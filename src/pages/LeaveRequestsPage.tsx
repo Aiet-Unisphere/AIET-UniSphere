@@ -26,6 +26,7 @@ export const LeaveRequestsPage: React.FC = () => {
       const data = await getStudentLeaveRequests();
       setLeaves(data);
     } catch (err: any) {
+      console.error('[LeaveRequestsPage] Load error:', err);
       setLoadError(err.message || 'Unable to load leave requests. Please try again.');
     } finally {
       setLoading(false);
@@ -49,7 +50,7 @@ export const LeaveRequestsPage: React.FC = () => {
     e.preventDefault();
     
     if (!leaveType.trim()) {
-      setErrorMsg('Leave type / reason is required.');
+      setErrorMsg('Leave type is required.');
       return;
     }
     if (!startDate || !endDate) {
@@ -61,7 +62,7 @@ export const LeaveRequestsPage: React.FC = () => {
       return;
     }
     if (new Date(endDate) < new Date(startDate)) {
-      setErrorMsg('Start date cannot be after end date.');
+      setErrorMsg('End date cannot be before start date.');
       return;
     }
 
@@ -75,10 +76,11 @@ export const LeaveRequestsPage: React.FC = () => {
         endDate
       });
       setIsModalOpen(false);
-      setSuccessMsg('Leave request submitted successfully.');
-      setTimeout(() => setSuccessMsg(''), 5000);
+      setSuccessMsg('Leave request submitted successfully and is pending HOD review.');
+      setTimeout(() => setSuccessMsg(''), 6000);
       await loadLeaves();
     } catch (err: any) {
+      console.error('[LeaveRequestsPage] Submit error:', err);
       setErrorMsg(err.message || 'Failed to submit leave request.');
     } finally {
       setSubmitting(false);
@@ -115,7 +117,8 @@ export const LeaveRequestsPage: React.FC = () => {
       <div className="card-box" style={{ padding: '0', overflow: 'hidden' }}>
         {loading ? (
           <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--brand-dark-grey)' }}>
-            Loading leave requests...
+            <Loader2 size={28} className="animate-spin" style={{ margin: '0 auto 0.75rem', color: 'var(--brand-blue)' }} />
+            <p>Loading leave requests...</p>
           </div>
         ) : loadError ? (
           <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--brand-dark-grey)' }}>
@@ -130,45 +133,51 @@ export const LeaveRequestsPage: React.FC = () => {
             <p style={{ fontSize: '0.85rem' }}>Click "+ Apply for Leave" above to request an academic or medical leave.</p>
           </div>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-            <thead>
-              <tr style={{ background: 'var(--brand-light-grey)', borderBottom: '1px solid rgba(156,163,175,0.2)', fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--brand-dark-grey)', fontWeight: 700 }}>
-                <th style={{ padding: '1rem' }}>Ref ID</th>
-                <th style={{ padding: '1rem' }}>Type</th>
-                <th style={{ padding: '1rem' }}>Reason</th>
-                <th style={{ padding: '1rem' }}>Dates</th>
-                <th style={{ padding: '1rem' }}>Status</th>
-                <th style={{ padding: '1rem' }}>Reviewed By</th>
-              </tr>
-            </thead>
-            <tbody>
-              {leaves.map((l) => (
-                <tr key={l.id} style={{ borderBottom: '1px solid rgba(156,163,175,0.15)', fontSize: '0.9rem' }}>
-                  <td style={{ padding: '1rem', fontWeight: 700 }} className="font-mono text-blue">{l.id}</td>
-                  <td style={{ padding: '1rem', fontWeight: 600 }}>{l.leaveType}</td>
-                  <td style={{ padding: '1rem' }}>{l.reason}</td>
-                  <td style={{ padding: '1rem' }} className="font-mono">{l.startDate} → {l.endDate} ({l.days} days)</td>
-                  <td style={{ padding: '1rem' }}>
-                    <span className={`badge ${l.status === 'Approved' ? 'badge-active' : l.status === 'Pending' ? 'badge-pending' : 'badge-overdue'}`}>
-                      {l.status}
-                    </span>
-                    {l.status === 'Rejected' && l.remark && (
-                      <div style={{ fontSize: '0.75rem', color: '#DC2626', marginTop: '0.25rem', fontWeight: 600 }}>
-                        Reason: {l.remark}
-                      </div>
-                    )}
-                  </td>
-                  <td style={{ padding: '1rem', color: 'var(--brand-dark-grey)' }}>
-                    {l.status === 'Approved' ? `Approved by: ${l.reviewedBy || 'HOD'}` : l.status === 'Rejected' ? `Rejected by: ${l.reviewedBy || 'HOD'}` : 'Pending HOD'}
-                  </td>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+              <thead>
+                <tr style={{ background: 'var(--brand-light-grey)', borderBottom: '1px solid rgba(156,163,175,0.2)', fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--brand-dark-grey)', fontWeight: 700 }}>
+                  <th style={{ padding: '1rem' }}>Ref ID</th>
+                  <th style={{ padding: '1rem' }}>Leave Type</th>
+                  <th style={{ padding: '1rem' }}>Reason / Purpose</th>
+                  <th style={{ padding: '1rem' }}>Dates</th>
+                  <th style={{ padding: '1rem' }}>Status</th>
+                  <th style={{ padding: '1rem' }}>Reviewed By</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {leaves.map((l) => (
+                  <tr key={l.dbId || l.id} style={{ borderBottom: '1px solid rgba(156,163,175,0.15)', fontSize: '0.9rem' }}>
+                    <td style={{ padding: '1rem', fontWeight: 700 }} className="font-mono text-blue">{l.id}</td>
+                    <td style={{ padding: '1rem', fontWeight: 600 }}>{l.leaveType}</td>
+                    <td style={{ padding: '1rem', maxWidth: '250px' }}>
+                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.reason}</div>
+                    </td>
+                    <td style={{ padding: '1rem' }} className="font-mono">{l.startDate} → {l.endDate} ({l.days} days)</td>
+                    <td style={{ padding: '1rem' }}>
+                      <span className={`badge ${l.status === 'Approved' ? 'badge-active' : l.status === 'Pending' ? 'badge-pending' : 'badge-overdue'}`}>
+                        {l.status}
+                      </span>
+                      {l.status === 'Rejected' && l.remark && (
+                        <div style={{ fontSize: '0.75rem', color: '#DC2626', marginTop: '0.25rem', fontWeight: 600 }}>
+                          Reason: {l.remark}
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ padding: '1rem', color: 'var(--brand-dark-grey)', fontSize: '0.85rem' }}>
+                      {l.status === 'Approved' ? `Approved by: ${l.reviewedBy || 'HOD'}` : l.status === 'Rejected' ? `Rejected by: ${l.reviewedBy || 'HOD'}` : 'Pending HOD Review'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
-      {/* Apply for Leave Modal */}
+      {/* ═══════════════════════════════════════════ */}
+      {/* APPLY FOR LEAVE MODAL                       */}
+      {/* ═══════════════════════════════════════════ */}
       {isModalOpen && (
         <div style={{
           position: 'fixed',
@@ -190,7 +199,7 @@ export const LeaveRequestsPage: React.FC = () => {
               </div>
               <button 
                 onClick={() => setIsModalOpen(false)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.25rem', color: 'var(--brand-dark-grey)' }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.5rem', color: 'var(--brand-dark-grey)', lineHeight: 1 }}
               >
                 ×
               </button>
@@ -204,15 +213,16 @@ export const LeaveRequestsPage: React.FC = () => {
             )}
 
             <form onSubmit={handleSubmit}>
+              {/* Leave Type — TEXT INPUT */}
               <div style={{ marginBottom: '1rem' }}>
                 <label style={{ display: 'block', fontSize: '0.825rem', fontWeight: 700, color: 'var(--brand-black)', marginBottom: '0.35rem' }}>
-                  Leave Type / Reason *
+                  Leave Type *
                 </label>
                 <input
                   type="text"
                   value={leaveType}
                   onChange={(e) => setLeaveType(e.target.value)}
-                  placeholder="Enter leave type (e.g. Medical Leave, Duty Leave, Tech Fest, Internship...)"
+                  placeholder="Enter leave type (e.g. Medical Leave, Duty Leave, Personal Leave)"
                   style={{ width: '100%', padding: '0.65rem 0.85rem', borderRadius: 'var(--border-radius)', border: '1px solid rgba(156, 163, 175, 0.4)', fontSize: '0.9rem' }}
                 />
               </div>
@@ -252,7 +262,7 @@ export const LeaveRequestsPage: React.FC = () => {
                 <textarea
                   required
                   rows={3}
-                  placeholder="Describe your leave reason (e.g. Participation in Tech Fest / Medical rest)..."
+                  placeholder="Describe your leave reason (e.g. Participation in Tech Fest / Medical rest / Personal emergency)..."
                   value={reason}
                   onChange={(e) => setReason(e.target.value)}
                   style={{ width: '100%', padding: '0.65rem 0.85rem', borderRadius: 'var(--border-radius)', border: '1px solid rgba(156, 163, 175, 0.4)', fontSize: '0.9rem' }}

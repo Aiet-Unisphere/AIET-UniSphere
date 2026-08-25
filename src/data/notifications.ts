@@ -9,7 +9,7 @@ export type NotificationType =
   | 'Faculty' 
   | 'System';
 
-export type NotificationCategory = 'Academic' | 'Projects' | 'System';
+export type NotificationCategory = 'Academic' | 'Projects' | 'System' | 'Leave';
 
 export interface NotificationItem {
   id: string;

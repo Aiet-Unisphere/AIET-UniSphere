@@ -5,7 +5,7 @@ import { useAuth } from '../app/context/AuthContext';
 import { getStudentFullProfile, updateStudentProfile } from '../services/studentService';
 
 export const StudentProfilePage: React.FC = () => {
-  const { profile: authProfile, user } = useAuth();
+  const { profile: authProfile, user, refreshProfile } = useAuth();
   
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -78,6 +78,9 @@ export const StudentProfilePage: React.FC = () => {
         cgpa: cgpa ? parseFloat(cgpa) : undefined
       });
       setSuccessMsg("Student academic & personal profile updated successfully.");
+      if (refreshProfile) {
+        await refreshProfile();
+      }
       await loadData();
     } catch (err: any) {
       setErrorMsg(err.message || "Failed to update profile details.");
