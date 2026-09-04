@@ -10,7 +10,8 @@ import {
   UserCheck, 
   ShieldAlert,
   Clock,
-  CheckCircle2
+  CheckCircle2,
+  Trash2
 } from 'lucide-react';
 import type { NotificationItem, NotificationType } from '../data/notifications';
 
@@ -18,6 +19,7 @@ interface NotificationCardProps {
   notification: NotificationItem;
   onClick: (notification: NotificationItem) => void;
   onMarkRead: (id: string, e: React.MouseEvent) => void;
+  onDeleteRead?: (id: string, e: React.MouseEvent) => void;
 }
 
 export const getNotificationIcon = (type: NotificationType) => {
@@ -47,7 +49,8 @@ export const getNotificationIcon = (type: NotificationType) => {
 export const NotificationCard: React.FC<NotificationCardProps> = ({
   notification,
   onClick,
-  onMarkRead
+  onMarkRead,
+  onDeleteRead
 }) => {
   return (
     <div 
@@ -80,8 +83,8 @@ export const NotificationCard: React.FC<NotificationCardProps> = ({
         <div className="notification-meta-row">
           <span className="notification-source">From: {notification.source}</span>
           
-          <div className="notification-actions">
-            {!notification.isRead && (
+          <div className="notification-actions" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            {!notification.isRead ? (
               <button 
                 className="btn-mark-read"
                 onClick={(e) => onMarkRead(notification.id, e)}
@@ -90,6 +93,29 @@ export const NotificationCard: React.FC<NotificationCardProps> = ({
                 <CheckCircle2 size={14} />
                 <span>Mark read</span>
               </button>
+            ) : (
+              onDeleteRead && (
+                <button
+                  className="btn-delete-notif"
+                  onClick={(e) => onDeleteRead(notification.id, e)}
+                  title="Delete read notification"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.25rem',
+                    padding: '0.25rem 0.5rem',
+                    fontSize: '0.75rem',
+                    color: '#DC2626',
+                    backgroundColor: '#FEF2F2',
+                    border: '1px solid #FCA5A5',
+                    borderRadius: '4px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <Trash2 size={13} />
+                  <span>Delete</span>
+                </button>
+              )
             )}
           </div>
         </div>

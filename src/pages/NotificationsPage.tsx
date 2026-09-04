@@ -11,9 +11,11 @@ import { NotificationDetailModal } from '../components/NotificationDetailModal';
 import { 
   getNotifications, 
   markNotificationAsRead, 
-  markAllNotificationsAsRead 
+  markAllNotificationsAsRead,
+  deleteNotification,
+  clearAllReadNotifications
 } from '../services/notificationService';
-import { CheckCheck } from 'lucide-react';
+import { CheckCheck, Trash2 } from 'lucide-react';
 
 export const NotificationsPage: React.FC = () => {
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
@@ -22,6 +24,11 @@ export const NotificationsPage: React.FC = () => {
 
   const [selectedFilter, setSelectedFilter] = useState<FilterCategory>('All');
   const [selectedNotification, setSelectedNotification] = useState<NotificationItem | null>(null);
+
+  // Modals for Deletion
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+  const [showClearAllModal, setShowClearAllModal] = useState(false);
+  const [actionStatus, setActionStatus] = useState<string | null>(null);
 
   const fetchNotifications = async () => {
     setIsLoading(true);
@@ -59,6 +66,53 @@ export const NotificationsPage: React.FC = () => {
     setSelectedNotification(notif);
   };
 
+  // Delete Single Read Notification
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  const promptDeleteReadNotification = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const target = notifications.find(n => n.id === id);
+    if (!target) return;
+    setDeleteTargetId(id);
+  };
+
+  const confirmDeleteReadNotification = async () => {
+    if (!deleteTargetId || isProcessing) return;
+    setIsProcessing(true);
+    try {
+      const updated = await deleteNotification(deleteTargetId);
+      setNotifications(updated);
+      setActionStatus("Notification deleted successfully.");
+      setTimeout(() => setActionStatus(null), 4000);
+    } catch (err: any) {
+      console.error('[NotificationsPage] Delete failed:', err);
+      setActionStatus(`Error: ${err.message || "Failed to delete notification."}`);
+      setTimeout(() => setActionStatus(null), 6000);
+    } finally {
+      setIsProcessing(false);
+      setDeleteTargetId(null);
+    }
+  };
+
+  // Clear All Read Notifications
+  const confirmClearAllRead = async () => {
+    if (isProcessing) return;
+    setIsProcessing(true);
+    try {
+      const updated = await clearAllReadNotifications();
+      setNotifications(updated);
+      setActionStatus("All read notifications cleared.");
+      setTimeout(() => setActionStatus(null), 4000);
+    } catch (err: any) {
+      console.error('[NotificationsPage] Clear read failed:', err);
+      setActionStatus(`Error: ${err.message || "Failed to clear read notifications."}`);
+      setTimeout(() => setActionStatus(null), 6000);
+    } finally {
+      setIsProcessing(false);
+      setShowClearAllModal(false);
+    }
+  };
+
   // Filtering notifications
   const filteredNotifications = notifications.filter(n => {
     if (selectedFilter === 'Unread') return !n.isRead;
@@ -69,6 +123,7 @@ export const NotificationsPage: React.FC = () => {
   });
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
+  const readCount = notifications.filter(n => n.isRead).length;
 
   if (isLoading) {
     return (
@@ -102,17 +157,48 @@ export const NotificationsPage: React.FC = () => {
           </p>
         </div>
 
-        {unreadCount > 0 && (
-          <button 
-            className="btn btn-secondary" 
-            style={{ width: 'auto' }}
-            onClick={handleMarkAllRead}
-          >
-            <CheckCheck size={16} />
-            Mark all as read
-          </button>
-        )}
+        <div style={{ display: 'flex', gap: '0.75rem' }}>
+          {unreadCount > 0 && (
+            <button 
+              className="btn btn-secondary" 
+              style={{ width: 'auto' }}
+              onClick={handleMarkAllRead}
+              disabled={isProcessing}
+            >
+              <CheckCheck size={16} />
+              Mark all as read
+            </button>
+          )}
+
+          {readCount > 0 && (
+            <button
+              className="btn"
+              style={{ width: 'auto', backgroundColor: '#FEF2F2', color: '#DC2626', border: '1px solid #FCA5A5', opacity: isProcessing ? 0.6 : 1 }}
+              onClick={() => setShowClearAllModal(true)}
+              disabled={isProcessing}
+            >
+              <Trash2 size={16} />
+              Clear Read Notifications
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* Action Notification Status Banner */}
+      {actionStatus && (
+        <div style={{ 
+          padding: '0.75rem 1rem', 
+          backgroundColor: actionStatus.startsWith('Error:') ? '#FEF2F2' : '#F0FDF4', 
+          border: `1px solid ${actionStatus.startsWith('Error:') ? '#FCA5A5' : '#86EFAC'}`, 
+          borderRadius: '8px', 
+          color: actionStatus.startsWith('Error:') ? '#991B1B' : '#166534', 
+          marginBottom: '1rem', 
+          fontSize: '0.85rem',
+          fontWeight: 500
+        }}>
+          {actionStatus}
+        </div>
+      )}
 
       {/* Filter Tabs */}
       <NotificationFilter 
@@ -142,6 +228,7 @@ export const NotificationsPage: React.FC = () => {
               notification={notif}
               onClick={handleNotificationClick}
               onMarkRead={handleMarkRead}
+              onDeleteRead={promptDeleteReadNotification}
             />
           ))}
         </div>
@@ -152,6 +239,56 @@ export const NotificationsPage: React.FC = () => {
         notification={selectedNotification}
         onClose={() => setSelectedNotification(null)}
       />
+
+      {/* Single Read Notification Delete Confirmation Modal */}
+      {deleteTargetId && (
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1rem' }}>
+          <div className="dashboard-panel" style={{ width: '100%', maxWidth: '420px', padding: '1.5rem' }}>
+            <h3 className="font-display" style={{ fontSize: '1.15rem', fontWeight: 700, marginTop: 0, marginBottom: '0.5rem', color: '#DC2626' }}>
+              Delete notification?
+            </h3>
+            <p style={{ fontSize: '0.9rem', color: 'var(--brand-dark-grey)', lineHeight: 1.5 }}>
+              Are you sure you want to delete this notification? It will be permanently removed from your account.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.25rem' }}>
+              <button className="btn btn-secondary" onClick={() => setDeleteTargetId(null)} disabled={isProcessing}>Cancel</button>
+              <button 
+                className="btn" 
+                style={{ backgroundColor: '#DC2626', color: '#FFF', border: '1px solid #DC2626', opacity: isProcessing ? 0.6 : 1 }}
+                onClick={confirmDeleteReadNotification}
+                disabled={isProcessing}
+              >
+                {isProcessing ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Clear All Read Notifications Confirmation Modal */}
+      {showClearAllModal && (
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1rem' }}>
+          <div className="dashboard-panel" style={{ width: '100%', maxWidth: '440px', padding: '1.5rem' }}>
+            <h3 className="font-display" style={{ fontSize: '1.15rem', fontWeight: 700, marginTop: 0, marginBottom: '0.5rem', color: '#DC2626' }}>
+              Clear all read notifications?
+            </h3>
+            <p style={{ fontSize: '0.9rem', color: 'var(--brand-dark-grey)', lineHeight: 1.5 }}>
+              This will permanently remove your read notifications from your notification history. Unread notifications will remain intact.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.25rem' }}>
+              <button className="btn btn-secondary" onClick={() => setShowClearAllModal(false)} disabled={isProcessing}>Cancel</button>
+              <button 
+                className="btn" 
+                style={{ backgroundColor: '#DC2626', color: '#FFF', border: '1px solid #DC2626', opacity: isProcessing ? 0.6 : 1 }}
+                onClick={confirmClearAllRead}
+                disabled={isProcessing}
+              >
+                {isProcessing ? 'Clearing...' : 'Clear Read Notifications'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </AppShell>
   );
 };

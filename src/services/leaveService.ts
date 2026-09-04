@@ -202,9 +202,9 @@ export const getDepartmentLeaveRequests = async (): Promise<LeaveRequest[]> => {
         ...row,
         student_profile: profileMap.get(row.student_id) || null,
         reviewer_profile: profileMap.get(row.reviewed_by) || null,
-        student_name: profileMap.get(row.student_id)?.full_name || 'Student',
-        student_usn: profileMap.get(row.student_id)?.usn_or_employee_id || 'N/A',
-        department_name: profileMap.get(row.student_id)?.department?.name || 'Department'
+        student_name: (profileMap.get(row.student_id) as any)?.full_name || 'Student',
+        student_usn: (profileMap.get(row.student_id) as any)?.usn_or_employee_id || 'N/A',
+        department_name: (profileMap.get(row.student_id) as any)?.department?.name || 'Department'
       }));
     }
   }

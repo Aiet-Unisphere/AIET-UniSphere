@@ -1,15 +1,22 @@
 import React, { useEffect, useState } from 'react';
-import { Megaphone, Plus, Calendar, CheckCircle2, Clock, Trash2, Edit3, Send, X, Eye } from 'lucide-react';
+import { Megaphone, Plus, Calendar, CheckCircle2, Clock, Trash2, Send, X, Users } from 'lucide-react';
 import { HODAppShell } from '../components/HODAppShell';
 import { StatCard } from '../../components/StatCard';
 import { getDepartmentAnnouncements, createDepartmentAnnouncement, publishAnnouncement, deleteAnnouncement } from '../../services/announcementService';
 import type { Announcement } from '../../data/announcements';
+import { useAuth } from '../../app/context/AuthContext';
+import { supabase } from '../../lib/supabase';
 
 export const HODAnnouncementPage: React.FC = () => {
+  const { profile } = useAuth();
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+
+  // Recipient Counts
+  const [studentCount, setStudentCount] = useState<number>(0);
+  const [facultyCount, setFacultyCount] = useState<number>(0);
 
   // Form State
   const [title, setTitle] = useState('');
@@ -19,13 +26,16 @@ export const HODAnnouncementPage: React.FC = () => {
   const [isDraft, setIsDraft] = useState(false);
 
   useEffect(() => {
-    loadAnnouncements();
-  }, []);
+    if (profile?.department_id) {
+      loadAnnouncements();
+      loadRecipientCounts();
+    }
+  }, [profile]);
 
   const loadAnnouncements = async () => {
     setLoading(true);
     try {
-      const data = await getDepartmentAnnouncements();
+      const data = await getDepartmentAnnouncements(profile?.department_id || undefined);
       setAnnouncements(data);
     } catch (err) {
       console.error("Error loading announcements:", err);
@@ -34,19 +44,40 @@ export const HODAnnouncementPage: React.FC = () => {
     }
   };
 
+  const loadRecipientCounts = async () => {
+    if (!profile?.department_id) return;
+    try {
+      const [studentsRes, facultyRes] = await Promise.all([
+        supabase
+          .from('profiles')
+          .select('id', { count: 'exact', head: true })
+          .eq('department_id', profile.department_id)
+          .eq('role', 'STUDENT'),
+        supabase
+          .from('profiles')
+          .select('id', { count: 'exact', head: true })
+          .eq('department_id', profile.department_id)
+          .eq('role', 'FACULTY')
+      ]);
+
+      setStudentCount(studentsRes.count || 0);
+      setFacultyCount(facultyRes.count || 0);
+    } catch (err) {
+      console.error("Error loading recipient counts:", err);
+    }
+  };
+
   const handleCreateAnnouncement = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || !content.trim()) return;
+    if (!title.trim() || !content.trim() || !profile?.department_id || !profile?.id) return;
 
     try {
       await createDepartmentAnnouncement({
         title,
         content,
         category,
-        departmentId: 'dept-ds',
-        departmentName: 'CSE — Data Science',
-        createdBy: 'Dr. Sneha Reddy',
-        authorRole: 'HOD',
+        departmentId: profile.department_id,
+        createdBy: profile.id,
         targetAudience,
         status: isDraft ? 'Draft' : 'Published'
       });
@@ -56,6 +87,9 @@ export const HODAnnouncementPage: React.FC = () => {
       // Reset form
       setTitle('');
       setContent('');
+      setIsDraft(false);
+      setTargetAudience('Students + Faculty');
+      setCategory('Academic');
       loadAnnouncements();
     } catch (err) {
       console.error("Error creating announcement:", err);
@@ -87,11 +121,17 @@ export const HODAnnouncementPage: React.FC = () => {
   const publishedCount = announcements.filter(a => a.status === 'Published').length;
   const draftCount = announcements.filter(a => a.status === 'Draft').length;
 
+  const getRecipientNumber = (audience: 'Students' | 'Faculty' | 'Students + Faculty') => {
+    if (audience === 'Students') return studentCount;
+    if (audience === 'Faculty') return facultyCount;
+    return studentCount + facultyCount;
+  };
+
   return (
     <HODAppShell>
       {/* Header Banner */}
-      <div style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
-        <div>
+      <div style={{ marginBottom: '1.5rem', display: 'flex', justifySelf: 'stretch', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+        <div style={{ flex: 1, minWidth: '300px' }}>
           <span className="badge badge-active font-mono">COMMUNICATION</span>
           <h1 className="font-display" style={{ fontSize: '1.85rem', fontWeight: 800, color: 'var(--brand-black)', marginTop: '0.25rem', marginBottom: 0 }}>
             Department Announcements & Notices
@@ -132,10 +172,10 @@ export const HODAnnouncementPage: React.FC = () => {
           icon={<Clock size={22} />}
         />
         <StatCard
-          title="TARGET AUDIENCE"
-          value="Students + Faculty"
-          subtitle="Department Scope"
-          icon={<CheckCircle2 size={22} />}
+          title="DEPARTMENT SCOPE"
+          value={`${studentCount + facultyCount} Recipients`}
+          subtitle={`${studentCount} Students · ${facultyCount} Faculty`}
+          icon={<Users size={22} />}
         />
       </div>
 
@@ -187,7 +227,7 @@ export const HODAnnouncementPage: React.FC = () => {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', paddingTop: '0.75rem', borderTop: '1px solid rgba(156, 163, 175, 0.15)', fontSize: '0.8rem', color: 'var(--brand-dark-grey)' }}>
                   <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
                     <span>By: <strong>{anc.createdBy}</strong> ({anc.authorRole})</span>
-                    <span>Target: <strong>{anc.targetAudience}</strong></span>
+                    <span>Target: <strong style={{ color: anc.targetAudience === 'Students + Faculty' ? 'var(--brand-orange)' : 'inherit' }}>{anc.targetAudience}</strong> ({getRecipientNumber(anc.targetAudience)} recipients)</span>
                     <span className="font-mono">{anc.publishedAt}</span>
                   </div>
 

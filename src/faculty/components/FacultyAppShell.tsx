@@ -12,7 +12,8 @@ import {
   Search, 
   LogOut, 
   User as UserIcon,
-  ChevronDown
+  ChevronDown,
+  Megaphone
 } from 'lucide-react';
 import { AuthLogo } from '../../components/AuthLogo';
 import { mockFacultyProfile } from '../data/facultyData';
@@ -66,6 +67,10 @@ export const FacultyAppShell: React.FC<FacultyAppShellProps> = ({ children }) =>
     { label: 'Assessments', path: '/faculty/assessments', icon: <Award size={18} /> }
   ];
 
+  const navCommunication = [
+    { label: 'Announcements', path: '/faculty/announcements', icon: <Megaphone size={18} /> }
+  ];
+
   // Helper to format page title from current pathname
   const getPageTitle = () => {
     const path = location.pathname;
@@ -79,6 +84,7 @@ export const FacultyAppShell: React.FC<FacultyAppShellProps> = ({ children }) =>
     if (path.includes('/faculty/assignments')) return 'Assignment Management';
     if (path.includes('/faculty/assessments/')) return 'Assessment Details';
     if (path.includes('/faculty/assessments')) return 'Assessment Management';
+    if (path.includes('/faculty/announcements')) return 'Faculty Announcements';
     return 'Faculty Portal';
   };
 
@@ -126,6 +132,28 @@ export const FacultyAppShell: React.FC<FacultyAppShellProps> = ({ children }) =>
                   className={({ isActive }) => 
                     `app-sidebar-link ${
                       location.pathname === item.path || (item.path !== '/faculty/dashboard' && location.pathname.startsWith(item.path)) ? 'active' : ''
+                    }`
+                  }
+                  onClick={() => setIsSidebarOpen(false)}
+                >
+                  {item.icon}
+                  <span>{item.label}</span>
+                </NavLink>
+              ))}
+            </div>
+          </div>
+
+          {/* COMMUNICATION */}
+          <div className="app-sidebar-group">
+            <div className="app-sidebar-group-title">Communication</div>
+            <div className="app-sidebar-menu">
+              {navCommunication.map((item) => (
+                <NavLink
+                  key={item.path}
+                  to={item.path}
+                  className={({ isActive }) => 
+                    `app-sidebar-link ${
+                      location.pathname === item.path || location.pathname.startsWith(item.path) ? 'active' : ''
                     }`
                   }
                   onClick={() => setIsSidebarOpen(false)}

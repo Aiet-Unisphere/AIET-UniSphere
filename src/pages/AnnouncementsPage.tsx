@@ -3,15 +3,18 @@ import { AppShell } from '../components/AppShell';
 import { Megaphone, Calendar } from 'lucide-react';
 import { getDepartmentAnnouncements } from '../services/announcementService';
 import type { Announcement } from '../data/announcements';
+import { useAuth } from '../app/context/AuthContext';
 
 export const AnnouncementsPage: React.FC = () => {
+  const { profile } = useAuth();
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchAnnouncements = async () => {
+      if (!profile?.department_id) return;
       try {
-        const data = await getDepartmentAnnouncements();
+        const data = await getDepartmentAnnouncements(profile.department_id);
         setAnnouncements(data);
       } catch (err) {
         console.error("Error fetching announcements:", err);
@@ -19,8 +22,13 @@ export const AnnouncementsPage: React.FC = () => {
         setLoading(false);
       }
     };
-    fetchAnnouncements();
-  }, []);
+    if (profile?.department_id) {
+      fetchAnnouncements();
+    } else if (profile) {
+      // If profile is loaded but no department
+      setLoading(false);
+    }
+  }, [profile]);
 
   return (
     <AppShell>
@@ -50,12 +58,12 @@ export const AnnouncementsPage: React.FC = () => {
                 <Megaphone size={18} className="text-orange-icon" />
                 <h3 style={{ fontSize: '1.1rem', fontWeight: 700 }}>{anc.title}</h3>
               </div>
-              <p style={{ fontSize: '0.95rem', color: 'var(--brand-black)', lineHeight: '1.5' }}>
+              <p style={{ fontSize: '0.95rem', color: 'var(--brand-black)', lineHeight: '1.5', whiteSpace: 'pre-wrap' }}>
                 {anc.content}
               </p>
               <div style={{ marginTop: '1rem', display: 'flex', gap: '1.5rem', fontSize: '0.8rem', color: 'var(--brand-dark-grey)' }}>
-                <span>From: <strong>{(anc as any).author || anc.category || 'Department Head'}</strong></span>
-                <span className="font-mono"><Calendar size={12} style={{ display: 'inline', marginRight: '0.2rem' }} />{(anc as any).date || anc.publishedAt || 'Recent'}</span>
+                <span>From: <strong>{anc.createdBy} ({anc.authorRole})</strong></span>
+                <span className="font-mono"><Calendar size={12} style={{ display: 'inline', marginRight: '0.2rem' }} />{anc.publishedAt}</span>
               </div>
             </div>
           ))

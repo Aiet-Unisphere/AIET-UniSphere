@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { 
-  GitBranch, FolderGit2, Play, Share2, ArrowLeft,
-  Sidebar, Sliders, CheckCircle2, AlertCircle, Save
+  GitBranch, FolderGit2, Play, ArrowLeft,
+  Sidebar, CheckCircle2, Save, FolderSync
 } from 'lucide-react';
 import { AppShell } from '../components/AppShell';
 import { LoadingState } from '../components/LoadingState';
@@ -13,23 +13,73 @@ import { WorkspaceEditor } from '../components/WorkspaceEditor';
 import { WorkspaceTerminal } from '../components/WorkspaceTerminal';
 import { useAuth } from '../app/context/AuthContext';
 import {
-  ensureDefaultProject, getProjectFiles, createProjectFile,
-  updateFileContent, renameProjectFile, deleteProjectFile, buildFileTree,
-  type UserProject, type ProjectFileNode
-} from '../services/projectPersistenceService';
+  getSelectedRepository,
+  getRemoteFileTree,
+  getRemoteFileContent,
+  recordWorkspaceFileChange,
+  getGitChanges
+} from '../services/githubService';
+import type { GitHubRepositoryItem } from '../data/repositories';
+import { mockWorkspaceFiles } from '../data/repositories';
 
 interface OpenTab extends FileTreeNode {
   isDirty?: boolean;
   savedContent?: string;
 }
 
+const convertGitHubTreeToNodes = (rawItems: any[]): FileTreeNode[] => {
+  const rootNodes: FileTreeNode[] = [];
+  const mapByPath = new Map<string, FileTreeNode>();
+
+  const sorted = [...rawItems].sort((a, b) => a.path.localeCompare(b.path));
+
+  sorted.forEach((item) => {
+    const parts = item.path.split('/');
+    const fileName = parts[parts.length - 1];
+    const isFolder = item.type === 'tree';
+
+    const ext = fileName.split('.').pop()?.toLowerCase();
+    let lang = 'typescript';
+    if (ext === 'js' || ext === 'jsx') lang = 'javascript';
+    else if (ext === 'css') lang = 'css';
+    else if (ext === 'html') lang = 'html';
+    else if (ext === 'json') lang = 'json';
+    else if (ext === 'md') lang = 'markdown';
+
+    const node: FileTreeNode = {
+      id: item.path,
+      name: fileName,
+      type: isFolder ? 'folder' : 'file',
+      path: item.path,
+      language: lang,
+      children: isFolder ? [] : undefined,
+      content: undefined
+    };
+
+    mapByPath.set(item.path, node);
+
+    if (parts.length === 1) {
+      rootNodes.push(node);
+    } else {
+      const parentPath = parts.slice(0, parts.length - 1).join('/');
+      const parentNode = mapByPath.get(parentPath);
+      if (parentNode && parentNode.children) {
+        parentNode.children.push(node);
+      } else {
+        rootNodes.push(node);
+      }
+    }
+  });
+
+  return rootNodes;
+};
+
 export const ProjectWorkspace: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user, profile: authProfile } = useAuth();
+  const { user } = useAuth();
 
-  const [project, setProject] = useState<UserProject | null>(null);
-  const [flatFiles, setFlatFiles] = useState<ProjectFileNode[]>([]);
+  const [selectedRepo, setSelectedRepo] = useState<GitHubRepositoryItem | null>(null);
   const [treeFiles, setTreeFiles] = useState<FileTreeNode[]>([]);
   const [openTabs, setOpenTabs] = useState<OpenTab[]>([]);
   const [activeTab, setActiveTab] = useState<OpenTab | null>(null);
@@ -49,41 +99,68 @@ export const ProjectWorkspace: React.FC = () => {
   const [confirmDelete, setConfirmDelete] = useState<FileTreeNode | null>(null);
 
   const loadWorkspace = useCallback(async () => {
-    if (!user) return;
     setIsLoading(true);
     setError(null);
     try {
-      const proj = await ensureDefaultProject(user.id);
-      setProject(proj);
+      const repo = await getSelectedRepository();
+      setSelectedRepo(repo);
 
-      const files = await getProjectFiles(proj.id);
-      setFlatFiles(files);
-      setTreeFiles(buildFileTree(files) as FileTreeNode[]);
+      if (repo && repo.owner && repo.name) {
+        const rawTree = await getRemoteFileTree(repo.owner, repo.name, repo.selectedBranch || repo.defaultBranch || 'main');
+        if (rawTree && rawTree.length > 0) {
+          const parsedTree = convertGitHubTreeToNodes(rawTree);
+          setTreeFiles(parsedTree);
+        } else {
+          setTreeFiles(mockWorkspaceFiles as any);
+        }
+      } else {
+        setTreeFiles(mockWorkspaceFiles as any);
+      }
     } catch (err: any) {
-      setError(err.message || 'Unable to load project workspace.');
+      console.warn('[ProjectWorkspace] Failed to fetch remote GitHub tree:', err);
+      setTreeFiles(mockWorkspaceFiles as any);
     } finally {
       setIsLoading(false);
     }
-  }, [user]);
+  }, []);
 
   useEffect(() => {
     loadWorkspace();
   }, [loadWorkspace]);
 
   const refreshFiles = async () => {
-    if (!project) return;
-    const files = await getProjectFiles(project.id);
-    setFlatFiles(files);
-    setTreeFiles(buildFileTree(files) as FileTreeNode[]);
+    await loadWorkspace();
   };
 
-  const handleSelectFile = (file: FileTreeNode) => {
+  const handleSelectFile = async (file: FileTreeNode) => {
     if (file.type === 'folder') return;
+    
     const existing = openTabs.find(t => t.id === file.id);
     if (existing) {
       setActiveTab(existing);
     } else {
-      const tab: OpenTab = { ...file, isDirty: false, savedContent: file.content || '' };
+      let fileContent = file.content;
+      if (fileContent === undefined && selectedRepo?.owner && selectedRepo?.name) {
+        setSaveStatus(`Fetching ${file.name} from GitHub...`);
+        try {
+          fileContent = await getRemoteFileContent(
+            selectedRepo.owner,
+            selectedRepo.name,
+            file.path || file.id,
+            selectedRepo.selectedBranch || selectedRepo.defaultBranch || 'main'
+          );
+        } catch (e) {
+          fileContent = `// Unable to fetch content for ${file.name}`;
+        }
+        setSaveStatus(null);
+      }
+
+      const tab: OpenTab = { 
+        ...file, 
+        content: fileContent || '', 
+        isDirty: false, 
+        savedContent: fileContent || '' 
+      };
       setOpenTabs(prev => [...prev, tab]);
       setActiveTab(tab);
     }
@@ -113,14 +190,20 @@ export const ProjectWorkspace: React.FC = () => {
   const handleSave = async () => {
     if (!activeTab || !activeTab.isDirty) return;
     try {
-      await updateFileContent(activeTab.id, activeTab.content || '');
+      await recordWorkspaceFileChange(
+        activeTab.path || activeTab.id,
+        activeTab.content || '',
+        'MODIFIED',
+        activeTab.savedContent
+      );
+
       const savedTab: OpenTab = { ...activeTab, isDirty: false, savedContent: activeTab.content || '' };
       setActiveTab(savedTab);
       setOpenTabs(prev => prev.map(t => t.id === activeTab.id ? savedTab : t));
-      setSaveStatus('File saved successfully.');
-      setTimeout(() => setSaveStatus(null), 2000);
+      setSaveStatus('File saved to workspace (tracked as uncommitted change).');
+      setTimeout(() => setSaveStatus(null), 3000);
     } catch (err: any) {
-      setSaveStatus('Failed to save: ' + (err.message || 'Unknown error'));
+      setSaveStatus('Failed to save file: ' + (err.message || 'Unknown error'));
       setTimeout(() => setSaveStatus(null), 4000);
     }
   };
@@ -143,20 +226,47 @@ export const ProjectWorkspace: React.FC = () => {
   };
 
   const executePrompt = async () => {
-    if (!promptValue.trim() || !project) return;
+    if (!promptValue.trim()) return;
+    const cleanName = promptValue.trim();
     try {
-      if (promptMode === 'create-file' || promptMode === 'create-folder') {
-        const type = promptMode === 'create-file' ? 'file' : 'folder';
-        await createProjectFile(project.id, promptTarget?.parentId || null, promptValue.trim(), type, promptTarget?.parentPath || '');
+      if (promptMode === 'create-file') {
+        const fullPath = promptTarget?.parentPath ? `${promptTarget.parentPath}/${cleanName}` : cleanName;
+        const newFileNode: FileTreeNode = {
+          id: fullPath,
+          name: cleanName,
+          type: 'file',
+          path: fullPath,
+          content: '',
+          language: cleanName.endsWith('.tsx') || cleanName.endsWith('.ts') ? 'typescript' : 'javascript'
+        };
+
+        await recordWorkspaceFileChange(fullPath, '', 'ADDED');
+        setTreeFiles(prev => [...prev, newFileNode]);
+        handleSelectFile(newFileNode);
+        setSaveStatus(`Created file ${cleanName}`);
+      } else if (promptMode === 'create-folder') {
+        const fullPath = promptTarget?.parentPath ? `${promptTarget.parentPath}/${cleanName}` : cleanName;
+        const newFolderNode: FileTreeNode = {
+          id: fullPath,
+          name: cleanName,
+          type: 'folder',
+          path: fullPath,
+          children: []
+        };
+        setTreeFiles(prev => [...prev, newFolderNode]);
       } else if (promptMode === 'rename' && promptTarget?.file) {
-        await renameProjectFile(promptTarget.file.id, promptValue.trim());
-        // Update open tabs if the renamed file is open
-        setOpenTabs(prev => prev.map(t => t.id === promptTarget.file!.id ? { ...t, name: promptValue.trim() } : t));
-        if (activeTab?.id === promptTarget.file.id) {
-          setActiveTab(prev => prev ? { ...prev, name: promptValue.trim() } : null);
+        const oldFile = promptTarget.file;
+        const filePathStr = oldFile.path || oldFile.id;
+        const parentPath = filePathStr.includes('/') ? filePathStr.substring(0, filePathStr.lastIndexOf('/')) : '';
+        const newPath = parentPath ? `${parentPath}/${cleanName}` : cleanName;
+
+        await recordWorkspaceFileChange(newPath, oldFile.content || '', 'RENAMED');
+        setOpenTabs(prev => prev.map(t => t.id === oldFile.id ? { ...t, name: cleanName, path: newPath } : t));
+        if (activeTab?.id === oldFile.id) {
+          setActiveTab(prev => prev ? { ...prev, name: cleanName, path: newPath } : null);
         }
+        await loadWorkspace();
       }
-      await refreshFiles();
     } catch (err: any) {
       console.error('File operation error:', err);
     }
@@ -165,16 +275,17 @@ export const ProjectWorkspace: React.FC = () => {
   };
 
   const executeDelete = async () => {
-    if (!confirmDelete || !project) return;
+    if (!confirmDelete) return;
     try {
-      await deleteProjectFile(confirmDelete.id, project.id);
-      // Close tab if deleted file was open
+      await recordWorkspaceFileChange(confirmDelete.path || confirmDelete.id, '', 'DELETED');
       setOpenTabs(prev => prev.filter(t => t.id !== confirmDelete.id));
       if (activeTab?.id === confirmDelete.id) {
         const remaining = openTabs.filter(t => t.id !== confirmDelete.id);
         setActiveTab(remaining.length > 0 ? remaining[remaining.length - 1] : null);
       }
-      await refreshFiles();
+      setTreeFiles(prev => prev.filter(t => t.id !== confirmDelete.id));
+      setSaveStatus(`Deleted ${confirmDelete.name}`);
+      setTimeout(() => setSaveStatus(null), 3000);
     } catch (err: any) {
       console.error('Delete error:', err);
     }
@@ -182,16 +293,14 @@ export const ProjectWorkspace: React.FC = () => {
   };
 
   const handleRunProject = () => {
-    if (!project) return;
-    // Find an index.html or main file and try to preview
-    const htmlFile = flatFiles.find(f => f.name === 'index.html');
-    if (htmlFile && htmlFile.content) {
-      const blob = new Blob([htmlFile.content], { type: 'text/html' });
+    const htmlTab = openTabs.find(t => t.name.endsWith('.html')) || activeTab;
+    if (htmlTab && htmlTab.content) {
+      const blob = new Blob([htmlTab.content], { type: 'text/html' });
       const url = URL.createObjectURL(blob);
       window.open(url, '_blank');
-      setSaveStatus('Preview opened in new tab.');
+      setSaveStatus('Preview opened in new browser tab.');
     } else {
-      setSaveStatus('No index.html found for preview. Create an index.html file to enable Run/Preview.');
+      setSaveStatus('Open or select an HTML file to enable Run / Preview.');
     }
     setTimeout(() => setSaveStatus(null), 4000);
   };
@@ -199,15 +308,7 @@ export const ProjectWorkspace: React.FC = () => {
   if (isLoading) {
     return (
       <AppShell>
-        <LoadingState message="Launching AIET-UniSphere Developer Workspace..." />
-      </AppShell>
-    );
-  }
-
-  if (error || !project) {
-    return (
-      <AppShell>
-        <ErrorState message={error || 'Workspace error'} onRetry={loadWorkspace} />
+        <LoadingState message="Loading GitHub repository workspace tree..." />
       </AppShell>
     );
   }
@@ -218,15 +319,15 @@ export const ProjectWorkspace: React.FC = () => {
         {/* Top IDE Toolbar */}
         <div className="ide-top-toolbar">
           <div className="toolbar-left">
-            <button className="ide-btn-icon" onClick={() => navigate(-1)} title="Back">
+            <button className="ide-btn-icon" onClick={() => navigate('/student/github')} title="Back to Git / GitHub">
               <ArrowLeft size={16} />
             </button>
             <div className="toolbar-project-title">
               <span style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--brand-black)' }}>
-                {project.name}
+                {selectedRepo?.fullName || selectedRepo?.name || 'UniSphere Developer Workspace'}
               </span>
               <span className="badge badge-active" style={{ fontSize: '0.65rem' }}>
-                Workspace
+                GitHub IDE
               </span>
             </div>
           </div>
@@ -234,7 +335,7 @@ export const ProjectWorkspace: React.FC = () => {
           <div className="toolbar-center font-mono">
             <div className="toolbar-branch-select">
               <GitBranch size={14} className="text-orange-icon" />
-              <span>main</span>
+              <span>{selectedRepo?.selectedBranch || selectedRepo?.defaultBranch || 'main'}</span>
             </div>
             {saveStatus && (
               <>
@@ -303,7 +404,7 @@ export const ProjectWorkspace: React.FC = () => {
 
             {isTerminalOpen && (
               <div className="ide-terminal-wrapper">
-                <WorkspaceTerminal projectName={project.name} />
+                <WorkspaceTerminal projectName={selectedRepo?.name || 'UniSphere Workspace'} />
               </div>
             )}
           </div>
@@ -345,7 +446,6 @@ export const ProjectWorkspace: React.FC = () => {
             </h3>
             <p style={{ fontSize: '0.9rem', color: 'var(--brand-dark-grey)' }}>
               Are you sure you want to delete <strong>{confirmDelete.name}</strong>?
-              {confirmDelete.type === 'folder' && ' This will also delete all files inside it.'}
             </p>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1rem' }}>
               <button className="btn btn-secondary" onClick={() => setConfirmDelete(null)}>Cancel</button>

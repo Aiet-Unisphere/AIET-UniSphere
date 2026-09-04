@@ -32,6 +32,7 @@ import { MyProjectsList } from './pages/MyProjectsList';
 import { ProjectDetail } from './pages/ProjectDetail';
 import { ProjectWorkspace } from './pages/ProjectWorkspace';
 import { GitGithubPage } from './pages/GitGithubPage';
+import { GitHubCallbackPage } from './pages/GitHubCallbackPage';
 
 // Phase 5 Feature Pages
 import { AILearningAssistantPage } from './pages/AILearningAssistantPage';
@@ -55,6 +56,7 @@ import { FacultyAssignmentList } from './faculty/pages/FacultyAssignmentList';
 import { FacultyAssignmentDetail } from './faculty/pages/FacultyAssignmentDetail';
 import { FacultyAssessmentList } from './faculty/pages/FacultyAssessmentList';
 import { FacultyAssessmentDetail } from './faculty/pages/FacultyAssessmentDetail';
+import { FacultyAnnouncementPage } from './faculty/pages/FacultyAnnouncementPage';
 
 // Phase 7 & 8 HOD Portal Pages & Role Guard
 import { RoleGuard } from './app/guards/RoleGuard';
@@ -128,6 +130,7 @@ const App: React.FC = () => {
         <Route path="/student/projects/:id/workspace" element={<RoleGuard allowedRoles={['STUDENT', 'ADMIN']}><ProjectWorkspace /></RoleGuard>} />
         <Route path="/student/project-workspace" element={<RoleGuard allowedRoles={['STUDENT', 'ADMIN']}><ProjectWorkspace /></RoleGuard>} />
         <Route path="/student/github" element={<RoleGuard allowedRoles={['STUDENT', 'ADMIN']}><GitGithubPage /></RoleGuard>} />
+        <Route path="/student/github/callback" element={<RoleGuard allowedRoles={['STUDENT', 'ADMIN']}><GitHubCallbackPage /></RoleGuard>} />
 
         {/* Phase 5 Required Feature Routes */}
         <Route path="/student/ai" element={<RoleGuard allowedRoles={['STUDENT', 'ADMIN']}><AILearningAssistantPage /></RoleGuard>} />
@@ -151,6 +154,7 @@ const App: React.FC = () => {
         <Route path="/faculty/assignments/:id" element={<RoleGuard allowedRoles={['FACULTY', 'ADMIN']}><FacultyAssignmentDetail /></RoleGuard>} />
         <Route path="/faculty/assessments" element={<RoleGuard allowedRoles={['FACULTY', 'ADMIN']}><FacultyAssessmentList /></RoleGuard>} />
         <Route path="/faculty/assessments/:id" element={<RoleGuard allowedRoles={['FACULTY', 'ADMIN']}><FacultyAssessmentDetail /></RoleGuard>} />
+        <Route path="/faculty/announcements" element={<RoleGuard allowedRoles={['FACULTY', 'ADMIN']}><FacultyAnnouncementPage /></RoleGuard>} />
 
         {/* Phase 7 HOD Portal Routes */}
         <Route path="/hod/dashboard" element={<RoleGuard allowedRoles={['HOD', 'ADMIN']}><HODDashboard /></RoleGuard>} />

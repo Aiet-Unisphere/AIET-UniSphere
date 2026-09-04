@@ -9,18 +9,21 @@ import {
   Lock,
   Globe,
   CheckCircle2,
-  XCircle
+  XCircle,
+  FolderSync
 } from 'lucide-react';
 import type { RepositoryInfo } from '../data/repositories';
 
 interface RepositoryCardProps {
   repository: RepositoryInfo;
   onToggleConnect?: () => void;
+  onChangeRepository?: () => void;
 }
 
 export const RepositoryCard: React.FC<RepositoryCardProps> = ({
   repository,
-  onToggleConnect
+  onToggleConnect,
+  onChangeRepository
 }) => {
   return (
     <div className="repo-card-container">
@@ -45,15 +48,37 @@ export const RepositoryCard: React.FC<RepositoryCardProps> = ({
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
           {repository.githubConnected ? (
-            <span className="badge badge-graded" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-              <CheckCircle2 size={13} /> Connected
-            </span>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+              <span className="badge badge-graded" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                <CheckCircle2 size={13} /> Connected
+              </span>
+              <span style={{ fontSize: '0.75rem', color: 'var(--brand-dark-grey)', marginTop: '0.15rem' }}>
+                GitHub: <strong>{repository.githubUsername}</strong>
+              </span>
+            </div>
           ) : (
-            <span className="badge badge-overdue" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-              <XCircle size={13} /> Not Connected
-            </span>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+              <span className="badge badge-overdue" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                <XCircle size={13} /> Not Connected
+              </span>
+              <span style={{ fontSize: '0.75rem', color: '#DC2626', marginTop: '0.15rem' }}>
+                GitHub authentication failed
+              </span>
+            </div>
+          )}
+
+          {repository.githubConnected && onChangeRepository && (
+            <button 
+              className="btn btn-secondary"
+              style={{ width: 'auto', padding: '0.45rem 0.85rem', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+              onClick={onChangeRepository}
+              title="Select different GitHub repository"
+            >
+              <FolderSync size={15} />
+              Switch Repo
+            </button>
           )}
 
           {onToggleConnect && (
@@ -89,11 +114,11 @@ export const RepositoryCard: React.FC<RepositoryCardProps> = ({
 
       <div className="repo-card-actions font-mono">
         <span style={{ fontSize: '0.8rem', color: 'var(--brand-dark-grey)' }}>
-          {repository.cloneUrl}
+          {repository.cloneUrl || `https://github.com/${repository.owner}/${repository.name}.git`}
         </span>
 
         <a 
-          href={`https://github.com/${repository.owner}/${repository.name}`}
+          href={repository.htmlUrl || `https://github.com/${repository.owner}/${repository.name}`}
           target="_blank"
           rel="noopener noreferrer"
           className="btn btn-secondary"

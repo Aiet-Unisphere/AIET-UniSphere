@@ -51,7 +51,15 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
   const profileRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    getUnreadNotificationsCount().then(count => setUnreadNotifications(count));
+    const updateCount = () => {
+      getUnreadNotificationsCount().then(count => setUnreadNotifications(count));
+    };
+    updateCount();
+
+    window.addEventListener('notifications_updated', updateCount);
+    return () => {
+      window.removeEventListener('notifications_updated', updateCount);
+    };
   }, [location.pathname]);
 
   // Close dropdown on click outside
