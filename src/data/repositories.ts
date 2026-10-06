@@ -4,7 +4,6 @@ export interface GitHubConnection {
   githubUserId: string;
   githubUsername: string;
   avatarUrl?: string;
-  accessToken?: string;
   scope?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -88,37 +87,3 @@ export interface GitFileChange {
   }[];
 }
 
-export const mockWorkspaceFiles = [
-  {
-    name: 'src',
-    type: 'folder',
-    path: 'src',
-    id: 'src',
-    children: [
-      {
-        name: 'App.tsx',
-        type: 'file',
-        path: 'src/App.tsx',
-        id: 'src/App.tsx',
-        language: 'typescript',
-        content: `import React from 'react';\n\nexport default function App() {\n  return <div>Welcome to AIET UniSphere Workspace</div>;\n}`
-      },
-      {
-        name: 'index.css',
-        type: 'file',
-        path: 'src/index.css',
-        id: 'src/index.css',
-        language: 'css',
-        content: `:root {\n  --brand-orange: #ff4f18;\n}`
-      }
-    ]
-  },
-  {
-    name: 'README.md',
-    type: 'file',
-    path: 'README.md',
-    id: 'README.md',
-    language: 'markdown',
-    content: `# AIET-UniSphere Workspace\n\nConnected to GitHub repository.`
-  }
-];

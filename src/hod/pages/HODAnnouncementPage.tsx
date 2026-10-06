@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { Megaphone, Plus, Calendar, CheckCircle2, Clock, Trash2, Send, X, Users } from 'lucide-react';
+import { Megaphone, Plus, Calendar, CheckCircle2, Clock, Trash2, Send, X, Users, Paperclip, Download } from 'lucide-react';
 import { HODAppShell } from '../components/HODAppShell';
 import { StatCard } from '../../components/StatCard';
-import { getDepartmentAnnouncements, createDepartmentAnnouncement, publishAnnouncement, deleteAnnouncement } from '../../services/announcementService';
+import { getDepartmentAnnouncements, createDepartmentAnnouncement, publishAnnouncement, deleteAnnouncement, downloadAnnouncementAttachment } from '../../services/announcementService';
 import type { Announcement } from '../../data/announcements';
 import { useAuth } from '../../app/context/AuthContext';
 import { supabase } from '../../lib/supabase';
@@ -24,6 +24,8 @@ export const HODAnnouncementPage: React.FC = () => {
   const [category, setCategory] = useState<'Academic' | 'Exam' | 'Event' | 'General'>('Academic');
   const [targetAudience, setTargetAudience] = useState<'Students' | 'Faculty' | 'Students + Faculty'>('Students + Faculty');
   const [isDraft, setIsDraft] = useState(false);
+  const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (profile?.department_id) {
@@ -71,6 +73,7 @@ export const HODAnnouncementPage: React.FC = () => {
     e.preventDefault();
     if (!title.trim() || !content.trim() || !profile?.department_id || !profile?.id) return;
 
+    setSubmitting(true);
     try {
       await createDepartmentAnnouncement({
         title,
@@ -79,7 +82,8 @@ export const HODAnnouncementPage: React.FC = () => {
         departmentId: profile.department_id,
         createdBy: profile.id,
         targetAudience,
-        status: isDraft ? 'Draft' : 'Published'
+        status: isDraft ? 'Draft' : 'Published',
+        file: attachmentFile || undefined
       });
 
       setActionSuccess(isDraft ? 'Announcement saved as Draft.' : 'Department Announcement published! Shared with Student & Faculty portals.');
@@ -88,11 +92,15 @@ export const HODAnnouncementPage: React.FC = () => {
       setTitle('');
       setContent('');
       setIsDraft(false);
+      setAttachmentFile(null);
       setTargetAudience('Students + Faculty');
       setCategory('Academic');
       loadAnnouncements();
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error creating announcement:", err);
+      alert('Failed to create announcement: ' + (err.message || 'Unknown error'));
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -224,6 +232,47 @@ export const HODAnnouncementPage: React.FC = () => {
                   {anc.content}
                 </p>
 
+                {anc.attachmentPath && (
+                  <div style={{
+                    marginBottom: '0.85rem',
+                    padding: '0.75rem 1rem',
+                    backgroundColor: '#EFF6FF',
+                    borderRadius: 'var(--border-radius)',
+                    border: '1px solid #BFDBFE',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '0.75rem'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <Paperclip size={16} style={{ color: '#2563EB' }} />
+                      <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#1E40AF' }}>
+                        {anc.attachmentName || 'Circular_Attachment.pdf'}
+                      </span>
+                      {anc.attachmentSize && (
+                        <span style={{ fontSize: '0.75rem', color: '#6B7280' }}>
+                          ({(anc.attachmentSize / (1024 * 1024)).toFixed(2)} MB)
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          await downloadAnnouncementAttachment(anc.attachmentPath!, anc.attachmentName || 'Announcement_Attachment.pdf');
+                        } catch (err: any) {
+                          alert('Failed to download: ' + (err.message || 'Unknown error'));
+                        }
+                      }}
+                      className="btn btn-secondary font-sans"
+                      style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}
+                    >
+                      <Download size={13} />
+                      <span>Download</span>
+                    </button>
+                  </div>
+                )}
+
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', paddingTop: '0.75rem', borderTop: '1px solid rgba(156, 163, 175, 0.15)', fontSize: '0.8rem', color: 'var(--brand-dark-grey)' }}>
                   <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
                     <span>By: <strong>{anc.createdBy}</strong> ({anc.authorRole})</span>
@@ -319,12 +368,41 @@ export const HODAnnouncementPage: React.FC = () => {
                 <label style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--brand-dark-grey)', display: 'block', marginBottom: '0.35rem' }}>ANNOUNCEMENT CONTENT</label>
                 <textarea 
                   className="form-input font-sans" 
-                  style={{ width: '100%', height: '110px', padding: '0.55rem', resize: 'vertical' }}
+                  style={{ width: '100%', height: '100px', padding: '0.55rem', resize: 'vertical' }}
                   placeholder="Enter complete notice text..."
                   value={content} 
                   onChange={(e) => setContent(e.target.value)} 
                   required 
                 />
+              </div>
+
+              {/* Attachment File Input */}
+              <div>
+                <label style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--brand-dark-grey)', display: 'block', marginBottom: '0.35rem' }}>
+                  ATTACHMENT (OPTIONAL - PDF / IMAGE / DOC, MAX 25MB)
+                </label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <input
+                    type="file"
+                    accept=".pdf,.png,.jpg,.jpeg,.doc,.docx"
+                    onChange={(e) => {
+                      if (e.target.files && e.target.files[0]) {
+                        setAttachmentFile(e.target.files[0]);
+                      }
+                    }}
+                    style={{ fontSize: '0.85rem' }}
+                  />
+                  {attachmentFile && (
+                    <button
+                      type="button"
+                      onClick={() => setAttachmentFile(null)}
+                      className="btn btn-secondary"
+                      style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.25rem' }}>
@@ -340,12 +418,12 @@ export const HODAnnouncementPage: React.FC = () => {
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1rem' }}>
-                <button type="button" onClick={() => setIsCreateModalOpen(false)} className="btn btn-secondary font-sans">
+                <button type="button" onClick={() => setIsCreateModalOpen(false)} className="btn btn-secondary font-sans" disabled={submitting}>
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary font-sans">
+                <button type="submit" className="btn btn-primary font-sans" disabled={submitting}>
                   <Send size={16} />
-                  <span>{isDraft ? 'Save Draft' : 'Publish Notice'}</span>
+                  <span>{submitting ? 'Uploading & Saving...' : isDraft ? 'Save Draft' : 'Publish Notice'}</span>
                 </button>
               </div>
             </form>

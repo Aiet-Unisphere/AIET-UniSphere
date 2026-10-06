@@ -12,7 +12,6 @@ export const RequestCard: React.FC<RequestCardProps> = ({ request }) => {
 
   const getStatusBadge = (status: ServiceRequestItem['status']) => {
     switch (status) {
-      case 'Approved':
       case 'Resolved':
         return <span className="badge badge-active font-mono">{status}</span>;
       case 'In Review':

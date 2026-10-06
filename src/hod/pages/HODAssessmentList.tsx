@@ -5,9 +5,11 @@ import { HODAppShell } from '../components/HODAppShell';
 import { StatCard } from '../../components/StatCard';
 import { getDepartmentAssessments } from '../../services/assessmentService';
 import type { Assessment } from '../../data/assessments';
+import { useAuth } from '../../app/context/AuthContext';
 
 export const HODAssessmentList: React.FC = () => {
   const navigate = useNavigate();
+  const { profile } = useAuth();
   const [assessments, setAssessments] = useState<Assessment[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [semFilter, setSemFilter] = useState('All');
@@ -55,7 +57,7 @@ export const HODAssessmentList: React.FC = () => {
             Department Assessment Overview
           </h1>
           <p style={{ fontSize: '0.9rem', color: 'var(--brand-dark-grey)', marginTop: '0.2rem' }}>
-            Data Science Department Examinations, Quizzes & Mid-Semester Evaluations
+            {profile?.department?.name || 'Department'} examinations, quizzes and evaluations
           </p>
         </div>
       </div>
@@ -172,7 +174,7 @@ export const HODAssessmentList: React.FC = () => {
                     </td>
 
                     <td style={{ padding: '1rem 1.25rem', fontWeight: 600, color: 'var(--brand-black)' }}>
-                      Dr. Rajesh Kumar
+                      Not recorded
                     </td>
 
                     <td style={{ padding: '1rem 1.25rem' }}>

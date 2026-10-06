@@ -6,7 +6,7 @@ import { LoadingState } from '../components/LoadingState';
 import { EmptyState } from '../components/EmptyState';
 import { LearningGapCard } from '../components/LearningGapCard';
 import { TopicDetailModal } from '../components/TopicDetailModal';
-import type { TopicGapItem } from '../data/learningGaps';
+import type { TopicGapItem } from '../services/learningService';
 import { getLearningGaps } from '../services/learningService';
 
 export const LearningGapsPage: React.FC = () => {
@@ -42,16 +42,26 @@ export const LearningGapsPage: React.FC = () => {
   useEffect(() => {
     let result = [...gaps];
 
+    // Filter by severity (mapped from old status filter)
     if (statusFilter !== 'All') {
-      result = result.filter(g => g.status.toLowerCase() === statusFilter.toLowerCase());
+      const severityMap: Record<string, string> = {
+        'needs practice': 'Critical',
+        'needs review': 'Moderate',
+        'moderate': 'Moderate',
+        'strong': 'Minor',
+      };
+      const targetSeverity = severityMap[statusFilter.toLowerCase()];
+      if (targetSeverity) {
+        result = result.filter(g => g.severity === targetSeverity);
+      }
     }
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       result = result.filter(g =>
-        g.topicName.toLowerCase().includes(q) ||
+        g.topic.toLowerCase().includes(q) ||
         g.courseName.toLowerCase().includes(q) ||
-        g.courseCode.toLowerCase().includes(q)
+        g.courseId.toLowerCase().includes(q)
       );
     }
 

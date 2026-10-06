@@ -14,10 +14,12 @@ import {
   Building2,
   BookOpen,
   Award,
-  BarChart2
+  BarChart2,
+  Paperclip,
+  Download
 } from 'lucide-react';
 import { HODAppShell } from '../components/HODAppShell';
-import { getLeaveRequestById, approveLeaveRequest, rejectLeaveRequest } from '../../services/leaveService';
+import { getLeaveRequestById, approveLeaveRequest, rejectLeaveRequest, downloadLeaveDocument } from '../../services/leaveService';
 import type { LeaveRequest } from '../../data/leaveRequests';
 
 export const HODLeaveDetail: React.FC = () => {
@@ -357,6 +359,57 @@ export const HODLeaveDetail: React.FC = () => {
           }}>
             {leave.reason}
           </div>
+        </div>
+
+        {/* Supporting Document Card */}
+        <div style={{ marginBottom: '1.25rem' }}>
+          <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--brand-dark-grey)', textTransform: 'uppercase', display: 'block', marginBottom: '0.5rem' }}>
+            SUPPORTING DOCUMENT / MEDICAL CERTIFICATE
+          </span>
+          {leave.supportingDocPath ? (
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'space-between', 
+              padding: '1rem 1.25rem', 
+              backgroundColor: '#EFF6FF', 
+              borderRadius: 'var(--border-radius)', 
+              border: '1px solid #BFDBFE' 
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <Paperclip size={20} style={{ color: '#2563EB' }} />
+                <div>
+                  <div style={{ fontWeight: 700, color: '#1E3A8A', fontSize: '0.95rem' }}>
+                    {leave.supportingDocName || 'Supporting_Document.pdf'}
+                  </div>
+                  {leave.supportingDocSize && (
+                    <div style={{ fontSize: '0.8rem', color: '#64748B', marginTop: '0.1rem' }}>
+                      {(leave.supportingDocSize / (1024 * 1024)).toFixed(2)} MB
+                    </div>
+                  )}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await downloadLeaveDocument(leave.supportingDocPath!, leave.supportingDocName || 'Leave_Supporting_Document.pdf');
+                  } catch (err: any) {
+                    alert('Error downloading document: ' + (err.message || 'Unknown error'));
+                  }
+                }}
+                className="btn btn-secondary font-sans"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', fontWeight: 600 }}
+              >
+                <Download size={15} />
+                <span>Download Attachment</span>
+              </button>
+            </div>
+          ) : (
+            <div style={{ padding: '0.85rem 1rem', backgroundColor: '#F8FAFC', borderRadius: 'var(--border-radius)', border: '1px dashed #CBD5E1', color: '#64748B', fontSize: '0.85rem' }}>
+              No supporting document attached with this leave request.
+            </div>
+          )}
         </div>
 
         {/* If Rejected, display Rejection Reason */}

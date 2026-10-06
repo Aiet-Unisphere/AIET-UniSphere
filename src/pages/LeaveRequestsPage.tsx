@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { AppShell } from '../components/AppShell';
-import { Plus, CheckCircle2, Clock, AlertCircle, Loader2 } from 'lucide-react';
-import { getStudentLeaveRequests, submitLeaveRequest } from '../services/leaveService';
+import { Plus, CheckCircle2, Clock, AlertCircle, Loader2, Upload, FileText, Download, X } from 'lucide-react';
+import { getStudentLeaveRequests, submitLeaveRequest, downloadLeaveDocument } from '../services/leaveService';
 import type { LeaveRequest } from '../data/leaveRequests';
 
 export const LeaveRequestsPage: React.FC = () => {
@@ -16,6 +16,7 @@ export const LeaveRequestsPage: React.FC = () => {
   const [reason, setReason] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -42,6 +43,7 @@ export const LeaveRequestsPage: React.FC = () => {
     setReason('');
     setStartDate('');
     setEndDate('');
+    setSelectedFile(null);
     setErrorMsg('');
     setIsModalOpen(true);
   };
@@ -73,10 +75,11 @@ export const LeaveRequestsPage: React.FC = () => {
         leaveType: leaveType.trim(),
         reason: reason.trim(),
         startDate,
-        endDate
+        endDate,
+        file: selectedFile || undefined
       });
       setIsModalOpen(false);
-      setSuccessMsg('Leave request submitted successfully and is pending HOD review.');
+      setSuccessMsg('Leave request submitted successfully with attachments to Supabase Storage. Pending HOD review.');
       setTimeout(() => setSuccessMsg(''), 6000);
       await loadLeaves();
     } catch (err: any) {
@@ -84,6 +87,18 @@ export const LeaveRequestsPage: React.FC = () => {
       setErrorMsg(err.message || 'Failed to submit leave request.');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleDownloadDoc = async (leave: LeaveRequest) => {
+    if (!leave.supportingDocPath) {
+      alert("No storage document attached to this request.");
+      return;
+    }
+    try {
+      await downloadLeaveDocument(leave.supportingDocPath, leave.supportingDocName || 'supporting-document.pdf');
+    } catch (err: any) {
+      alert(`Download failed: ${err.message}`);
     }
   };
 
@@ -141,6 +156,7 @@ export const LeaveRequestsPage: React.FC = () => {
                   <th style={{ padding: '1rem' }}>Leave Type</th>
                   <th style={{ padding: '1rem' }}>Reason / Purpose</th>
                   <th style={{ padding: '1rem' }}>Dates</th>
+                  <th style={{ padding: '1rem' }}>Document</th>
                   <th style={{ padding: '1rem' }}>Status</th>
                   <th style={{ padding: '1rem' }}>Reviewed By</th>
                 </tr>
@@ -155,17 +171,30 @@ export const LeaveRequestsPage: React.FC = () => {
                     </td>
                     <td style={{ padding: '1rem' }} className="font-mono">{l.startDate} → {l.endDate} ({l.days} days)</td>
                     <td style={{ padding: '1rem' }}>
+                      {l.supportingDocPath || l.supportingDocument ? (
+                        <button 
+                          onClick={() => handleDownloadDoc(l)}
+                          className="btn btn-secondary"
+                          style={{ width: 'auto', padding: '0.3rem 0.6rem', fontSize: '0.75rem', gap: '0.3rem' }}
+                          title="Download attached certificate from Storage"
+                        >
+                          <FileText size={12} />
+                          <span style={{ maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {l.supportingDocName || l.supportingDocument || 'Document'}
+                          </span>
+                          <Download size={11} />
+                        </button>
+                      ) : (
+                        <span style={{ fontSize: '0.8rem', color: 'var(--brand-dark-grey)' }}>None</span>
+                      )}
+                    </td>
+                    <td style={{ padding: '1rem' }}>
                       <span className={`badge ${l.status === 'Approved' ? 'badge-active' : l.status === 'Pending' ? 'badge-pending' : 'badge-overdue'}`}>
                         {l.status}
                       </span>
-                      {l.status === 'Rejected' && l.remark && (
-                        <div style={{ fontSize: '0.75rem', color: '#DC2626', marginTop: '0.25rem', fontWeight: 600 }}>
-                          Reason: {l.remark}
-                        </div>
-                      )}
                     </td>
                     <td style={{ padding: '1rem', color: 'var(--brand-dark-grey)', fontSize: '0.85rem' }}>
-                      {l.status === 'Approved' ? `Approved by: ${l.reviewedBy || 'HOD'}` : l.status === 'Rejected' ? `Rejected by: ${l.reviewedBy || 'HOD'}` : 'Pending HOD Review'}
+                      {l.reviewedBy || 'Pending Review'}
                     </td>
                   </tr>
                 ))}
@@ -175,118 +204,149 @@ export const LeaveRequestsPage: React.FC = () => {
         )}
       </div>
 
-      {/* ═══════════════════════════════════════════ */}
-      {/* APPLY FOR LEAVE MODAL                       */}
-      {/* ═══════════════════════════════════════════ */}
+      {/* Leave Application Modal */}
       {isModalOpen && (
-        <div style={{
-          position: 'fixed',
-          inset: 0,
-          backgroundColor: 'rgba(0,0,0,0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 100,
-          padding: '1rem'
-        }}>
-          <div className="dashboard-panel" style={{ width: '100%', maxWidth: '520px', backgroundColor: 'var(--brand-white)', borderRadius: 'var(--border-radius)', padding: '1.5rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+        <div className="modal-backdrop" onClick={() => !submitting && setIsModalOpen(false)}>
+          <div className="modal-container" style={{ maxWidth: '580px' }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
               <div>
-                <span className="badge badge-active font-mono" style={{ fontSize: '0.7rem' }}>STUDENT APPLICATION</span>
-                <h2 className="font-display" style={{ fontSize: '1.35rem', fontWeight: 800, margin: '0.2rem 0 0 0', color: 'var(--brand-black)' }}>
-                  Apply for Academic Leave
-                </h2>
+                <span className="badge badge-active font-mono">LEAVE APPLICATION</span>
+                <h2 className="modal-title font-display" style={{ marginTop: '0.25rem' }}>Apply for Leave</h2>
               </div>
-              <button 
-                onClick={() => setIsModalOpen(false)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.5rem', color: 'var(--brand-dark-grey)', lineHeight: 1 }}
-              >
-                ×
+              <button className="modal-close-btn" onClick={() => setIsModalOpen(false)} disabled={submitting}>
+                <X size={20} />
               </button>
             </div>
 
-            {errorMsg && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', backgroundColor: '#FEF2F2', border: '1px solid #FCA5A5', color: '#991B1B', padding: '0.75rem', borderRadius: 'var(--border-radius)', marginBottom: '1rem', fontSize: '0.85rem' }}>
-                <AlertCircle size={18} style={{ flexShrink: 0 }} />
-                <span>{errorMsg}</span>
-              </div>
-            )}
-
             <form onSubmit={handleSubmit}>
-              {/* Leave Type — TEXT INPUT */}
-              <div style={{ marginBottom: '1rem' }}>
-                <label style={{ display: 'block', fontSize: '0.825rem', fontWeight: 700, color: 'var(--brand-black)', marginBottom: '0.35rem' }}>
-                  Leave Type *
-                </label>
-                <input
-                  type="text"
-                  value={leaveType}
-                  onChange={(e) => setLeaveType(e.target.value)}
-                  placeholder="Enter leave type (e.g. Medical Leave, Duty Leave, Personal Leave)"
-                  style={{ width: '100%', padding: '0.65rem 0.85rem', borderRadius: 'var(--border-radius)', border: '1px solid rgba(156, 163, 175, 0.4)', fontSize: '0.9rem' }}
-                />
-              </div>
+              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                {errorMsg && (
+                  <div style={{ padding: '0.75rem 1rem', backgroundColor: '#FEE2E2', border: '1px solid #FCA5A5', color: '#991B1B', borderRadius: 'var(--border-radius)', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
+                    <AlertCircle size={16} />
+                    <span>{errorMsg}</span>
+                  </div>
+                )}
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.825rem', fontWeight: 700, color: 'var(--brand-black)', marginBottom: '0.35rem' }}>
-                    Start Date *
-                  </label>
-                  <input
-                    type="date"
+                <div className="form-group">
+                  <label className="form-label">Leave Category *</label>
+                  <select 
+                    className="form-select font-sans"
+                    value={leaveType}
+                    onChange={(e) => setLeaveType(e.target.value)}
+                    disabled={submitting}
                     required
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                    style={{ width: '100%', padding: '0.65rem 0.85rem', borderRadius: 'var(--border-radius)', border: '1px solid rgba(156, 163, 175, 0.4)', fontSize: '0.9rem' }}
+                  >
+                    <option value="">Select Category</option>
+                    <option value="Medical Leave">Medical Leave (Doctor Certificate Recommended)</option>
+                    <option value="Academic Duty / Event">Academic Duty / Hackathon / Symposium</option>
+                    <option value="Personal / Family Emergency">Personal / Family Emergency</option>
+                    <option value="Internship / Placement Drive">Internship / Placement Drive</option>
+                  </select>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <div className="form-group">
+                    <label className="form-label">Start Date *</label>
+                    <input 
+                      type="date"
+                      className="form-input font-sans"
+                      value={startDate}
+                      onChange={(e) => setStartDate(e.target.value)}
+                      disabled={submitting}
+                      required
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">End Date *</label>
+                    <input 
+                      type="date"
+                      className="form-input font-sans"
+                      value={endDate}
+                      onChange={(e) => setEndDate(e.target.value)}
+                      disabled={submitting}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Reason / Academic Duty Explanation *</label>
+                  <textarea 
+                    className="form-input font-sans"
+                    rows={3}
+                    placeholder="Provide justification and specific context for your department HOD..."
+                    value={reason}
+                    onChange={(e) => setReason(e.target.value)}
+                    disabled={submitting}
+                    required
                   />
                 </div>
 
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.825rem', fontWeight: 700, color: 'var(--brand-black)', marginBottom: '0.35rem' }}>
-                    End Date *
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                    style={{ width: '100%', padding: '0.65rem 0.85rem', borderRadius: 'var(--border-radius)', border: '1px solid rgba(156, 163, 175, 0.4)', fontSize: '0.9rem' }}
-                  />
+                {/* Supporting Document Upload */}
+                <div className="form-group">
+                  <label className="form-label">Supporting Document / Certificate (Optional)</label>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    <input 
+                      type="file" 
+                      id="leave-doc-input"
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files.length > 0) {
+                          setSelectedFile(e.target.files[0]);
+                        }
+                      }}
+                      disabled={submitting}
+                      style={{ display: 'none' }}
+                    />
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                      <label 
+                        htmlFor="leave-doc-input" 
+                        className="btn btn-secondary" 
+                        style={{ width: 'auto', padding: '0.45rem 0.85rem', fontSize: '0.8rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+                      >
+                        <Upload size={14} /> Browse Document
+                      </label>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--brand-dark-grey)' }}>
+                        PDF, JPG, PNG up to 20MB (Stored in Supabase Storage)
+                      </span>
+                    </div>
+
+                    {selectedFile && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'var(--brand-light-grey)', padding: '0.5rem 0.75rem', borderRadius: '4px', fontSize: '0.85rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                          <FileText size={16} style={{ color: 'var(--brand-blue)' }} />
+                          <span style={{ fontWeight: 600 }}>{selectedFile.name}</span>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--brand-dark-grey)' }}>({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)</span>
+                        </div>
+                        <button 
+                          type="button" 
+                          onClick={() => setSelectedFile(null)} 
+                          style={{ border: 'none', background: 'none', color: 'var(--color-error)', cursor: 'pointer', fontWeight: 600, fontSize: '0.8rem' }}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
 
-              <div style={{ marginBottom: '1.5rem' }}>
-                <label style={{ display: 'block', fontSize: '0.825rem', fontWeight: 700, color: 'var(--brand-black)', marginBottom: '0.35rem' }}>
-                  Reason / Purpose *
-                </label>
-                <textarea
-                  required
-                  rows={3}
-                  placeholder="Describe your leave reason (e.g. Participation in Tech Fest / Medical rest / Personal emergency)..."
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  style={{ width: '100%', padding: '0.65rem 0.85rem', borderRadius: 'var(--border-radius)', border: '1px solid rgba(156, 163, 175, 0.4)', fontSize: '0.9rem' }}
-                />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="btn btn-secondary"
-                  style={{ fontSize: '0.85rem' }}
-                  disabled={submitting}
-                >
+              <div className="modal-footer" style={{ justifyContent: 'flex-end', gap: '0.75rem' }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setIsModalOpen(false)} disabled={submitting}>
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  className="btn btn-primary"
-                  style={{ fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
-                  disabled={submitting}
-                >
-                  {submitting && <Loader2 className="animate-spin" size={14} />}
-                  <span>{submitting ? 'Submitting...' : 'Submit Request'}</span>
+                <button type="submit" className="btn btn-primary" disabled={submitting}>
+                  {submitting ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin" />
+                      <span>Submitting Request...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Plus size={16} />
+                      <span>Submit Leave Request</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>

@@ -1,9 +1,13 @@
 import { supabase } from '../lib/supabase';
 import type { ServiceTypeItem, ServiceRequestItem, CreateServiceRequestPayload } from '../data/studentServices';
-import { mockServiceTypes, mockServiceRequests } from '../data/studentServices';
 import type { StudentProfile, ExtendedStudent } from '../data/students';
-
-let localRequests: ServiceRequestItem[] = [...mockServiceRequests];
+import { 
+  STORAGE_BUCKETS, 
+  uploadFile, 
+  getSignedUrl, 
+  downloadStorageFile, 
+  sanitizeFileName 
+} from './storageService';
 
 const mapProfileToStudent = (profile: any, studentProf?: any): ExtendedStudent => {
   const deptName = profile.department?.name || (profile.department_id ? 'Loading Department...' : 'Department not assigned');
@@ -131,6 +135,22 @@ export const getStudentFullProfile = async (targetId?: string): Promise<{ profil
   }
 };
 
+import { uploadAvatar, getUserAvatarUrl } from './avatarService';
+
+/**
+ * Uploads a profile avatar photo to Supabase Storage avatars bucket and syncs metadata.
+ */
+export const uploadUserAvatar = async (file: File): Promise<{ storagePath: string; signedUrl: string | null }> => {
+  return await uploadAvatar(file);
+};
+
+/**
+ * Gets a signed URL for a user's avatar.
+ */
+export const getUserAvatarSignedUrl = async (avatarPath?: string | null): Promise<string | null> => {
+  return await getUserAvatarUrl(avatarPath);
+};
+
 export const updateStudentProfile = async (payload: {
   phone?: string;
   date_of_birth?: string;
@@ -144,6 +164,7 @@ export const updateStudentProfile = async (payload: {
   semester?: number;
   academic_year?: string;
   cgpa?: number;
+  avatarFile?: File;
 }): Promise<any> => {
   const { data: { user }, error: userErr } = await (supabase as any).auth.getUser();
   if (userErr || !user) {
@@ -151,7 +172,13 @@ export const updateStudentProfile = async (payload: {
     throw new Error("Authenticated user session required.");
   }
 
-  const updateData = {
+  let avatarPath: string | undefined;
+  if (payload.avatarFile) {
+    const { storagePath } = await uploadUserAvatar(payload.avatarFile);
+    avatarPath = storagePath;
+  }
+
+  const updateData: any = {
     profile_id: user.id,
     phone: payload.phone?.trim() || null,
     date_of_birth: payload.date_of_birth || null,
@@ -167,6 +194,10 @@ export const updateStudentProfile = async (payload: {
     cgpa: payload.cgpa != null ? payload.cgpa : null,
     updated_at: new Date().toISOString()
   };
+
+  if (avatarPath) {
+    updateData.avatar_storage_path = avatarPath;
+  }
 
   const { data: savedRecord, error: upsertErr } = await (supabase as any)
     .from('student_profiles')
@@ -187,7 +218,6 @@ export const getAllStudents = async (): Promise<ExtendedStudent[]> => {
     const { data: { user } } = await (supabase as any).auth.getUser();
     if (!user) return [];
 
-    // Get active caller profile
     const { data: callerProfile } = await (supabase as any)
       .from('profiles')
       .select('role, department_id')
@@ -209,10 +239,9 @@ export const getAllStudents = async (): Promise<ExtendedStudent[]> => {
       .eq('role', 'STUDENT')
       .eq('account_status', 'ACTIVE');
 
-    // FACULTY and HOD can view ONLY students belonging to their department
     if (callerProfile.role === 'FACULTY' || callerProfile.role === 'HOD') {
       if (!callerProfile.department_id) {
-        return []; // No department assigned to faculty/HOD
+        return [];
       }
       query = query.eq('department_id', callerProfile.department_id);
     }
@@ -222,7 +251,6 @@ export const getAllStudents = async (): Promise<ExtendedStudent[]> => {
       return [];
     }
 
-    // Fetch all corresponding student_profiles
     const studentIds = studentsData.map((s: any) => s.id);
     const { data: extendedProfiles } = await (supabase as any)
       .from('student_profiles')
@@ -249,61 +277,168 @@ export const getStudentById = async (id: string): Promise<ExtendedStudent | null
 };
 
 export const getStudentsByCourse = async (courseId: string): Promise<ExtendedStudent[]> => {
-  return getAllStudents();
+  if (!courseId) return [];
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError || !user) throw new Error('Authenticated faculty session required.');
+  const { data: enrollments, error: enrollmentError } = await (supabase as any)
+    .from('course_enrollments')
+    .select('student_id')
+    .eq('course_id', courseId)
+    .eq('status', 'Active');
+  if (enrollmentError) throw new Error(`Unable to load course enrollments: ${enrollmentError.message}`);
+  const studentIds = [...new Set((enrollments || []).map((row: any) => row.student_id))];
+  if (!studentIds.length) return [];
+
+  const [profilesResult, studentProfilesResult] = await Promise.all([
+    (supabase as any).from('profiles')
+      .select('*, department:departments(id,name,code)')
+      .in('id', studentIds)
+      .eq('role', 'STUDENT')
+      .eq('account_status', 'ACTIVE'),
+    (supabase as any).from('student_profiles').select('*').in('profile_id', studentIds),
+  ]);
+  if (profilesResult.error) throw new Error(`Unable to load enrolled students: ${profilesResult.error.message}`);
+  if (studentProfilesResult.error) throw new Error(`Unable to load student details: ${studentProfilesResult.error.message}`);
+  const studentProfileById = new Map<string, any>((studentProfilesResult.data || []).map((row: any) => [row.profile_id, row]));
+  return (profilesResult.data || []).map((profile: any) => mapProfileToStudent(profile, studentProfileById.get(profile.id)));
 };
 
 export const getAvailableServices = async (): Promise<ServiceTypeItem[]> => {
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      resolve([...mockServiceTypes]);
-    }, 100);
-  });
+  const { data, error } = await (supabase as any)
+    .from('service_catalog')
+    .select('id, name, description, category, icon, sla_hours, requires_attachment')
+    .eq('is_active', true)
+    .order('category', { ascending: true })
+    .order('name', { ascending: true });
+  if (error) throw new Error(`Unable to load student services: ${error.message}`);
+  return (data || []).map((service: any) => ({
+    id: String(service.id),
+    title: service.name,
+    description: service.description || '',
+    iconName: service.icon || 'FileText',
+    estimatedTime: formatServiceSla(Number(service.sla_hours || 72)),
+    requiredDocs: Boolean(service.requires_attachment),
+    category: service.category,
+  }));
 };
 
 export const getServiceRequests = async (): Promise<ServiceRequestItem[]> => {
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      resolve([...localRequests]);
-    }, 100);
-  });
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError) throw new Error(`Unable to verify session: ${authError.message}`);
+  if (!user) throw new Error('Sign in to view your service requests.');
+  const { data, error } = await (supabase as any)
+    .from('student_service_requests')
+    .select('*')
+    .eq('student_id', user.id)
+    .order('created_at', { ascending: false });
+  if (error) throw new Error(`Unable to load service requests: ${error.message}`);
+  return (data || []).map(mapServiceRequest);
 };
 
 export const getServiceRequestById = async (id: string): Promise<ServiceRequestItem | null> => {
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      const req = localRequests.find(r => r.id === id) || null;
-      resolve(req);
-    }, 100);
-  });
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError) throw new Error(`Unable to verify session: ${authError.message}`);
+  if (!user) throw new Error('Sign in to view this service request.');
+  const { data, error } = await (supabase as any)
+    .from('student_service_requests')
+    .select('*')
+    .eq('id', id)
+    .eq('student_id', user.id)
+    .maybeSingle();
+  if (error) throw new Error(`Unable to load service request: ${error.message}`);
+  return data ? mapServiceRequest(data) : null;
 };
 
 export const createServiceRequest = async (payload: CreateServiceRequestPayload): Promise<ServiceRequestItem> => {
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      const newId = `REQ-2026-${Math.floor(1000 + Math.random() * 9000)}`;
-      const nowStr = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError || !user) throw new Error('Authenticated student session required.');
 
-      const newReq: ServiceRequestItem = {
-        id: newId,
-        serviceTypeId: payload.serviceTypeId,
-        requestType: payload.requestType,
-        subject: payload.subject,
-        description: payload.description,
-        submittedDate: nowStr,
-        lastUpdatedDate: nowStr,
-        status: 'Pending',
-        attachmentName: payload.attachmentName || undefined,
-        remarks: 'Request submitted successfully. Waiting for Student Section assignment.',
-        timeline: [
-          { step: 'Submitted', status: 'completed', date: nowStr, note: 'Online request submitted.' },
-          { step: 'Under Review', status: 'current', note: 'Queued for Student Welfare Office review.' },
-          { step: 'Action Taken', status: 'upcoming' },
-          { step: 'Completed', status: 'upcoming' }
-        ]
-      };
+  const { data: profile, error: profileError } = await (supabase as any)
+    .from('profiles')
+    .select('department_id, role, account_status')
+    .eq('id', user.id)
+    .single();
+  if (profileError || !profile?.department_id || profile.role !== 'STUDENT' || profile.account_status !== 'ACTIVE') {
+    throw new Error('An active student profile with a department is required to submit a request.');
+  }
 
-      localRequests = [newReq, ...localRequests];
-      resolve(newReq);
-    }, 300);
-  });
+  const { data: service, error: serviceError } = await (supabase as any)
+    .from('service_catalog')
+    .select('id, name, requires_attachment')
+    .eq('id', payload.serviceTypeId)
+    .eq('is_active', true)
+    .maybeSingle();
+  if (serviceError || !service) throw new Error('This service is no longer available. Refresh and select an active service.');
+  if (service.requires_attachment && !payload.file) throw new Error('This service requires a supporting attachment.');
+  if (!payload.subject.trim() || !payload.description.trim()) throw new Error('Subject and description are required.');
+
+  const requestId = crypto.randomUUID();
+  const fileName = payload.file?.name;
+  const storagePath = payload.file
+    ? `${user.id}/services/${requestId}/${sanitizeFileName(payload.file.name)}`
+    : undefined;
+  if (payload.file && storagePath) {
+    await uploadFile({ bucket: STORAGE_BUCKETS.STUDENT_DOCUMENTS, path: storagePath, file: payload.file, upsert: false });
+  }
+
+  const { data, error } = await (supabase as any)
+    .from('student_service_requests')
+    .insert({
+      id: requestId,
+      student_id: user.id,
+      department_id: profile.department_id,
+      service_type_id: String(service.id),
+      request_type: service.name,
+      subject: payload.subject.trim(),
+      description: payload.description.trim(),
+      attachment_name: fileName || null,
+      attachment_path: storagePath || null,
+      attachment_size: payload.file?.size || null,
+      attachment_type: payload.file?.type || null,
+      status: 'Pending',
+    })
+    .select('*')
+    .single();
+  if (error || !data) {
+    if (storagePath) await supabase.storage.from(STORAGE_BUCKETS.STUDENT_DOCUMENTS).remove([storagePath]);
+    throw new Error(`Failed to submit service request: ${error?.message || 'No request record returned.'}`);
+  }
+  return mapServiceRequest(data);
+};
+
+const formatServiceSla = (hours: number): string => hours < 24
+  ? `Within ${hours} hours`
+  : `${Math.ceil(hours / 24)} working day${Math.ceil(hours / 24) === 1 ? '' : 's'}`;
+
+const mapServiceRequest = (row: any): ServiceRequestItem => {
+  const submittedDate = new Date(row.created_at).toLocaleDateString('en-GB');
+  const status = row.status as ServiceRequestItem['status'];
+  const actionStatus = status === 'In Review' ? 'current' : ['Resolved', 'Rejected'].includes(status) ? 'completed' : 'upcoming';
+  return {
+    id: row.id,
+    requestType: row.request_type,
+    serviceTypeId: String(row.service_type_id),
+    subject: row.subject,
+    description: row.description,
+    submittedDate,
+    lastUpdatedDate: new Date(row.updated_at).toLocaleDateString('en-GB'),
+    status,
+    attachmentName: row.attachment_name || undefined,
+    attachmentPath: row.attachment_path || undefined,
+    attachmentSize: row.attachment_size == null ? undefined : Number(row.attachment_size),
+    remarks: row.admin_notes || undefined,
+    timeline: [
+      { step: 'Submitted', status: 'completed', date: submittedDate, note: 'Request submitted.' },
+      { step: 'Under Review', status: status === 'Pending' ? 'current' : 'completed' },
+      { step: 'Action Taken', status: actionStatus },
+      { step: 'Completed', status: status === 'Resolved' ? 'completed' : 'upcoming' },
+    ],
+  };
+};
+
+/**
+ * Helper to download student service request document from Supabase Storage.
+ */
+export const downloadServiceRequestAttachment = async (storagePath: string, fileName?: string): Promise<void> => {
+  await downloadStorageFile(STORAGE_BUCKETS.STUDENT_DOCUMENTS, storagePath, fileName);
 };

@@ -1,9 +1,9 @@
 import React from 'react';
 import { Calendar, CheckCircle2, Clock } from 'lucide-react';
-import type { ProjectMilestoneItem } from '../data/projectMilestones';
+import type { ProjectMilestone as ProjectMilestoneData } from '../services/projectService';
 
 interface ProjectMilestoneProps {
-  milestone: ProjectMilestoneItem;
+  milestone: ProjectMilestoneData;
 }
 
 export const ProjectMilestone: React.FC<ProjectMilestoneProps> = ({ milestone }) => {
@@ -32,10 +32,10 @@ export const ProjectMilestone: React.FC<ProjectMilestoneProps> = ({ milestone })
           {milestone.description}
         </p>
         <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', fontWeight: 600, color: 'var(--brand-dark-grey)' }}>
-          Target Deadline: {milestone.dueDate}
-          {milestone.completedDate && (
+          Target Deadline: {milestone.due_date || 'Not set'}
+          {milestone.completed_at && (
             <span style={{ color: 'var(--color-success)', marginLeft: '0.75rem' }}>
-              ✓ Completed on {milestone.completedDate}
+              Completed on {new Date(milestone.completed_at).toLocaleDateString()}
             </span>
           )}
         </div>

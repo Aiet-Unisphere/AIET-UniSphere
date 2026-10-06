@@ -19,6 +19,10 @@ export interface LeaveRequest {
   reviewerName?: string;
   remark?: string;
   supportingDocument?: string;
+  supportingDocPath?: string;
+  supportingDocName?: string;
+  supportingDocSize?: number;
+  supportingDocType?: string;
   semester?: string | number | null;
   cgpa?: string | number | null;
   attendancePercent?: string | number | null;

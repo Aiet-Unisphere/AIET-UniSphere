@@ -29,7 +29,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const fetchAndSetProfile = async (uid: string) => {
     try {
       const userProfile = await authService.getCurrentProfile(uid);
-      if (userProfile) {
+      if (userProfile?.account_status === 'ACTIVE') {
         setProfile(userProfile);
         setRole(userProfile.role);
         return userProfile;
@@ -39,6 +39,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     setProfile(null);
     setRole(null);
+    await authService.signOut();
     return null;
   };
 
@@ -84,7 +85,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setSession(result.session);
         setUser(result.session.user);
         setProfile(result.profile);
-        setRole(result.profile?.role || (result.session.user.user_metadata?.role as UserRole) || null);
+        setRole(result.profile?.role || null);
       }
       return result;
     } finally {

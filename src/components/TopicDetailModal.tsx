@@ -1,7 +1,7 @@
 import React from 'react';
-import { X, BookOpen, ExternalLink, CheckSquare, TrendingUp, HelpCircle } from 'lucide-react';
+import { X, CheckSquare, HelpCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import type { TopicGapItem } from '../data/learningGaps';
+import type { TopicGapItem } from '../services/learningService';
 import { ProgressBar } from './ProgressBar';
 
 interface TopicDetailModalProps {
@@ -16,8 +16,21 @@ export const TopicDetailModal: React.FC<TopicDetailModalProps> = ({ topic, onClo
 
   const handleAskAI = () => {
     onClose();
-    navigate(`/student/ai?prompt=Explain%20${encodeURIComponent(topic.topicName)}`);
+    navigate(`/student/ai?prompt=Explain%20${encodeURIComponent(topic.topic)}%20in%20${encodeURIComponent(topic.courseName)}`);
   };
+
+  const severityColor = topic.severity === 'Critical' ? '#ef4444' : topic.severity === 'Moderate' ? '#f59e0b' : '#10b981';
+
+  const recommendedActions: string[] = [];
+  if (topic.severity === 'Critical' || topic.severity === 'Moderate') {
+    recommendedActions.push(`Review lecture notes and study materials on "${topic.topic}".`);
+    recommendedActions.push(`Practice additional questions on this topic.`);
+  }
+  if (topic.severity === 'Critical') {
+    recommendedActions.push(`Schedule a consultation with your ${topic.courseName} faculty.`);
+  }
+  recommendedActions.push(`Ask the AI Learning Assistant to explain "${topic.topic}".`);
+  recommendedActions.push(`Review your previous assessment answers for this topic.`);
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -25,10 +38,10 @@ export const TopicDetailModal: React.FC<TopicDetailModalProps> = ({ topic, onClo
         <div className="modal-header">
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <span className="badge badge-secondary font-mono">{topic.courseCode}</span>
+              <span className="badge badge-secondary font-mono">{topic.courseId}</span>
               <span style={{ fontSize: '0.85rem', color: 'var(--brand-dark-grey)' }}>{topic.courseName}</span>
             </div>
-            <h2 className="modal-title font-display" style={{ marginTop: '0.25rem' }}>{topic.topicName}</h2>
+            <h2 className="modal-title font-display" style={{ marginTop: '0.25rem' }}>{topic.topic}</h2>
           </div>
 
           <button className="modal-close-btn" onClick={onClose} title="Close">
@@ -41,69 +54,52 @@ export const TopicDetailModal: React.FC<TopicDetailModalProps> = ({ topic, onClo
           <div className="topic-perf-overview-box">
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
               <span className="font-mono text-dark-grey" style={{ fontSize: '0.85rem' }}>Current Topic Mastery:</span>
-              <span className="font-mono font-bold" style={{ fontSize: '0.9rem' }}>{topic.performancePercent}%</span>
+              <span className="font-mono font-bold" style={{ fontSize: '0.9rem', color: severityColor }}>
+                {topic.scorePercent}%
+              </span>
             </div>
-            <ProgressBar progress={topic.performancePercent} />
+            <ProgressBar progress={topic.scorePercent} />
 
-            <div style={{ display: 'flex', gap: '1rem', marginTop: '0.75rem', fontSize: '0.825rem' }}>
+            <div style={{ display: 'flex', gap: '1rem', marginTop: '0.75rem', fontSize: '0.825rem', flexWrap: 'wrap' }}>
               <div>
-                <span className="text-dark-grey font-mono">Recent Trend: </span>
-                <span className="font-bold text-orange">{topic.recentTrend}</span>
+                <span className="text-dark-grey font-mono">Severity: </span>
+                <span className="font-bold" style={{ color: severityColor }}>{topic.severity}</span>
               </div>
               <div>
-                <span className="text-dark-grey font-mono">Status: </span>
-                <span className="font-bold">{topic.status}</span>
+                <span className="text-dark-grey font-mono">Correct: </span>
+                <span className="font-bold text-success">{topic.correctAnswers}</span>
+              </div>
+              <div>
+                <span className="text-dark-grey font-mono">Wrong: </span>
+                <span className="font-bold text-error">{topic.wrongAnswers}</span>
+              </div>
+              <div>
+                <span className="text-dark-grey font-mono">Total: </span>
+                <span className="font-bold">{topic.totalQuestions}</span>
               </div>
             </div>
-          </div>
-
-          {/* Suggested Focus */}
-          <div style={{ marginTop: '1rem' }}>
-            <h4 className="section-title font-display" style={{ fontSize: '0.95rem' }}>Suggested Focus Area</h4>
-            <p className="font-sans" style={{ fontSize: '0.875rem', color: 'var(--brand-dark-grey)', marginTop: '0.25rem' }}>
-              {topic.suggestedFocus}
-            </p>
           </div>
 
           {/* Recommended Actions */}
           <div style={{ marginTop: '1rem' }}>
-            <h4 className="section-title font-display" style={{ fontSize: '0.95rem' }}>Recommended Practice Actions</h4>
+            <h4 className="section-title font-display" style={{ fontSize: '0.95rem' }}>Recommended Actions</h4>
             <ul style={{ listStyleType: 'none', padding: 0, marginTop: '0.35rem' }}>
-              {topic.recommendedActions.map((act, idx) => (
-                <li key={idx} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', marginBottom: '0.35rem', color: 'var(--brand-black)' }}>
-                  <CheckSquare size={15} className="text-orange" />
+              {recommendedActions.map((act, idx) => (
+                <li key={idx} style={{ display: 'flex', alignItems: 'flex-start', gap: '0.4rem', fontSize: '0.85rem', marginBottom: '0.35rem', color: 'var(--brand-black)' }}>
+                  <CheckSquare size={15} className="text-orange" style={{ flexShrink: 0, marginTop: '0.1rem' }} />
                   <span>{act}</span>
                 </li>
               ))}
             </ul>
-          </div>
-
-          {/* Related Learning Materials */}
-          <div style={{ marginTop: '1.25rem' }}>
-            <h4 className="section-title font-display" style={{ fontSize: '0.95rem' }}>Related Study Materials</h4>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.5rem' }}>
-              {topic.materials.map((mat) => (
-                <div key={mat.id} className="material-item-row">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <BookOpen size={16} className="text-blue" />
-                    <span style={{ fontWeight: 600, fontSize: '0.85rem' }}>{mat.title}</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <span className="badge badge-secondary font-mono" style={{ fontSize: '0.7rem' }}>{mat.type}</span>
-                    <span className="font-mono text-dark-grey" style={{ fontSize: '0.75rem' }}>{mat.duration}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
           </div>
         </div>
 
         <div className="modal-footer" style={{ display: 'flex', justifyContent: 'space-between' }}>
           <button className="btn btn-secondary" onClick={handleAskAI}>
             <HelpCircle size={16} />
-            <span>Ask AI Assistant about this topic</span>
+            <span>Ask AI about this topic</span>
           </button>
-          
+
           <button className="btn btn-primary" onClick={onClose}>
             <span>Done</span>
           </button>

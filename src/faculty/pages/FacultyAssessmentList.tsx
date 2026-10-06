@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Award, Plus, Search, Filter, Clock, CheckCircle2, AlertCircle, Eye } from 'lucide-react';
+import { Award, Plus, Search, Filter, Clock, CheckCircle2, AlertCircle, Eye, Trash2 } from 'lucide-react';
 import { FacultyAppShell } from '../components/FacultyAppShell';
 import { StatCard } from '../../components/StatCard';
-import { getFacultyAssessments } from '../../services/assessmentService';
+import { getFacultyAssessments, deleteAssessment } from '../../services/assessmentService';
 import type { Assessment } from '../../data/assessments';
 import { CreateAssessmentModal } from '../components/CreateAssessmentModal';
 
@@ -31,15 +31,26 @@ export const FacultyAssessmentList: React.FC = () => {
     loadData();
   }, []);
 
+  const handleDeleteAssessment = async (id: string, title: string) => {
+    if (!confirm(`Are you sure you want to delete "${title}"? This action cannot be undone.`)) return;
+    try {
+      await deleteAssessment(id);
+      await loadData();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Unable to delete assessment.');
+    }
+  };
+
   const upcomingCount = assessments.filter(a => a.status === 'Upcoming' || a.status === 'Active').length;
   const completedCount = assessments.filter(a => a.status === 'Completed' || a.status === 'Graded').length;
   const pendingEvalCount = assessments.filter(a => a.status === 'Completed').length;
 
   const filteredAssessments = assessments.filter(a => {
+    const code = a.courseCode || a.courseId || a.subjectCode || '';
     const matchesSearch = 
       a.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-      (a.courseCode || a.courseId).toLowerCase().includes(searchQuery.toLowerCase()) ||
-      a.courseName.toLowerCase().includes(searchQuery.toLowerCase());
+      code.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (a.courseName || '').toLowerCase().includes(searchQuery.toLowerCase());
     
     if (activeTab === 'All') return matchesSearch;
     return matchesSearch && a.status === activeTab;
@@ -112,7 +123,7 @@ export const FacultyAssessmentList: React.FC = () => {
             <Search size={16} className="header-search-icon" />
             <input 
               type="text" 
-              placeholder="Search assessments..."
+              placeholder="Search assessments, subject code..."
               className="header-search-input"
               style={{ width: '100%' }}
               value={searchQuery}
@@ -149,7 +160,7 @@ export const FacultyAssessmentList: React.FC = () => {
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.875rem' }}>
               <thead>
                 <tr style={{ backgroundColor: 'var(--brand-light-grey)', borderBottom: '1px solid rgba(156, 163, 175, 0.2)', color: 'var(--brand-black)', fontWeight: 700, textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: '0.03em' }}>
-                  <th style={{ padding: '1rem 1.25rem' }}>Assessment Title & Course</th>
+                  <th style={{ padding: '1rem 1.25rem' }}>Subject Code & Assessment Title</th>
                   <th style={{ padding: '1rem 1.25rem' }}>Semester</th>
                   <th style={{ padding: '1rem 1.25rem' }}>Date & Time</th>
                   <th style={{ padding: '1rem 1.25rem' }}>Duration</th>
@@ -159,13 +170,17 @@ export const FacultyAssessmentList: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {filteredAssessments.map((a) => (
-                  <tr key={a.id} style={{ borderBottom: '1px solid rgba(156, 163, 175, 0.15)' }}>
-                    <td style={{ padding: '1rem 1.25rem' }}>
-                      <span className="font-mono text-blue font-bold" style={{ fontSize: '0.825rem' }}>{a.courseCode || a.courseId}</span>
-                      <div style={{ fontWeight: 700, color: 'var(--brand-black)', marginTop: '0.1rem', fontSize: '0.9rem' }}>{a.title}</div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--brand-dark-grey)' }}>{a.courseName}</div>
-                    </td>
+                {filteredAssessments.map((a) => {
+                  const subjectCodeDisplay = a.courseCode || a.courseId || a.subjectCode || 'N/A';
+                  return (
+                    <tr key={a.id} style={{ borderBottom: '1px solid rgba(156, 163, 175, 0.15)' }}>
+                      <td style={{ padding: '1rem 1.25rem' }}>
+                        <span className="font-mono text-blue font-bold" style={{ fontSize: '0.825rem' }}>{subjectCodeDisplay}</span>
+                        <div style={{ fontWeight: 700, color: 'var(--brand-black)', marginTop: '0.1rem', fontSize: '0.9rem' }}>{a.title}</div>
+                        {a.courseName && a.courseName !== subjectCodeDisplay && (
+                          <div style={{ fontSize: '0.75rem', color: 'var(--brand-dark-grey)' }}>{a.courseName}</div>
+                        )}
+                      </td>
 
                     <td style={{ padding: '1rem 1.25rem' }}>
                       <span className="badge badge-graded font-mono">SEM {a.semester || 6}</span>
@@ -191,17 +206,30 @@ export const FacultyAssessmentList: React.FC = () => {
                     </td>
 
                     <td style={{ padding: '1rem 1.25rem', textAlign: 'right' }}>
-                      <button 
-                        onClick={() => navigate(`/faculty/assessments/${a.id}`)}
-                        className="btn btn-secondary"
-                        style={{ fontSize: '0.8rem', padding: '0.4rem 0.75rem' }}
-                      >
-                        <Eye size={14} />
-                        <span>Inspect</span>
-                      </button>
+                      <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'flex-end' }}>
+                        <button 
+                          onClick={() => navigate(`/faculty/assessments/${a.id}`)}
+                          className="btn btn-secondary"
+                          style={{ fontSize: '0.8rem', padding: '0.4rem 0.75rem' }}
+                        >
+                          <Eye size={14} />
+                          <span>Inspect</span>
+                        </button>
+                        {(a.status === 'Draft' || a.status === 'Upcoming') && (
+                          <button
+                            onClick={() => handleDeleteAssessment(a.id, a.title)}
+                            className="btn btn-secondary"
+                            style={{ fontSize: '0.8rem', padding: '0.4rem 0.6rem', color: '#b91c1c' }}
+                            title="Delete Assessment"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
-                ))}
+                );
+              })}
               </tbody>
             </table>
           </div>

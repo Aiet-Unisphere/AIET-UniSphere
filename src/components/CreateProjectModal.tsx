@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { X, Plus, FolderPlus } from 'lucide-react';
-import type { ProjectType } from '../data/projects';
 import type { CreateProjectPayload } from '../services/projectService';
 import { FormField } from './FormField';
 
@@ -18,12 +17,12 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
   const [formData, setFormData] = useState<CreateProjectPayload>({
     name: '',
     description: '',
-    projectType: 'Course Project',
-    course: '',
+    projectType: 'Personal',
+    courseName: '',
     technology: [],
     teamMembers: '',
     deadline: '',
-    faculty: ''
+    facultyMentor: ''
   });
 
   const [techInput, setTechInput] = useState('');
@@ -37,7 +36,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
     if (!formData.name.trim()) errs.name = 'Project Name is required.';
     if (!formData.description.trim()) errs.description = 'Description is required.';
     if (!formData.deadline) errs.deadline = 'Deadline date is required.';
-    if (!formData.course.trim()) errs.course = 'Course name or subject code is required.';
+    if (!formData.courseName?.trim()) errs.courseName = 'Course name or subject code is required.';
     return errs;
   };
 
@@ -64,12 +63,12 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
       setFormData({
         name: '',
         description: '',
-        projectType: 'Course Project',
-        course: '',
+        projectType: 'Personal',
+        courseName: '',
         technology: [],
         teamMembers: '',
         deadline: '',
-        faculty: ''
+        facultyMentor: ''
       });
       setTechInput('');
       setErrors({});
@@ -134,12 +133,13 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                   id="project-type"
                   className="form-input"
                   value={formData.projectType}
-                  onChange={(e) => setFormData({ ...formData, projectType: e.target.value as ProjectType })}
+                  onChange={(e) => setFormData({ ...formData, projectType: e.target.value as CreateProjectPayload['projectType'] })}
                 >
-                  <option value="Course Project">Course Project</option>
-                  <option value="Capstone">Capstone Project</option>
-                  <option value="Research">Research Project</option>
-                  <option value="Personal">Personal Project</option>
+                  <option value="Personal">Personal</option>
+                  <option value="Team">Team</option>
+                  <option value="Mini">Mini</option>
+                  <option value="Capstone">Capstone</option>
+                  <option value="Research">Research</option>
                 </select>
               </div>
 
@@ -147,9 +147,9 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                 id="project-course"
                 label="Course / Subject *"
                 placeholder="e.g. Artificial Intelligence (CS-603)"
-                value={formData.course}
-                onChange={(e) => setFormData({ ...formData, course: e.target.value })}
-                error={errors.course}
+                value={formData.courseName || ''}
+                onChange={(e) => setFormData({ ...formData, courseName: e.target.value })}
+                error={errors.courseName}
               />
             </div>
 
@@ -158,8 +158,8 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                 id="project-mentor"
                 label="Faculty / Mentor"
                 placeholder="e.g. Dr. Faculty Name"
-                value={formData.faculty || ''}
-                onChange={(e) => setFormData({ ...formData, faculty: e.target.value })}
+                value={formData.facultyMentor || ''}
+                onChange={(e) => setFormData({ ...formData, facultyMentor: e.target.value })}
               />
 
               <div className="form-group">

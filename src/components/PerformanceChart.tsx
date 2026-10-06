@@ -1,59 +1,77 @@
 import React from 'react';
-import type { SemesterTrendItem } from '../data/analytics';
+
+interface SemesterTrendItem {
+  semester: number | string;
+  averagePercent?: number;
+  gpa?: number;
+  target?: number;
+}
 
 interface PerformanceChartProps {
   trends: SemesterTrendItem[];
 }
 
 export const PerformanceChart: React.FC<PerformanceChartProps> = ({ trends }) => {
-  const maxVal = 10.0;
+  const maxVal = 100; // Use percentage scale (0-100)
 
   return (
     <div className="performance-chart-card">
       <div className="chart-header">
         <div>
-          <h3 className="chart-title">Academic GPA Progress Trend</h3>
-          <p className="chart-subtitle">Semester GPA vs Target Performance Benchmark (Out of 10.0)</p>
+          <h3 className="chart-title">Academic Performance Trend</h3>
+          <p className="chart-subtitle">Semester-wise average performance percentage</p>
         </div>
 
         <div className="chart-legend font-mono">
           <span className="legend-item">
-            <span className="legend-dot orange-dot" /> Actual GPA
+            <span className="legend-dot orange-dot" /> Actual Score
           </span>
           <span className="legend-item">
-            <span className="legend-dot blue-dot" /> Target (8.5)
+            <span className="legend-dot blue-dot" /> Target (75%)
           </span>
         </div>
       </div>
 
-      <div className="chart-bars-container">
-        {trends.map((item, idx) => {
-          const heightPercent = (item.gpa / maxVal) * 100;
-          const isCurrent = item.semester.includes('Current');
+      {trends.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--brand-dark-grey)' }}>
+          No semester trend data available yet.
+        </div>
+      ) : (
+        <div className="chart-bars-container">
+          {trends.map((item, idx) => {
+            // Support both old (gpa, string semester) and new (averagePercent, number semester) formats
+            const value = item.averagePercent ?? (item.gpa !== undefined ? (item.gpa / 10) * 100 : 0);
+            const label = typeof item.semester === 'string'
+              ? item.semester
+              : `Sem ${item.semester}`;
+            const heightPercent = Math.min(100, value);
+            const isCurrent = typeof item.semester === 'string' && item.semester.includes('Current');
+            const target = item.target ?? 75;
 
-          return (
-            <div key={idx} className="chart-bar-group">
-              <span className="bar-value-label font-mono">{item.gpa.toFixed(2)}</span>
-              
-              <div className="bar-track">
-                <div 
-                  className={`bar-fill ${isCurrent ? 'bar-current' : ''}`} 
-                  style={{ height: `${heightPercent}%` }}
-                />
-                <div 
-                  className="target-line" 
-                  style={{ bottom: `${(item.target / maxVal) * 100}%` }}
-                  title={`Target: ${item.target}`}
-                />
+            return (
+              <div key={idx} className="chart-bar-group">
+                <span className="bar-value-label font-mono">{value.toFixed(1)}%</span>
+
+                <div className="bar-track">
+                  <div
+                    className={`bar-fill ${isCurrent ? 'bar-current' : ''}`}
+                    style={{ height: `${heightPercent}%` }}
+                  />
+                  <div
+                    className="target-line"
+                    style={{ bottom: `${(target / maxVal) * 100}%` }}
+                    title={`Target: ${target}%`}
+                  />
+                </div>
+
+                <span className={`bar-axis-label ${isCurrent ? 'font-bold' : ''}`}>
+                  {label}
+                </span>
               </div>
-
-              <span className={`bar-axis-label ${isCurrent ? 'font-bold' : ''}`}>
-                {item.semester}
-              </span>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 };

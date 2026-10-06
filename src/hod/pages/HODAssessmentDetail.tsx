@@ -2,13 +2,14 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Award, Users, CheckCircle2, Clock, Calendar, BarChart2 } from 'lucide-react';
 import { HODAppShell } from '../components/HODAppShell';
-import { getAssessmentById } from '../../services/assessmentService';
+import { getAssessmentById, getAssessmentPerformanceSummary, type AssessmentPerformanceSummary } from '../../services/assessmentService';
 import type { Assessment } from '../../data/assessments';
 
 export const HODAssessmentDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [assessment, setAssessment] = useState<Assessment | null>(null);
+  const [metrics, setMetrics] = useState<AssessmentPerformanceSummary | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -16,8 +17,12 @@ export const HODAssessmentDetail: React.FC = () => {
       if (!id) return;
       setLoading(true);
       try {
-        const item = await getAssessmentById(id);
+        const [item, performance] = await Promise.all([
+          getAssessmentById(id),
+          getAssessmentPerformanceSummary(id),
+        ]);
         setAssessment(item || null);
+        setMetrics(performance);
       } catch (err) {
         console.error("Error loading assessment detail:", err);
       } finally {
@@ -73,7 +78,7 @@ export const HODAssessmentDetail: React.FC = () => {
               {assessment.title}
             </h1>
             <p style={{ fontSize: '0.9rem', color: 'var(--brand-dark-grey)', marginTop: '0.2rem' }}>
-              Course: <strong>{assessment.courseName}</strong> · Faculty Lead: <strong>Dr. Rajesh Kumar</strong>
+              Course: <strong>{assessment.courseName}</strong> · Faculty Lead: <strong>Not recorded</strong>
             </p>
           </div>
         </div>
@@ -83,22 +88,22 @@ export const HODAssessmentDetail: React.FC = () => {
       <div className="stat-cards-grid" style={{ marginBottom: '1.75rem' }}>
         <div className="stat-card">
           <span className="stat-title">TOTAL STUDENTS</span>
-          <div className="stat-value">62</div>
+          <div className="stat-value">{metrics?.enrolledStudents ?? '—'}</div>
           <span className="stat-subtitle">Enrolled in Course</span>
         </div>
         <div className="stat-card">
           <span className="stat-title">ATTEMPTED</span>
-          <div className="stat-value text-blue">58</div>
+          <div className="stat-value text-blue">{metrics?.attemptedStudents ?? '—'}</div>
           <span className="stat-subtitle">Submissions Recorded</span>
         </div>
         <div className="stat-card">
           <span className="stat-title">EVALUATED</span>
-          <div className="stat-value text-success">58</div>
+          <div className="stat-value text-success">{metrics?.submittedAttempts ?? '—'}</div>
           <span className="stat-subtitle">Graded by Faculty</span>
         </div>
         <div className="stat-card">
           <span className="stat-title">CLASS AVERAGE</span>
-          <div className="stat-value text-orange">84.5%</div>
+          <div className="stat-value text-orange">{metrics?.averagePercentage == null ? 'No submissions' : `${metrics.averagePercentage}%`}</div>
           <span className="stat-subtitle">Performance Rating</span>
         </div>
       </div>

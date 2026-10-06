@@ -1,5 +1,12 @@
 import { supabase } from '../lib/supabase';
 import type { Announcement } from '../data/announcements';
+import { 
+  STORAGE_BUCKETS, 
+  uploadFile, 
+  getSignedUrl, 
+  downloadStorageFile, 
+  sanitizeFileName 
+} from './storageService';
 
 // Helper to map DB row to frontend Announcement
 const mapDBRowToAnnouncement = (row: any): Announcement => {
@@ -15,6 +22,10 @@ const mapDBRowToAnnouncement = (row: any): Announcement => {
     targetAudience: row.target_audience as 'Students' | 'Faculty' | 'Students + Faculty',
     publishedAt: row.published_at ? new Date(row.published_at).toLocaleString() : new Date(row.created_at).toLocaleString(),
     status: row.status === 'PUBLISHED' ? 'Published' : 'Draft',
+    attachmentPath: row.attachment_path || row.storage_path || undefined,
+    attachmentName: row.attachment_name || row.file_name || undefined,
+    attachmentSize: row.attachment_size ? Number(row.attachment_size) : undefined,
+    attachmentType: row.attachment_type || row.mime_type || undefined
   };
 };
 
@@ -133,10 +144,35 @@ export const createDepartmentAnnouncement = async (data: {
   createdBy: string; // Profile UUID
   targetAudience: 'Students' | 'Faculty' | 'Students + Faculty';
   status: 'Published' | 'Draft';
+  file?: File;
 }): Promise<Announcement | null> => {
+  const tempAnnounceId = crypto.randomUUID ? crypto.randomUUID() : `ann-${Date.now()}`;
+  let storagePath: string | null = null;
+  let fileName: string | null = null;
+  let fileSize: number | null = null;
+  let mimeType: string | null = null;
+
+  if (data.file) {
+    fileName = data.file.name;
+    fileSize = data.file.size;
+    mimeType = data.file.type || 'application/pdf';
+    const safeName = sanitizeFileName(data.file.name);
+
+    // Predictable path: announcements/{department_id}/{announcement_id}/{file_name}
+    storagePath = `${data.departmentId}/${tempAnnounceId}/${safeName}`;
+
+    await uploadFile({
+      bucket: STORAGE_BUCKETS.ANNOUNCEMENTS,
+      path: storagePath,
+      file: data.file,
+      upsert: true
+    });
+  }
+
   const { data: inserted, error } = await (supabase as any)
     .from('announcements')
     .insert({
+      id: tempAnnounceId,
       title: data.title,
       content: data.content,
       category: data.category,
@@ -144,7 +180,11 @@ export const createDepartmentAnnouncement = async (data: {
       created_by: data.createdBy,
       target_audience: data.targetAudience,
       status: data.status === 'Published' ? 'PUBLISHED' : 'DRAFT',
-      published_at: data.status === 'Published' ? new Date().toISOString() : null
+      published_at: data.status === 'Published' ? new Date().toISOString() : null,
+      attachment_path: storagePath,
+      attachment_name: fileName,
+      attachment_size: fileSize,
+      attachment_type: mimeType
     })
     .select(`
       *,
@@ -243,4 +283,18 @@ export const markAnnouncementAsRead = async (announcementId: string, userId: str
     return false;
   }
   return true;
+};
+
+/**
+ * Helper to download an announcement attachment from Supabase Storage.
+ */
+export const downloadAnnouncementAttachment = async (storagePath: string, fileName?: string): Promise<void> => {
+  await downloadStorageFile(STORAGE_BUCKETS.ANNOUNCEMENTS, storagePath, fileName);
+};
+
+/**
+ * Get signed URL for announcement attachment
+ */
+export const getAnnouncementAttachmentUrl = async (storagePath: string): Promise<string | null> => {
+  return await getSignedUrl(STORAGE_BUCKETS.ANNOUNCEMENTS, storagePath, 3600);
 };

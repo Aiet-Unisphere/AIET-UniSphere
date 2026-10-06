@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Clock, AlertTriangle, ChevronLeft, ChevronRight, Check } from 'lucide-react';
-import { getAssessmentById, submitAssessmentAnswers } from '../services/assessmentService';
+import { getAssessmentById, startAssessmentAttempt, saveAssessmentAnswer, submitAssessmentAnswers } from '../services/assessmentService';
+import type { Assessment } from '../data/assessments';
 import { AppShell } from '../components/AppShell';
 import { LoadingState } from '../components/LoadingState';
 import { ErrorState } from '../components/ErrorState';
@@ -10,15 +11,17 @@ export const AssessmentAttempt: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
-  const [assessment, setAssessment] = useState<any>(null);
+  const [assessment, setAssessment] = useState<Assessment | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Quiz attempt states
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
-  const [answers, setAnswers] = useState<{ [questionId: number]: number }>({});
+  const [answers, setAnswers] = useState<{ [questionId: string]: number }>({});
   const [timeLeft, setTimeLeft] = useState<number>(0); // in seconds
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSavingAnswer, setIsSavingAnswer] = useState(false);
+  const [submissionError, setSubmissionError] = useState<string | null>(null);
   const [showConfirmSubmit, setShowConfirmSubmit] = useState(false);
 
   const timerRef = useRef<any>(null);
@@ -28,20 +31,33 @@ export const AssessmentAttempt: React.FC = () => {
     setIsLoading(true);
     setError(null);
     try {
-      const data = await getAssessmentById(id);
-      if (!data) {
+      const summary = await getAssessmentById(id);
+      if (!summary) {
         setError("Assessment not found.");
         return;
       }
-      if (data.status === 'Completed') {
+      if (summary.status === 'Completed') {
         // If already completed, redirect to results
         navigate(`/student/assessments/${id}`);
         return;
       }
+      if (summary.status === 'Closed' || summary.status === 'Draft') {
+        setError('This assessment is not currently open for attempts.');
+        return;
+      }
+      const attempt = await startAssessmentAttempt(id);
+      const data = await getAssessmentById(id);
+      if (!data?.questions?.length) {
+        setError('No active assessment questions were returned.');
+        return;
+      }
       setAssessment(data);
-      setTimeLeft(data.duration * 60);
+      setAnswers(data.studentAnswers || {});
+      const elapsedSeconds = Math.floor((Date.now() - new Date(attempt.startedAt).getTime()) / 1000);
+      setTimeLeft(Math.max(0, attempt.durationMinutes * 60 - elapsedSeconds));
     } catch (err) {
-      setError("Unable to load assessment questions. Please try again.");
+      console.error("Assessment attempt initialization error:", err);
+      setError(err instanceof Error ? err.message : "Unable to load assessment questions. Please try again.");
     } finally {
       setIsLoading(false);
     }
@@ -74,11 +90,20 @@ export const AssessmentAttempt: React.FC = () => {
     };
   }, [timeLeft, isLoading, error, assessment]);
 
-  const handleSelectOption = (questionId: number, optionIndex: number) => {
+  const handleSelectOption = async (questionId: string, optionIndex: number) => {
     setAnswers((prev) => ({
       ...prev,
       [questionId]: optionIndex
     }));
+    setIsSavingAnswer(true);
+    setSubmissionError(null);
+    try {
+      await saveAssessmentAnswer(id!, questionId, optionIndex);
+    } catch (error) {
+      setSubmissionError(error instanceof Error ? error.message : 'Unable to save this answer.');
+    } finally {
+      setIsSavingAnswer(false);
+    }
   };
 
   const handlePrev = () => {
@@ -101,7 +126,7 @@ export const AssessmentAttempt: React.FC = () => {
       alert("Time limit exceeded! Your quiz has been auto-submitted.");
       navigate(`/student/assessments/${id}`);
     } catch (err) {
-      alert("Failed to submit assessment answers. Please contact administrator.");
+      setSubmissionError(err instanceof Error ? err.message : 'Failed to submit assessment answers.');
     } finally {
       setIsSubmitting(false);
     }
@@ -115,7 +140,7 @@ export const AssessmentAttempt: React.FC = () => {
       await submitAssessmentAnswers(id, answers);
       navigate(`/student/assessments/${id}`);
     } catch (err) {
-      alert("Failed to submit assessment answers. Please try again.");
+      setSubmissionError(err instanceof Error ? err.message : 'Failed to submit assessment answers.');
     } finally {
       setIsSubmitting(false);
     }
@@ -145,7 +170,7 @@ export const AssessmentAttempt: React.FC = () => {
   }
 
   const currentQuestion = assessment.questions[currentQuestionIndex];
-  const isAnswered = (qId: number) => answers[qId] !== undefined;
+  const isAnswered = (qId: string) => answers[qId] !== undefined;
 
   return (
     <AppShell>
@@ -158,7 +183,7 @@ export const AssessmentAttempt: React.FC = () => {
             <span className="course-code-badge">{assessment.courseName}</span>
             <h2 style={{ fontSize: '1.25rem', marginTop: '0.25rem' }}>{assessment.title}</h2>
           </div>
-          
+
           <div 
             style={{ 
               display: 'flex', 
@@ -177,6 +202,8 @@ export const AssessmentAttempt: React.FC = () => {
           </div>
         </div>
 
+        {submissionError && <div className="form-error-msg" role="alert" style={{ marginTop: '0.75rem' }}>{submissionError}</div>}
+
         {/* Question Index Grid */}
         <div>
           <span style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--brand-dark-grey)', display: 'block', marginBottom: '0.5rem' }}>
@@ -187,6 +214,7 @@ export const AssessmentAttempt: React.FC = () => {
               <button
                 key={q.id}
                 onClick={() => setCurrentQuestionIndex(idx)}
+                disabled={isSavingAnswer || isSubmitting}
                 className={`question-nav-btn ${currentQuestionIndex === idx ? 'active' : ''} ${isAnswered(q.id) ? 'answered' : ''}`}
                 aria-label={`Go to question ${idx + 1}`}
               >
@@ -210,10 +238,13 @@ export const AssessmentAttempt: React.FC = () => {
           {/* Options grid */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
             {currentQuestion.options.map((option: string, optIdx: number) => (
-              <div 
+              <button
+                type="button"
                 key={optIdx}
-                onClick={() => handleSelectOption(currentQuestion.id, optIdx)}
+                onClick={() => void handleSelectOption(currentQuestion.id, optIdx)}
                 className={`option-choice-item ${answers[currentQuestion.id] === optIdx ? 'selected' : ''}`}
+                aria-pressed={answers[currentQuestion.id] === optIdx}
+                disabled={isSavingAnswer || isSubmitting}
               >
                 <div className="option-letter-badge">
                   {String.fromCharCode(65 + optIdx)}
@@ -221,7 +252,7 @@ export const AssessmentAttempt: React.FC = () => {
                 <span style={{ fontSize: '0.925rem', color: 'var(--brand-black)' }}>
                   {option}
                 </span>
-              </div>
+              </button>
             ))}
           </div>
         </div>
@@ -231,7 +262,7 @@ export const AssessmentAttempt: React.FC = () => {
           <div style={{ display: 'flex', gap: '0.75rem' }}>
             <button 
               onClick={handlePrev} 
-              disabled={currentQuestionIndex === 0} 
+              disabled={currentQuestionIndex === 0 || isSavingAnswer || isSubmitting} 
               className="btn btn-secondary"
               style={{ width: 'auto', padding: '0.5rem 1rem', fontSize: '0.875rem' }}
             >
@@ -239,7 +270,7 @@ export const AssessmentAttempt: React.FC = () => {
             </button>
             <button 
               onClick={handleNext} 
-              disabled={currentQuestionIndex === assessment.questions.length - 1} 
+              disabled={currentQuestionIndex === assessment.questions.length - 1 || isSavingAnswer || isSubmitting} 
               className="btn btn-secondary"
               style={{ width: 'auto', padding: '0.5rem 1rem', fontSize: '0.875rem' }}
             >
@@ -251,6 +282,7 @@ export const AssessmentAttempt: React.FC = () => {
             onClick={() => setShowConfirmSubmit(true)} 
             className="btn btn-primary"
             style={{ width: 'auto', padding: '0.5rem 1.5rem', backgroundColor: 'var(--brand-orange)', gap: '0.35rem' }}
+            disabled={isSavingAnswer || isSubmitting}
           >
             <Check size={16} /> Submit Test
           </button>

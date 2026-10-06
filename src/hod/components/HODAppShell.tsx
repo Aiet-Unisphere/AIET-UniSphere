@@ -3,10 +3,10 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { 
   LayoutDashboard, 
   BookOpen, 
-  Users, 
   CalendarCheck, 
   Bell, 
-  Menu, 
+  ChevronLeft,
+  ChevronRight,
   Search, 
   LogOut, 
   UserCheck,
@@ -16,15 +16,24 @@ import {
   Award,
   Clock,
   Megaphone,
-  BarChart2
+  BarChart2,
+  Sparkles,
+  User
 } from 'lucide-react';
 import { AuthLogo } from '../../components/AuthLogo';
 
 import { useAuth } from '../../app/context/AuthContext';
+import { getUnreadNotificationsCount } from '../../services/notificationService';
+import { getSignedUrl, STORAGE_BUCKETS } from '../../services/storageService';
+
+import { UserAvatar } from '../../components/UserAvatar';
 
 interface HODAppShellProps {
   children: React.ReactNode;
 }
+
+// Module-level state to persist sidebar collapse/expand state during route navigation
+let globalHODSidebarState: boolean | null = null;
 
 export const HODAppShell: React.FC<HODAppShellProps> = ({ children }) => {
   const navigate = useNavigate();
@@ -34,11 +43,61 @@ export const HODAppShell: React.FC<HODAppShellProps> = ({ children }) => {
   const deptDisplayName = profile?.department?.name || 'Department not assigned';
   const hodEmail = profile?.email || user?.email || 'N/A';
   
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
+    if (globalHODSidebarState !== null) return globalHODSidebarState;
+    if (typeof window !== 'undefined') {
+      return window.innerWidth >= 768;
+    }
+    return true;
+  });
+
   const [isProfileOpen, setIsProfileOpen] = useState(false);
-  const [unreadNotifications, setUnreadNotifications] = useState(4);
-  
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+
   const profileRef = useRef<HTMLDivElement>(null);
+  const avatarPath = profile?.avatar_path || profile?.avatar_url;
+
+  useEffect(() => {
+    let isMounted = true;
+    const loadAvatar = async () => {
+      if (avatarPath) {
+        const url = await getSignedUrl(STORAGE_BUCKETS.AVATARS, avatarPath, 86400);
+        if (isMounted) setAvatarUrl(url);
+      } else {
+        if (isMounted) setAvatarUrl(null);
+      }
+    };
+    loadAvatar();
+    return () => { isMounted = false; };
+  }, [avatarPath]);
+
+  const fetchUnreadCount = async () => {
+    try {
+      const count = await getUnreadNotificationsCount();
+      setUnreadNotifications(count);
+    } catch (e) {
+      console.error('[HODAppShell] Failed to fetch unread notifications count:', e);
+    }
+  };
+
+  useEffect(() => {
+    fetchUnreadCount();
+    const handleUpdate = () => fetchUnreadCount();
+    window.addEventListener('notifications_updated', handleUpdate);
+    return () => window.removeEventListener('notifications_updated', handleUpdate);
+  }, []);
+
+  // Close dropdown on Escape key
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsProfileOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   // Close dropdown on click outside
   useEffect(() => {
@@ -52,6 +111,21 @@ export const HODAppShell: React.FC<HODAppShellProps> = ({ children }) => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, []);
+
+  const toggleSidebar = () => {
+    setIsSidebarOpen((prev) => {
+      const next = !prev;
+      globalHODSidebarState = next;
+      return next;
+    });
+  };
+
+  const handleNavClick = () => {
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      setIsSidebarOpen(false);
+      globalHODSidebarState = false;
+    }
+  };
 
   const handleLogout = async () => {
     if (confirm("Are you sure you want to sign out from the HOD Portal?")) {
@@ -77,122 +151,125 @@ export const HODAppShell: React.FC<HODAppShellProps> = ({ children }) => {
     { label: 'Results', path: '/hod/results', icon: <Award size={18} /> },
     { label: 'Timetable', path: '/hod/timetable', icon: <Clock size={18} /> },
     { label: 'Announcements', path: '/hod/announcements', icon: <Megaphone size={18} /> },
-    { label: 'Analytics & Reports', path: '/hod/analytics', icon: <BarChart2 size={18} /> }
+    { label: 'Analytics & Reports', path: '/hod/analytics', icon: <BarChart2 size={18} /> },
+    { label: 'AI Assistant', path: '/hod/ai-assistant', icon: <Sparkles size={18} /> }
   ];
 
-  const renderNavList = (items: typeof navDashboard) => (
-    <ul className="sidebar-nav-list" style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-      {items.map((item) => {
-        const isActive = location.pathname === item.path || location.pathname.startsWith(`${item.path}/`);
-        return (
-          <li key={item.path} style={{ marginBottom: '0.35rem' }}>
-            <NavLink
-              to={item.path}
-              className={`sidebar-nav-item ${isActive ? 'active' : ''}`}
-              onClick={() => setIsSidebarOpen(false)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.75rem',
-                padding: '0.65rem 1rem',
-                borderRadius: 'var(--border-radius)',
-                color: isActive ? 'var(--brand-white)' : '#94A3B8',
-                backgroundColor: isActive ? 'var(--brand-orange)' : 'transparent',
-                fontWeight: isActive ? 600 : 500,
-                fontSize: '0.9rem',
-                textDecoration: 'none',
-                transition: 'var(--transition-smooth)'
-              }}
-            >
-              {item.icon}
-              <span>{item.label}</span>
-            </NavLink>
-          </li>
-        );
-      })}
-    </ul>
-  );
+  // Helper to format page title from current pathname
+  const getPageTitle = () => {
+    const path = location.pathname;
+    if (path.includes('/hod/dashboard')) return 'HOD Dashboard';
+    if (path.includes('/hod/faculty')) return 'Faculty Management';
+    if (path.includes('/hod/students')) return 'Student Registry';
+    if (path.includes('/hod/courses')) return 'Department Courses';
+    if (path.includes('/hod/attendance')) return 'Attendance Governance';
+    if (path.includes('/hod/leave')) return 'Leave & Approvals';
+    if (path.includes('/hod/assessments')) return 'Assessment Oversight';
+    if (path.includes('/hod/results')) return 'Academic Results';
+    if (path.includes('/hod/timetable')) return 'Department Timetable';
+    if (path.includes('/hod/announcements')) return 'Announcements';
+    if (path.includes('/hod/analytics')) return 'Analytics & Reports';
+    if (path.includes('/hod/ai-assistant')) return 'HOD AI Assistant';
+    return 'HOD Portal';
+  };
 
   return (
-    <div className="app-shell" style={{ display: 'flex', minHeight: '100vh', backgroundColor: 'var(--brand-light-grey)' }}>
+    <div className={`app-shell student-theme ${isSidebarOpen ? 'sidebar-open' : 'sidebar-collapsed'}`}>
       {/* Mobile Sidebar Overlay */}
-      {isSidebarOpen && (
-        <div 
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(0,0,0,0.5)',
-            zIndex: 40
-          }}
-          onClick={() => setIsSidebarOpen(false)}
-        />
-      )}
+      <div 
+        className={`sidebar-overlay ${isSidebarOpen ? 'open' : ''}`} 
+        onClick={() => {
+          setIsSidebarOpen(false);
+          globalHODSidebarState = false;
+        }}
+        aria-hidden="true"
+      ></div>
 
       {/* Unified Fixed Sidebar */}
-      <aside 
-        className={`app-sidebar ${isSidebarOpen ? 'open' : ''}`}
-        style={{
-          width: '260px',
-          backgroundColor: '#0F172A',
-          color: 'var(--brand-white)',
-          display: 'flex',
-          flexDirection: 'column',
-          position: 'fixed',
-          top: 0,
-          bottom: 0,
-          left: 0,
-          zIndex: 50,
-          boxShadow: 'var(--box-shadow-md)',
-          transition: 'transform 0.3s ease-in-out'
-        }}
-      >
+      <aside className={`app-sidebar ${isSidebarOpen ? 'open' : 'collapsed'}`}>
         {/* Logo Container */}
-        <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
-          <AuthLogo subtext={`HOD PORTAL — ${profile?.department?.code || profile?.department?.name || ''}`} />
+        <div className="app-sidebar-logo-container">
+          <AuthLogo compact subtext="" />
         </div>
 
         {/* Navigation Section Group */}
-        <div style={{ padding: '1.25rem 1rem', flexGrow: 1, overflowY: 'auto' }}>
-          <div style={{ marginBottom: '1.5rem' }}>
-            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748B', letterSpacing: '0.05em', textTransform: 'uppercase', display: 'block', padding: '0 0.5rem 0.5rem 0.5rem' }}>
-              DASHBOARD
-            </span>
-            {renderNavList(navDashboard)}
+        <nav className="app-sidebar-nav">
+          <div className="app-sidebar-group">
+            <div className="app-sidebar-group-title">Dashboard</div>
+            <div className="app-sidebar-menu">
+              {navDashboard.map((item) => (
+                <NavLink
+                  key={item.path}
+                  to={item.path}
+                  title={item.label}
+                  className={({ isActive }) => `app-sidebar-link ${isActive ? 'active' : ''}`}
+                  onClick={handleNavClick}
+                >
+                  {item.icon}
+                  <span>{item.label}</span>
+                </NavLink>
+              ))}
+            </div>
           </div>
 
-          <div style={{ marginBottom: '1.5rem' }}>
-            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748B', letterSpacing: '0.05em', textTransform: 'uppercase', display: 'block', padding: '0 0.5rem 0.5rem 0.5rem' }}>
-              DEPARTMENT MANAGEMENT
-            </span>
-            {renderNavList(navDeptManagement)}
+          <div className="app-sidebar-group">
+            <div className="app-sidebar-group-title">Department Management</div>
+            <div className="app-sidebar-menu">
+              {navDeptManagement.map((item) => (
+                <NavLink
+                  key={item.path}
+                  to={item.path}
+                  title={item.label}
+                  className={({ isActive }) => 
+                    `app-sidebar-link ${
+                      location.pathname === item.path || location.pathname.startsWith(`${item.path}/`) ? 'active' : ''
+                    }`
+                  }
+                  onClick={handleNavClick}
+                >
+                  {item.icon}
+                  <span>{item.label}</span>
+                </NavLink>
+              ))}
+            </div>
           </div>
 
-          <div style={{ marginBottom: '1.5rem' }}>
-            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748B', letterSpacing: '0.05em', textTransform: 'uppercase', display: 'block', padding: '0 0.5rem 0.5rem 0.5rem' }}>
-              ACADEMIC GOVERNANCE
-            </span>
-            {renderNavList(navAcademicGovernance)}
+          <div className="app-sidebar-group">
+            <div className="app-sidebar-group-title">Academic Governance</div>
+            <div className="app-sidebar-menu">
+              {navAcademicGovernance.map((item) => (
+                <NavLink
+                  key={item.path}
+                  to={item.path}
+                  title={item.label}
+                  className={({ isActive }) => 
+                    `app-sidebar-link ${
+                      location.pathname === item.path || location.pathname.startsWith(`${item.path}/`) ? 'active' : ''
+                    }`
+                  }
+                  onClick={handleNavClick}
+                >
+                  {item.icon}
+                  <span>{item.label}</span>
+                </NavLink>
+              ))}
+            </div>
           </div>
-        </div>
+        </nav>
 
         {/* Sidebar Footer — Sign Out */}
         <div style={{ padding: '1rem', borderTop: '1px solid rgba(255, 255, 255, 0.08)' }}>
           <button
             onClick={handleLogout}
+            className="app-sidebar-link"
+            title="Sign Out"
             style={{
               width: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.75rem',
-              padding: '0.6rem 1rem',
-              backgroundColor: 'transparent',
+              background: 'none',
               border: 'none',
-              borderRadius: 'var(--border-radius)',
-              color: '#94A3B8',
-              fontSize: '0.875rem',
-              fontWeight: 500,
               cursor: 'pointer',
-              transition: 'var(--transition-smooth)'
+              justifyContent: 'flex-start',
+              textAlign: 'left'
             }}
           >
             <LogOut size={18} />
@@ -202,41 +279,23 @@ export const HODAppShell: React.FC<HODAppShellProps> = ({ children }) => {
       </aside>
 
       {/* Main Layout Area */}
-      <div style={{ flexGrow: 1, marginLeft: '260px', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+      <div className={`app-main ${isSidebarOpen ? 'sidebar-open' : 'sidebar-collapsed'}`}>
         {/* Sticky Header Topbar */}
-        <header 
-          style={{
-            height: '64px',
-            backgroundColor: 'var(--brand-white)',
-            borderBottom: '1px solid rgba(156, 163, 175, 0.2)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '0 1.5rem',
-            position: 'sticky',
-            top: 0,
-            zIndex: 30
-          }}
-        >
-          {/* Mobile Hamburger Toggle & Title */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+        <header className="app-header">
+          {/* Header Left: Toggle Button & Title */}
+          <div className="header-left" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <button 
-              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-              style={{
-                display: 'none',
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                color: 'var(--brand-black)'
-              }}
-              className="mobile-menu-btn"
+              className="sidebar-toggle-btn" 
+              onClick={toggleSidebar}
+              aria-label={isSidebarOpen ? "Collapse navigation menu" : "Expand navigation menu"}
+              title={isSidebarOpen ? "Collapse navigation" : "Expand navigation"}
             >
-              <Menu size={22} />
+              {isSidebarOpen ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}
             </button>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
               <span className="badge badge-graded" style={{ fontSize: '0.75rem' }}>{profile?.department?.code || profile?.department?.name || 'DEPARTMENT'}</span>
               <h2 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--brand-black)', margin: 0, fontFamily: 'var(--font-display)' }}>
-                Department Head Portal
+                {getPageTitle()}
               </h2>
             </div>
           </div>
@@ -255,68 +314,50 @@ export const HODAppShell: React.FC<HODAppShellProps> = ({ children }) => {
 
             {/* Notification Bell */}
             <button 
-              onClick={() => navigate('/hod/attendance')}
-              style={{
-                position: 'relative',
-                background: 'none',
-                border: 'none',
-                color: 'var(--brand-dark-grey)',
-                cursor: 'pointer',
-                padding: '0.4rem',
-                borderRadius: '50%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center'
-              }}
+              className="header-action-btn"
+              onClick={() => navigate('/hod/notifications')}
               title="Department Notifications"
+              style={{ position: 'relative' }}
             >
               <Bell size={20} />
               {unreadNotifications > 0 && (
                 <span 
+                  className="notification-badge"
                   style={{
                     position: 'absolute',
-                    top: '2px',
-                    right: '2px',
-                    width: '8px',
-                    height: '8px',
+                    top: '-2px',
+                    right: '-2px',
                     backgroundColor: 'var(--brand-orange)',
-                    borderRadius: '50%'
+                    color: '#ffffff',
+                    fontSize: '0.65rem',
+                    fontWeight: 700,
+                    borderRadius: '50%',
+                    minWidth: '16px',
+                    height: '16px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '0 2px'
                   }}
-                />
+                >
+                  {unreadNotifications > 99 ? '99+' : unreadNotifications}
+                </span>
               )}
             </button>
 
             {/* Profile Dropdown */}
-            <div style={{ position: 'relative' }} ref={profileRef}>
+            <div className="profile-menu-container" ref={profileRef}>
               <button
+                className="profile-trigger"
                 onClick={() => setIsProfileOpen(!isProfileOpen)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.65rem',
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  padding: '0.35rem 0.6rem',
-                  borderRadius: 'var(--border-radius)'
-                }}
+                aria-expanded={isProfileOpen}
+                aria-label="Open profile menu"
               >
-                <div 
-                  style={{
-                    width: '34px',
-                    height: '34px',
-                    borderRadius: '50%',
-                    backgroundColor: 'var(--brand-orange)',
-                    color: 'var(--brand-white)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontWeight: 700,
-                    fontSize: '0.85rem'
-                  }}
-                >
-                  {(hodName.split(' ').map((n: string) => n[0]).join('')).substring(0, 2)}
-                </div>
+                <UserAvatar
+                  name={hodName}
+                  avatarPath={profile?.avatar_path || profile?.avatar_url}
+                  size="sm"
+                />
                 <div style={{ textAlign: 'left', display: 'flex', flexDirection: 'column' }}>
                   <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--brand-black)', lineHeight: 1.2 }}>
                     {hodName}
@@ -330,45 +371,55 @@ export const HODAppShell: React.FC<HODAppShellProps> = ({ children }) => {
 
               {/* Profile Menu Dropdown */}
               {isProfileOpen && (
-                <div 
-                  style={{
-                    position: 'absolute',
-                    right: 0,
-                    top: 'calc(100% + 8px)',
-                    width: '220px',
-                    backgroundColor: 'var(--brand-white)',
-                    borderRadius: 'var(--border-radius)',
-                    boxShadow: 'var(--box-shadow-lg)',
-                    border: '1px solid rgba(156, 163, 175, 0.2)',
-                    padding: '0.5rem',
-                    zIndex: 60
-                  }}
-                >
-                  <div style={{ padding: '0.5rem', borderBottom: '1px solid rgba(156, 163, 175, 0.2)', marginBottom: '0.35rem' }}>
-                    <div style={{ fontWeight: 700, fontSize: '0.875rem', color: 'var(--brand-black)' }}>{hodName}</div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--brand-dark-grey)' }}>{hodEmail}</div>
+                <div className="profile-dropdown" style={{ minWidth: '220px' }}>
+                  <div className="dropdown-header" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.85rem 1rem', borderBottom: '1px solid rgba(156, 163, 175, 0.15)' }}>
+                    <div style={{ width: '36px', height: '36px', borderRadius: '50%', overflow: 'hidden', flexShrink: 0, backgroundColor: 'var(--brand-orange)', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '0.85rem' }}>
+                      {avatarUrl ? (
+                        <img 
+                          src={avatarUrl} 
+                          alt={hodName} 
+                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          onError={() => setAvatarUrl(null)}
+                        />
+                      ) : (
+                        (hodName.split(' ').map((n: string) => n[0]).join('')).substring(0, 2)
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', textAlign: 'left' }}>
+                      <span style={{ fontWeight: 700, fontSize: '0.875rem', color: 'var(--brand-black)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {hodName}
+                      </span>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--brand-dark-grey)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {hodEmail}
+                      </span>
+                    </div>
                   </div>
 
-                  <button
-                    onClick={handleLogout}
-                    style={{
-                      width: '100%',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.5rem',
-                      padding: '0.5rem',
-                      backgroundColor: 'transparent',
-                      border: 'none',
-                      borderRadius: '4px',
-                      color: 'var(--color-error)',
-                      fontSize: '0.825rem',
-                      fontWeight: 600,
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <LogOut size={16} />
-                    <span>Sign Out</span>
-                  </button>
+                  <div style={{ padding: '0.35rem 0' }}>
+                    <button
+                      className="dropdown-item"
+                      onClick={() => {
+                        setIsProfileOpen(false);
+                        navigate('/hod/profile');
+                      }}
+                      style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', padding: '0.6rem 1rem', width: '100%', border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left', fontSize: '0.875rem', color: 'var(--brand-black)', fontWeight: 600 }}
+                    >
+                      <User size={16} />
+                      <span>Profile</span>
+                    </button>
+
+                    <button
+                      className="dropdown-item"
+                      onClick={() => {
+                        setIsProfileOpen(false);
+                        handleLogout();
+                      }}
+                      style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', padding: '0.6rem 1rem', width: '100%', border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left', fontSize: '0.875rem', color: 'var(--color-error)', fontWeight: 600 }}
+                    >
+                      <LogOut size={16} />
+                      <span>Sign Out</span>
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -376,7 +427,7 @@ export const HODAppShell: React.FC<HODAppShellProps> = ({ children }) => {
         </header>
 
         {/* Page Main Content Area */}
-        <main style={{ flexGrow: 1, padding: '1.75rem 2rem', overflowY: 'auto' }}>
+        <main className="app-content">
           {children}
         </main>
       </div>

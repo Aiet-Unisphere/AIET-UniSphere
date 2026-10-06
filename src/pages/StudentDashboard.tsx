@@ -167,33 +167,58 @@ export const StudentDashboard: React.FC = () => {
               <span style={{ fontSize: '0.75rem', color: 'var(--brand-dark-grey)', fontWeight: 600 }}>Urgent Tasks</span>
             </div>
             <div className="priority-list">
-              <div className="priority-item high-priority">
-                <div className="priority-details">
-                  <span className="priority-title">Database Systems Assignment 04</span>
-                  <span className="priority-meta">Due Today · 6:00 PM · Database Management Systems</span>
-                </div>
-                <button 
-                  onClick={() => navigate('/student/assignments/assign-dbms-04')}
-                  className="btn btn-primary" 
-                  style={{ width: 'auto', padding: '0.4rem 0.85rem', fontSize: '0.8rem', backgroundColor: 'var(--brand-orange)' }}
-                >
-                  Submit
-                </button>
-              </div>
+              {(() => {
+                const urgentAssigns = assignments.filter(a => a.status === 'Pending').slice(0, 2);
+                const urgentAssess = assessments.filter(a => a.status === 'Upcoming' || a.status === 'Active').slice(0, 2);
 
-              <div className="priority-item">
-                <div className="priority-details">
-                  <span className="priority-title">Database Systems — Unit Test 2</span>
-                  <span className="priority-meta">Tomorrow · 10:00 AM · 60 minutes · 20 Questions</span>
-                </div>
-                <button 
-                  onClick={() => navigate('/student/assessments/assess-dbms-ut2')}
-                  className="btn btn-secondary" 
-                  style={{ width: 'auto', padding: '0.4rem 0.85rem', fontSize: '0.8rem' }}
-                >
-                  Details
-                </button>
-              </div>
+                if (urgentAssigns.length === 0 && urgentAssess.length === 0) {
+                  return (
+                    <p style={{ fontSize: '0.85rem', color: 'var(--brand-dark-grey)', padding: '0.5rem 0' }}>
+                      No urgent priorities for today.
+                    </p>
+                  );
+                }
+
+                return (
+                  <>
+                    {urgentAssigns.map((assign) => (
+                      <div key={assign.id} className="priority-item high-priority">
+                        <div className="priority-details">
+                          <span className="priority-title">{assign.title}</span>
+                          <span className="priority-meta">
+                            {assign.dueDate ? `Due: ${new Date(assign.dueDate).toLocaleDateString()}` : 'Pending Submission'} · {assign.courseName}
+                          </span>
+                        </div>
+                        <button 
+                          onClick={() => navigate(`/student/assignments/${assign.id}`)}
+                          className="btn btn-primary" 
+                          style={{ width: 'auto', padding: '0.4rem 0.85rem', fontSize: '0.8rem', backgroundColor: 'var(--brand-orange)' }}
+                        >
+                          Submit
+                        </button>
+                      </div>
+                    ))}
+
+                    {urgentAssess.map((assess) => (
+                      <div key={assess.id} className="priority-item">
+                        <div className="priority-details">
+                          <span className="priority-title">{assess.title}</span>
+                          <span className="priority-meta">
+                            {assess.availableFrom ? `Available: ${new Date(assess.availableFrom).toLocaleDateString()}` : 'Upcoming Test'} · {assess.courseName}
+                          </span>
+                        </div>
+                        <button 
+                          onClick={() => navigate(`/student/assessments/${assess.id}`)}
+                          className="btn btn-secondary" 
+                          style={{ width: 'auto', padding: '0.4rem 0.85rem', fontSize: '0.8rem' }}
+                        >
+                          Details
+                        </button>
+                      </div>
+                    ))}
+                  </>
+                );
+              })()}
             </div>
           </div>
 
@@ -215,17 +240,23 @@ export const StudentDashboard: React.FC = () => {
                 View All Courses
               </button>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.15rem' }}>
-              {courses.slice(0, 3).map((course) => (
-                <div key={course.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-                  <div style={{ display: 'flex', justifyItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>{course.name}</span>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--brand-dark-grey)', fontWeight: 600 }}>{course.code}</span>
+            {courses.length === 0 ? (
+              <p style={{ fontSize: '0.85rem', color: 'var(--brand-dark-grey)', padding: '0.5rem 0' }}>
+                No active enrolled courses.
+              </p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.15rem' }}>
+                {courses.slice(0, 3).map((course) => (
+                  <div key={course.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                    <div style={{ display: 'flex', justifyItems: 'center', justifyContent: 'space-between' }}>
+                      <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>{course.name}</span>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--brand-dark-grey)', fontWeight: 600 }}>{course.code}</span>
+                    </div>
+                    <ProgressBar progress={course.progress || 0} showPercentage={true} />
                   </div>
-                  <ProgressBar progress={course.progress} showPercentage={true} />
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
 
         </div>
@@ -245,26 +276,32 @@ export const StudentDashboard: React.FC = () => {
                 View Attendance
               </button>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-              {attendance?.subjects.slice(0, 4).map((sub: any) => (
-                <div key={sub.code} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.875rem' }}>
-                  <span style={{ color: 'var(--brand-black)', fontWeight: 500, textAlign: 'left', flexGrow: 1, paddingRight: '0.5rem' }}>
-                    {sub.subject.length > 25 ? `${sub.subject.substring(0, 25)}...` : sub.subject}
-                  </span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexShrink: 0 }}>
-                    <span style={{ fontWeight: 600, color: sub.percentage < 80 ? 'var(--color-error)' : 'var(--brand-black)' }}>
-                      {sub.percentage}%
+            {!attendance?.subjects?.length ? (
+              <p style={{ fontSize: '0.85rem', color: 'var(--brand-dark-grey)', padding: '0.5rem 0' }}>
+                No attendance records available.
+              </p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                {attendance.subjects.slice(0, 4).map((sub: any) => (
+                  <div key={sub.code} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.875rem' }}>
+                    <span style={{ color: 'var(--brand-black)', fontWeight: 500, textAlign: 'left', flexGrow: 1, paddingRight: '0.5rem' }}>
+                      {sub.subject.length > 25 ? `${sub.subject.substring(0, 25)}...` : sub.subject}
                     </span>
-                    <span 
-                      className={`badge ${sub.percentage < 80 ? 'badge-overdue' : 'badge-graded'}`}
-                      style={{ padding: '0.15rem 0.45rem', fontSize: '0.7rem' }}
-                    >
-                      {sub.percentage < 80 ? 'Monitor' : 'Good'}
-                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexShrink: 0 }}>
+                      <span style={{ fontWeight: 600, color: sub.percentage < 80 ? 'var(--color-error)' : 'var(--brand-black)' }}>
+                        {sub.percentage}%
+                      </span>
+                      <span 
+                        className={`badge ${sub.percentage < 80 ? 'badge-overdue' : 'badge-graded'}`}
+                        style={{ padding: '0.15rem 0.45rem', fontSize: '0.7rem' }}
+                      >
+                        {sub.percentage < 80 ? 'Monitor' : 'Good'}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Pending Assignments */}
@@ -279,35 +316,41 @@ export const StudentDashboard: React.FC = () => {
                 View Assignments
               </button>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-              {assignments.filter(a => a.status === 'Pending').slice(0, 2).map((assign) => (
-                <div 
-                  key={assign.id} 
-                  onClick={() => navigate(`/student/assignments/${assign.id}`)}
-                  style={{ 
-                    display: 'flex', 
-                    flexDirection: 'column', 
-                    gap: '0.2rem', 
-                    textAlign: 'left', 
-                    cursor: 'pointer',
-                    padding: '0.5rem',
-                    borderRadius: '4px',
-                    transition: 'var(--transition-smooth)'
-                  }}
-                  className="priority-item-interactive"
-                >
-                  <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--brand-black)' }}>
-                    {assign.title.split(' — ')[1] || assign.title}
-                  </span>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--brand-dark-grey)' }}>
-                    <span>{assign.courseName}</span>
-                    <span style={{ color: 'var(--color-error)', fontWeight: 600 }}>
-                      {assign.id === 'assign-dbms-04' ? 'Due Today' : 'Due Tomorrow'}
+            {assignments.filter(a => a.status === 'Pending').length === 0 ? (
+              <p style={{ fontSize: '0.85rem', color: 'var(--brand-dark-grey)', padding: '0.5rem 0' }}>
+                No pending assignments.
+              </p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                {assignments.filter(a => a.status === 'Pending').slice(0, 3).map((assign) => (
+                  <div 
+                    key={assign.id} 
+                    onClick={() => navigate(`/student/assignments/${assign.id}`)}
+                    style={{ 
+                      display: 'flex', 
+                      flexDirection: 'column', 
+                      gap: '0.2rem', 
+                      textAlign: 'left', 
+                      cursor: 'pointer',
+                      padding: '0.5rem',
+                      borderRadius: '4px',
+                      transition: 'var(--transition-smooth)'
+                    }}
+                    className="priority-item-interactive"
+                  >
+                    <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--brand-black)' }}>
+                      {assign.title}
                     </span>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--brand-dark-grey)' }}>
+                      <span>{assign.courseName}</span>
+                      <span style={{ color: 'var(--color-error)', fontWeight: 600 }}>
+                        {assign.dueDate ? new Date(assign.dueDate).toLocaleDateString() : 'Pending'}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Upcoming Assessments */}
@@ -322,33 +365,39 @@ export const StudentDashboard: React.FC = () => {
                 View Assessments
               </button>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-              {assessments.filter(a => a.status === 'Upcoming').slice(0, 2).map((assess) => (
-                <div 
-                  key={assess.id} 
-                  onClick={() => navigate(`/student/assessments/${assess.id}`)}
-                  style={{ 
-                    display: 'flex', 
-                    flexDirection: 'column', 
-                    gap: '0.2rem', 
-                    textAlign: 'left', 
-                    cursor: 'pointer',
-                    padding: '0.5rem',
-                    borderRadius: '4px'
-                  }}
-                >
-                  <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--brand-black)' }}>
-                    {assess.title}
-                  </span>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--brand-dark-grey)' }}>
-                    <span>{assess.courseName}</span>
-                    <span style={{ fontWeight: 600, color: 'var(--brand-blue)' }}>
-                      {assess.time}
+            {assessments.filter(a => a.status === 'Upcoming' || a.status === 'Active').length === 0 ? (
+              <p style={{ fontSize: '0.85rem', color: 'var(--brand-dark-grey)', padding: '0.5rem 0' }}>
+                No upcoming assessments.
+              </p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                {assessments.filter(a => a.status === 'Upcoming' || a.status === 'Active').slice(0, 3).map((assess) => (
+                  <div 
+                    key={assess.id} 
+                    onClick={() => navigate(`/student/assessments/${assess.id}`)}
+                    style={{ 
+                      display: 'flex', 
+                      flexDirection: 'column', 
+                      gap: '0.2rem', 
+                      textAlign: 'left', 
+                      cursor: 'pointer',
+                      padding: '0.5rem',
+                      borderRadius: '4px'
+                    }}
+                  >
+                    <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--brand-black)' }}>
+                      {assess.title}
                     </span>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--brand-dark-grey)' }}>
+                      <span>{assess.courseName}</span>
+                      <span style={{ fontWeight: 600, color: 'var(--brand-orange)' }}>
+                        {assess.availableFrom ? new Date(assess.availableFrom).toLocaleDateString() : 'Upcoming'}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
 
         </div>

@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { AppShell } from '../components/AppShell';
-import { User, Phone, Calendar, MapPin, Save, AlertCircle, CheckCircle2, ShieldCheck, BookOpen, UserCheck } from 'lucide-react';
+import { User, Phone, Calendar, MapPin, Save, AlertCircle, CheckCircle2, ShieldCheck, BookOpen, UserCheck, Camera, Upload } from 'lucide-react';
 import { useAuth } from '../app/context/AuthContext';
-import { getStudentFullProfile, updateStudentProfile } from '../services/studentService';
+import { getStudentFullProfile, updateStudentProfile, uploadUserAvatar, getUserAvatarSignedUrl } from '../services/studentService';
 
 export const StudentProfilePage: React.FC = () => {
   const { profile: authProfile, user, refreshProfile } = useAuth();
@@ -26,6 +26,12 @@ export const StudentProfilePage: React.FC = () => {
   const [academicYear, setAcademicYear] = useState('');
   const [cgpa, setCgpa] = useState<string>('');
 
+  // Avatar state
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarPreviewUrl, setAvatarPreviewUrl] = useState<string | null>(null);
+  const [avatarSignedUrl, setAvatarSignedUrl] = useState<string | null>(null);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+
   const loadData = async () => {
     setLoading(true);
     try {
@@ -45,6 +51,12 @@ export const StudentProfilePage: React.FC = () => {
         setAcademicYear(sp.academic_year || '');
         setCgpa(sp.cgpa != null ? String(sp.cgpa) : '');
       }
+
+      const currentAvatarPath = authProfile?.avatar_path || authProfile?.avatar_url;
+      if (currentAvatarPath) {
+        const signed = await getUserAvatarSignedUrl(currentAvatarPath);
+        setAvatarSignedUrl(signed);
+      }
     } catch (err) {
       console.error("Error loading student profile:", err);
     } finally {
@@ -54,7 +66,36 @@ export const StudentProfilePage: React.FC = () => {
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [authProfile?.avatar_path, authProfile?.avatar_url]);
+
+  const handleAvatarFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      setAvatarFile(file);
+      setAvatarPreviewUrl(URL.createObjectURL(file));
+    }
+  };
+
+  const handleUploadAvatar = async () => {
+    if (!avatarFile || !user?.id) return;
+    setUploadingAvatar(true);
+    setErrorMsg(null);
+    try {
+      const result = await uploadUserAvatar(avatarFile);
+      setSuccessMsg("Profile photo uploaded and updated successfully.");
+      setAvatarFile(null);
+      setAvatarPreviewUrl(null);
+      if (refreshProfile) {
+        await refreshProfile();
+      }
+      setAvatarSignedUrl(result.signedUrl);
+    } catch (err: any) {
+      console.error("Avatar upload failed:", err);
+      setErrorMsg(err.message || "Failed to upload avatar photo.");
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -141,6 +182,68 @@ export const StudentProfilePage: React.FC = () => {
       ) : (
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           
+          {/* SECTION 0: PROFILE PHOTO / AVATAR */}
+          <div className="dashboard-panel">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem', borderBottom: '1px solid rgba(156, 163, 175, 0.2)', paddingBottom: '0.75rem' }}>
+              <Camera size={20} style={{ color: 'var(--brand-orange)' }} />
+              <h2 className="panel-title font-display" style={{ margin: 0 }}>Student Profile Photo</h2>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap' }}>
+              <div style={{
+                width: '90px',
+                height: '90px',
+                borderRadius: '50%',
+                overflow: 'hidden',
+                backgroundColor: '#E2E8F0',
+                border: '3px solid var(--brand-blue)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0
+              }}>
+                {avatarPreviewUrl || avatarSignedUrl ? (
+                  <img 
+                    src={avatarPreviewUrl || avatarSignedUrl || ''} 
+                    alt="Student Avatar" 
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+                  />
+                ) : (
+                  <User size={42} style={{ color: '#94A3B8' }} />
+                )}
+              </div>
+
+              <div style={{ flex: 1, minWidth: '220px' }}>
+                <div style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--brand-black)', marginBottom: '0.25rem' }}>
+                  Upload Verified Photo
+                </div>
+                <div style={{ fontSize: '0.8rem', color: 'var(--brand-dark-grey)', marginBottom: '0.75rem' }}>
+                  Allowed formats: PNG, JPEG, WEBP. Max file size: 5MB. Stored securely in Supabase Storage.
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                  <input 
+                    type="file" 
+                    accept="image/png,image/jpeg,image/webp" 
+                    onChange={handleAvatarFileChange} 
+                    style={{ fontSize: '0.85rem' }} 
+                  />
+                  {avatarFile && (
+                    <button
+                      type="button"
+                      onClick={handleUploadAvatar}
+                      disabled={uploadingAvatar}
+                      className="btn btn-primary font-sans"
+                      style={{ padding: '0.4rem 0.85rem', fontSize: '0.85rem' }}
+                    >
+                      <Upload size={14} />
+                      <span>{uploadingAvatar ? 'Uploading...' : 'Save Photo'}</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* SECTION 1: SYSTEM MANAGED IDENTITY */}
           <div className="dashboard-panel">
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem', borderBottom: '1px solid rgba(156, 163, 175, 0.2)', paddingBottom: '0.75rem' }}>

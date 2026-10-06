@@ -1,6 +1,14 @@
 import React from 'react';
-import { BookOpen, FileText, HelpCircle, Award } from 'lucide-react';
-import type { QuickActionItem } from '../data/aiConversations';
+import { BookOpen, FileText, HelpCircle, Award, Target, Calendar, RefreshCw, Code, BarChart2, CalendarOff, Bell } from 'lucide-react';
+
+interface QuickActionItem {
+  id: string;
+  label: string;
+  prompt: string;
+  // Supports both old (iconName) and new (icon) format
+  iconName?: string;
+  icon?: string;
+}
 
 interface AIQuickActionProps {
   quickActions: QuickActionItem[];
@@ -8,14 +16,21 @@ interface AIQuickActionProps {
 }
 
 export const AIQuickAction: React.FC<AIQuickActionProps> = ({ quickActions, onSelectAction }) => {
-  const getIcon = (name: string) => {
+  const getIcon = (iconNameOrIcon: string | undefined) => {
+    const name = iconNameOrIcon || '';
     switch (name) {
-      case 'BookOpen':
-        return <BookOpen size={16} className="text-orange" />;
-      case 'FileText':
-        return <FileText size={16} className="text-blue" />;
-      case 'HelpCircle':
-        return <HelpCircle size={16} className="text-orange" />;
+      case 'BookOpen': case 'book-open': return <BookOpen size={16} className="text-orange" />;
+      case 'FileText': case 'file-text': return <FileText size={16} className="text-blue" />;
+      case 'HelpCircle': case 'help-circle': return <HelpCircle size={16} className="text-orange" />;
+      case 'target': return <Target size={16} className="text-blue" />;
+      case 'calendar': return <Calendar size={16} className="text-orange" />;
+      case 'refresh-cw': return <RefreshCw size={16} className="text-blue" />;
+      case 'code': return <Code size={16} className="text-orange" />;
+      case 'clipboard-check': return <FileText size={16} className="text-blue" />;
+      // Phase 1 quick action icons
+      case 'bar-chart-2': return <BarChart2 size={16} className="text-orange" />;
+      case 'calendar-off': return <CalendarOff size={16} className="text-blue" />;
+      case 'bell': return <Bell size={16} className="text-orange" />;
       case 'Award':
       default:
         return <Award size={16} className="text-blue" />;
@@ -33,7 +48,7 @@ export const AIQuickAction: React.FC<AIQuickActionProps> = ({ quickActions, onSe
             onClick={() => onSelectAction(qa.prompt)}
           >
             <div className="qa-icon-wrapper">
-              {getIcon(qa.iconName)}
+              {getIcon(qa.iconName || qa.icon)}
             </div>
             <div className="qa-content">
               <span className="qa-label">{qa.label}</span>

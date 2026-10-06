@@ -19,6 +19,10 @@ export interface AttendanceHistoryItem {
 export interface AttendanceTrend {
   month: string;
   percentage: number;
+  conducted?: number;
+  present?: number;
+  late?: number;
+  absent?: number;
 }
 
 export interface AttendanceSummary {
@@ -26,11 +30,23 @@ export interface AttendanceSummary {
   subjects: AttendanceSubject[];
   history: AttendanceHistoryItem[];
   trend: AttendanceTrend[];
+  counts?: {
+    totalConducted: number;
+    present: number;
+    late: number;
+    absent: number;
+  };
 }
 
 export const mockAttendance: AttendanceSummary = {
   overallPercentage: 0,
   subjects: [],
   trend: [],
-  history: []
+  history: [],
+  counts: {
+    totalConducted: 0,
+    present: 0,
+    late: 0,
+    absent: 0
+  }
 };

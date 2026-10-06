@@ -15,12 +15,13 @@ import {
 } from 'lucide-react';
 import { HODAppShell } from '../components/HODAppShell';
 import { StatCard } from '../../components/StatCard';
+import { EmptyState } from '../../components/EmptyState';
 import { 
   getDepartmentOverview, 
   getDepartmentActivityLogs, 
   getDepartmentAttendanceMetrics
 } from '../../services/departmentService';
-import type { DepartmentOverview } from '../../services/departmentService';
+import type { DepartmentOverview, DepartmentAttendanceMetrics } from '../../services/departmentService';
 
 import { useAuth } from '../../app/context/AuthContext';
 
@@ -74,43 +75,57 @@ export const HODDashboard: React.FC = () => {
 
   const hodName = authProfile?.full_name || user?.email?.split('@')[0] || overview.hodName || 'Head of Department';
   const deptDisplayName = authProfile?.department?.name || 'Department not assigned';
+  const lowAttendanceStudents: DepartmentAttendanceMetrics['lowAttendanceStudents'] = attendanceData?.lowAttendanceStudents || [];
 
   return (
     <HODAppShell>
       {/* Page Header */}
-      <div style={{ marginBottom: '1.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
-            <span className="badge badge-active font-mono">DEPARTMENT HEAD DASHBOARD</span>
-            <span className="badge badge-graded font-mono">AY {overview.academicYear}</span>
-          </div>
-          <h1 className="font-display" style={{ fontSize: '1.85rem', fontWeight: 800, color: 'var(--brand-black)', margin: 0 }}>
-            {getGreeting()}, {hodName} 👋
-          </h1>
-          <p style={{ fontSize: '0.925rem', color: 'var(--brand-dark-grey)', marginTop: '0.2rem' }}>
-            {deptDisplayName} — Academic Operations & Governance
-          </p>
+      <div style={{ marginBottom: '1.5rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+          <span className="badge badge-active font-mono">DEPARTMENT HEAD DASHBOARD</span>
+          <span className="badge badge-graded font-mono">AY {overview.academicYear}</span>
         </div>
+        <h1 className="font-display" style={{ fontSize: '1.85rem', fontWeight: 800, color: 'var(--brand-black)', margin: 0 }}>
+          {getGreeting()}, {hodName} 👋
+        </h1>
+        <p style={{ fontSize: '0.925rem', color: 'var(--brand-dark-grey)', marginTop: '0.2rem' }}>
+          {deptDisplayName} — Academic Operations & Governance
+        </p>
+      </div>
 
-        {/* Quick Action Navigation Buttons */}
-        <div style={{ display: 'flex', gap: '0.65rem', flexWrap: 'wrap' }}>
-          <button onClick={() => navigate('/hod/faculty')} className="btn btn-secondary" style={{ fontSize: '0.85rem' }}>
-            <UserCheck size={16} />
-            <span>View Faculty</span>
-          </button>
-          <button onClick={() => navigate('/hod/students')} className="btn btn-secondary" style={{ fontSize: '0.85rem' }}>
-            <GraduationCap size={16} />
-            <span>View Students</span>
-          </button>
-          <button onClick={() => navigate('/hod/courses')} className="btn btn-secondary" style={{ fontSize: '0.85rem' }}>
-            <BookOpen size={16} />
-            <span>View Courses</span>
-          </button>
-          <button onClick={() => navigate('/hod/attendance')} className="btn btn-primary" style={{ fontSize: '0.85rem' }}>
-            <CalendarCheck size={16} />
-            <span>View Attendance</span>
-          </button>
-        </div>
+      {/* Quick Action Navigation Grid (2x2) */}
+      <div className="hod-quick-actions-grid">
+        <button 
+          onClick={() => navigate('/hod/faculty')} 
+          className="hod-quick-action-card"
+        >
+          <UserCheck size={21} style={{ flexShrink: 0 }} />
+          <span>View Faculty</span>
+        </button>
+
+        <button 
+          onClick={() => navigate('/hod/students')} 
+          className="hod-quick-action-card"
+        >
+          <GraduationCap size={21} style={{ flexShrink: 0 }} />
+          <span>View Students</span>
+        </button>
+
+        <button 
+          onClick={() => navigate('/hod/courses')} 
+          className="hod-quick-action-card"
+        >
+          <BookOpen size={21} style={{ flexShrink: 0 }} />
+          <span>View Courses</span>
+        </button>
+
+        <button 
+          onClick={() => navigate('/hod/attendance')} 
+          className="hod-quick-action-card primary"
+        >
+          <CalendarCheck size={21} style={{ flexShrink: 0 }} />
+          <span>View Attendance</span>
+        </button>
       </div>
 
       {/* 6 Key Department Overview Stat Cards */}
@@ -118,13 +133,13 @@ export const HODDashboard: React.FC = () => {
         <StatCard
           title="TOTAL FACULTY"
           value={overview.totalFaculty}
-          subtitle="24 Active Members"
+          subtitle={`${overview.activeFacultyCount} active accounts`}
           icon={<UserCheck size={22} />}
         />
         <StatCard
           title="TOTAL STUDENTS"
           value={overview.totalStudents}
-          subtitle="Enrolled Across 4 Semesters"
+          subtitle={`${overview.activeStudents} active accounts`}
           icon={<GraduationCap size={22} />}
         />
         <StatCard
@@ -136,7 +151,7 @@ export const HODDashboard: React.FC = () => {
         <StatCard
           title="DEPT ATTENDANCE"
           value={`${overview.overallAttendancePercent}%`}
-          subtitle="Healthy Threshold (≥80%)"
+          subtitle="Calculated from recorded sessions"
           icon={<CalendarCheck size={22} />}
         />
         <StatCard
@@ -173,38 +188,31 @@ export const HODDashboard: React.FC = () => {
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem', marginBottom: '1.25rem' }}>
             <div style={{ backgroundColor: 'var(--brand-light-grey)', padding: '1rem', borderRadius: 'var(--border-radius)', border: '1px solid rgba(156, 163, 175, 0.2)' }}>
-              <span className="text-dark-grey" style={{ fontSize: '0.75rem', fontWeight: 600 }}>ACTIVE TODAY</span>
-              <div style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--brand-black)', marginTop: '0.2rem' }}>18</div>
-              <span style={{ fontSize: '0.725rem', color: 'var(--color-success)', fontWeight: 600 }}>Active In Sessions</span>
+              <span className="text-dark-grey" style={{ fontSize: '0.75rem', fontWeight: 600 }}>SCHEDULED TODAY</span>
+              <div style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--brand-black)', marginTop: '0.2rem' }}>{overview.activeFacultyToday}</div>
+              <span style={{ fontSize: '0.725rem', color: 'var(--brand-dark-grey)', fontWeight: 600 }}>Faculty with a timetable entry today</span>
             </div>
 
             <div style={{ backgroundColor: 'var(--brand-light-grey)', padding: '1rem', borderRadius: 'var(--border-radius)', border: '1px solid rgba(156, 163, 175, 0.2)' }}>
-              <span className="text-dark-grey" style={{ fontSize: '0.75rem', fontWeight: 600 }}>PENDING TASKS</span>
-              <div style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--brand-black)', marginTop: '0.2rem' }}>4</div>
-              <span style={{ fontSize: '0.725rem', color: 'var(--brand-orange)', fontWeight: 600 }}>Syllabus & Grading</span>
+              <span className="text-dark-grey" style={{ fontSize: '0.75rem', fontWeight: 600 }}>PENDING REVIEWS</span>
+              <div style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--brand-black)', marginTop: '0.2rem' }}>{overview.pendingReviewsCount}</div>
+              <span style={{ fontSize: '0.725rem', color: 'var(--brand-orange)', fontWeight: 600 }}>Submitted work and leave requests</span>
             </div>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            <div style={{ padding: '0.75rem 0.9rem', borderRadius: 'var(--border-radius)', borderLeft: '4px solid var(--brand-blue)', backgroundColor: 'var(--brand-white)', boxShadow: 'var(--box-shadow-sm)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontWeight: 700, fontSize: '0.875rem', color: 'var(--brand-black)' }}>Dr. Rajesh Kumar</span>
-                <span className="badge badge-active" style={{ fontSize: '0.7rem' }}>CSE-601</span>
+            {(attendanceData?.courseAttendance || []).slice(0, 4).map((course: DepartmentAttendanceMetrics['courseAttendance'][number]) => (
+              <div key={course.courseId} style={{ padding: '0.75rem 0.9rem', borderRadius: 'var(--border-radius)', borderLeft: '4px solid var(--brand-blue)', backgroundColor: 'var(--brand-white)', boxShadow: 'var(--box-shadow-sm)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontWeight: 700, fontSize: '0.875rem', color: 'var(--brand-black)' }}>{course.courseName}</span>
+                  <span className="badge badge-active" style={{ fontSize: '0.7rem' }}>{course.courseCode}</span>
+                </div>
+                <p style={{ fontSize: '0.775rem', color: 'var(--brand-dark-grey)', marginTop: '0.2rem' }}>
+                  {course.facultyName} · {course.studentCount} enrolled · {course.attendancePercent}% attendance
+                </p>
               </div>
-              <p style={{ fontSize: '0.775rem', color: 'var(--brand-dark-grey)', marginTop: '0.2rem' }}>
-                Assigned 5 Courses · 16 Attendance Sessions Marked · 5 Assignments
-              </p>
-            </div>
-
-            <div style={{ padding: '0.75rem 0.9rem', borderRadius: 'var(--border-radius)', borderLeft: '4px solid var(--brand-orange)', backgroundColor: 'var(--brand-white)', boxShadow: 'var(--box-shadow-sm)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontWeight: 700, fontSize: '0.875rem', color: 'var(--brand-black)' }}>Prof. Sunita Sharma</span>
-                <span className="badge badge-pending" style={{ fontSize: '0.7rem' }}>Pending Grading</span>
-              </div>
-              <p style={{ fontSize: '0.775rem', color: 'var(--brand-dark-grey)', marginTop: '0.2rem' }}>
-                Operating Systems · 14 Submissions Awaiting Evaluation
-              </p>
-            </div>
+            ))}
+            {(attendanceData?.courseAttendance || []).length === 0 && <EmptyState title="No course attendance recorded" message="Course summaries appear after attendance sessions are recorded." />}
           </div>
         </div>
 
@@ -226,17 +234,17 @@ export const HODDashboard: React.FC = () => {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem', marginBottom: '1.25rem' }}>
             <div style={{ backgroundColor: 'var(--brand-light-grey)', padding: '0.85rem', borderRadius: 'var(--border-radius)', textAlign: 'center', border: '1px solid rgba(156, 163, 175, 0.2)' }}>
               <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--brand-dark-grey)' }}>STUDENTS</span>
-              <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--brand-black)', marginTop: '0.15rem' }}>620</div>
+              <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--brand-black)', marginTop: '0.15rem' }}>{overview.activeStudents}</div>
             </div>
 
             <div style={{ backgroundColor: 'var(--brand-light-grey)', padding: '0.85rem', borderRadius: 'var(--border-radius)', textAlign: 'center', border: '1px solid rgba(156, 163, 175, 0.2)' }}>
               <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--brand-dark-grey)' }}>AVG CGPA</span>
-              <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--brand-black)', marginTop: '0.15rem' }}>7.62</div>
+              <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--brand-black)', marginTop: '0.15rem' }}>{overview.averageCgpa ?? 'No results'}</div>
             </div>
 
             <div style={{ backgroundColor: 'var(--brand-light-grey)', padding: '0.85rem', borderRadius: 'var(--border-radius)', textAlign: 'center', border: '1px solid rgba(156, 163, 175, 0.2)' }}>
               <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--color-error)' }}>AT RISK</span>
-              <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--color-error)', marginTop: '0.15rem' }}>18</div>
+              <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--color-error)', marginTop: '0.15rem' }}>{lowAttendanceStudents.length}</div>
             </div>
           </div>
 
@@ -246,7 +254,7 @@ export const HODDashboard: React.FC = () => {
                 <AlertTriangle size={18} className="text-error" />
                 <div>
                   <div style={{ fontWeight: 700, fontSize: '0.85rem', color: '#991B1B' }}>Attendance Alert (&lt; 75%)</div>
-                  <div style={{ fontSize: '0.75rem', color: '#B91C1C' }}>18 Students below mandatory VTU 75% cutoff</div>
+                  <div style={{ fontSize: '0.75rem', color: '#B91C1C' }}>{lowAttendanceStudents.length} students below the 75% threshold</div>
                 </div>
               </div>
               <button onClick={() => navigate('/hod/attendance')} className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem' }}>
@@ -258,8 +266,8 @@ export const HODDashboard: React.FC = () => {
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
                 <Clock size={18} style={{ color: '#D97706' }} />
                 <div>
-                  <div style={{ fontWeight: 700, fontSize: '0.85rem', color: '#92400E' }}>Pending Assignments Alert</div>
-                  <div style={{ fontSize: '0.75rem', color: '#B45309' }}>6 students with multiple overdue submissions</div>
+                  <div style={{ fontWeight: 700, fontSize: '0.85rem', color: '#92400E' }}>Pending Reviews</div>
+                  <div style={{ fontSize: '0.75rem', color: '#B45309' }}>{overview.pendingReviewsCount} submitted work items or leave requests awaiting review</div>
                 </div>
               </div>
               <button onClick={() => navigate('/hod/students')} className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem' }}>
@@ -283,27 +291,15 @@ export const HODDashboard: React.FC = () => {
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-            <div style={{ padding: '0.85rem', borderRadius: 'var(--border-radius)', border: '1px solid rgba(156, 163, 175, 0.2)', backgroundColor: 'var(--brand-white)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
-                <span className="badge badge-overdue" style={{ fontSize: '0.7rem' }}>LOW COMPLETION</span>
-                <span style={{ fontSize: '0.75rem', color: 'var(--brand-dark-grey)' }}>CSE-604</span>
+            {lowAttendanceStudents.slice(0, 5).map(student => (
+              <div key={student.studentId} style={{ padding: '0.85rem', borderRadius: 'var(--border-radius)', border: '1px solid rgba(156, 163, 175, 0.2)', backgroundColor: 'var(--brand-white)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <strong>{student.studentName}</strong><span className="font-mono">{student.attendancePercent}%</span>
+                </div>
+                <span className="font-mono text-dark-grey" style={{ fontSize: '0.75rem' }}>{student.usn} · {student.courseCode}</span>
               </div>
-              <div style={{ fontWeight: 700, fontSize: '0.875rem', color: 'var(--brand-black)' }}>Artificial Intelligence Module 3 Delay</div>
-              <p style={{ fontSize: '0.775rem', color: 'var(--brand-dark-grey)', marginTop: '0.2rem' }}>
-                Syllabus progress is currently 12% behind expected semester schedule.
-              </p>
-            </div>
-
-            <div style={{ padding: '0.85rem', borderRadius: 'var(--border-radius)', border: '1px solid rgba(156, 163, 175, 0.2)', backgroundColor: 'var(--brand-white)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
-                <span className="badge badge-pending" style={{ fontSize: '0.7rem' }}>EVALUATION DELAY</span>
-                <span style={{ fontSize: '0.75rem', color: 'var(--brand-dark-grey)' }}>CSE-603</span>
-              </div>
-              <div style={{ fontWeight: 700, fontSize: '0.875rem', color: 'var(--brand-black)' }}>Computer Networks Assignment 2 Pending</div>
-              <p style={{ fontSize: '0.775rem', color: 'var(--brand-dark-grey)', marginTop: '0.2rem' }}>
-                24 submissions awaiting faculty grading past the target 5-day window.
-              </p>
-            </div>
+            ))}
+            {lowAttendanceStudents.length === 0 && <EmptyState title="No attendance alerts" message="No student with recorded sessions is currently below 75%." />}
           </div>
         </div>
 
@@ -312,11 +308,11 @@ export const HODDashboard: React.FC = () => {
           <div style={{ marginBottom: '1rem' }}>
             <h2 className="panel-title font-display">Recent Department Activity</h2>
             <p style={{ fontSize: '0.8rem', color: 'var(--brand-dark-grey)', marginTop: '0.1rem' }}>
-              Real-Time Shared Data Log Across Faculty & Students
+              Department activity records
             </p>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+          {activities.length === 0 ? <EmptyState title="No department activity recorded" message="The database does not currently provide a department-wide activity feed." /> : <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
             {activities.map((act) => (
               <div key={act.id} style={{ display: 'flex', gap: '0.75rem', padding: '0.75rem', borderRadius: 'var(--border-radius)', border: '1px solid rgba(156, 163, 175, 0.2)', backgroundColor: 'var(--brand-white)' }}>
                 <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: 'rgba(255, 79, 24, 0.1)', color: 'var(--brand-orange)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -334,7 +330,7 @@ export const HODDashboard: React.FC = () => {
                 </div>
               </div>
             ))}
-          </div>
+          </div>}
         </div>
 
       </div>

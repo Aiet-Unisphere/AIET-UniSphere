@@ -5,27 +5,32 @@ import { AdminAppShell } from '../components/AdminAppShell';
 import { StatCard } from '../../components/StatCard';
 import { getUsers } from '../../services/userService';
 import { getAuditLogs } from '../../services/auditService';
-import { mockDepartmentsList } from '../data/departments';
+import { getDepartmentSummaries, type DepartmentSummary } from '../../services/departmentService';
 import type { User } from '../../shared/types/user';
-import type { AuditLogEvent } from '../../shared/types/audit';
+import type { AuditLogEvent } from '../../services/auditService';
 
 export const AdminDashboard: React.FC = () => {
   const navigate = useNavigate();
   const [users, setUsers] = useState<User[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogEvent[]>([]);
+  const [departments, setDepartments] = useState<DepartmentSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     const loadDashboardData = async () => {
       setLoading(true);
       try {
-        const [usersData, logsData] = await Promise.all([
+        const [usersData, logsData, departmentData] = await Promise.all([
           getUsers(),
-          getAuditLogs()
+          getAuditLogs(),
+          getDepartmentSummaries()
         ]);
         setUsers(usersData);
         setAuditLogs(logsData);
+        setDepartments(departmentData);
       } catch (err) {
+        setLoadError(err instanceof Error ? err.message : 'Unable to load admin dashboard data.');
         console.error("Error loading admin dashboard data:", err);
       } finally {
         setLoading(false);
@@ -160,17 +165,23 @@ export const AdminDashboard: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {mockDepartmentsList.map((d) => (
+                {loadError ? (
+                  <tr><td colSpan={5} style={{ padding: '1rem', color: 'var(--color-error)' }}>{loadError}</td></tr>
+                ) : loading ? (
+                  <tr><td colSpan={5} style={{ padding: '1rem' }}>Loading department data...</td></tr>
+                ) : departments.length === 0 ? (
+                  <tr><td colSpan={5} style={{ padding: '1rem' }}>No departments are registered.</td></tr>
+                ) : departments.map((d) => (
                   <tr key={d.id} style={{ borderBottom: '1px solid rgba(156, 163, 175, 0.15)' }}>
                     <td style={{ padding: '0.85rem 1.25rem' }}>
-                      <span className="font-mono text-blue font-bold">{d.code}</span>
+                      <span className="font-mono text-blue font-bold">{d.code || '—'}</span>
                       <div style={{ fontWeight: 700, color: 'var(--brand-black)' }}>{d.name}</div>
                     </td>
                     <td style={{ padding: '0.85rem 1.25rem', fontWeight: 600 }}>{d.hodName}</td>
-                    <td style={{ padding: '0.85rem 1.25rem' }} className="font-mono font-bold">{d.facultyCount}</td>
-                    <td style={{ padding: '0.85rem 1.25rem' }} className="font-mono font-bold">{d.studentCount}</td>
+                    <td style={{ padding: '0.85rem 1.25rem' }} className="font-mono font-bold">{d.activeFacultyCount} / {d.facultyCount}</td>
+                    <td style={{ padding: '0.85rem 1.25rem' }} className="font-mono font-bold">{d.activeStudentCount} / {d.studentCount}</td>
                     <td style={{ padding: '0.85rem 1.25rem' }}>
-                      <span className="badge badge-active">{d.status}</span>
+                      <span className={`badge ${d.status === 'ACTIVE' ? 'badge-active' : 'badge-overdue'}`}>{d.status}</span>
                     </td>
                   </tr>
                 ))}
@@ -202,16 +213,16 @@ export const AdminDashboard: React.FC = () => {
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.2rem' }}>
                   <span className="badge badge-active font-mono" style={{ fontSize: '0.7rem' }}>{log.action.replace('_', ' ')}</span>
-                  <span style={{ fontSize: '0.725rem', color: 'var(--brand-dark-grey)' }}>{log.timestamp}</span>
+                  <span style={{ fontSize: '0.725rem', color: 'var(--brand-dark-grey)' }}>{new Date(log.created_at).toLocaleString()}</span>
                 </div>
 
                 <div style={{ fontWeight: 700, color: 'var(--brand-black)' }}>
-                  Target: {log.targetUserName} (<span className="font-mono text-blue">{log.targetUserId}</span>)
+                  {log.entity_type}{log.entity_id ? <>: <span className="font-mono text-blue">{log.entity_id}</span></> : ''}
                 </div>
 
                 {log.metadata && (
                   <div style={{ fontSize: '0.775rem', color: 'var(--brand-dark-grey)', marginTop: '0.15rem' }}>
-                    {log.metadata}
+                    {log.description || (log.metadata ? JSON.stringify(log.metadata) : '')}
                   </div>
                 )}
               </div>

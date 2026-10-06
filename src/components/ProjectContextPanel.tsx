@@ -1,14 +1,12 @@
 import React from 'react';
 import { CheckCircle2, Circle, Clock, Calendar, CheckSquare, Flag, ListTodo } from 'lucide-react';
-import type { ProjectItem } from '../data/projects';
-import type { ProjectTaskItem } from '../data/projectTasks';
-import type { ProjectMilestoneItem } from '../data/projectMilestones';
+import type { Project, ProjectTask, ProjectMilestone } from '../services/projectService';
 import { ProgressBar } from './ProgressBar';
 
 interface ProjectContextPanelProps {
-  project: ProjectItem;
-  tasks: ProjectTaskItem[];
-  milestones: ProjectMilestoneItem[];
+  project: Project;
+  tasks: ProjectTask[];
+  milestones: ProjectMilestone[];
   onToggleTask?: (taskId: string) => void;
 }
 
@@ -18,14 +16,6 @@ export const ProjectContextPanel: React.FC<ProjectContextPanelProps> = ({
   milestones,
   onToggleTask
 }) => {
-  const requirements = [
-    { label: 'Authentication Module', status: 'completed' },
-    { label: 'Database Schema & ORM', status: 'completed' },
-    { label: 'API Integration & State', status: 'in-progress' },
-    { label: 'Unit & E2E Testing Suite', status: 'pending' },
-    { label: 'Deployment & Field Demo', status: 'pending' }
-  ];
-
   const todoTasks = tasks.filter(t => t.status === 'Todo');
   const inProgressTasks = tasks.filter(t => t.status === 'In Progress');
   const completedTasks = tasks.filter(t => t.status === 'Completed');
@@ -40,30 +30,9 @@ export const ProjectContextPanel: React.FC<ProjectContextPanelProps> = ({
         <div className="context-card">
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
             <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--brand-dark-grey)' }}>Deadline:</span>
-            <span className="badge badge-active" style={{ fontSize: '0.75rem' }}>{project.deadline}</span>
+            <span className="badge badge-active" style={{ fontSize: '0.75rem' }}>{project.deadline || 'Not set'}</span>
           </div>
           <ProgressBar progress={project.progress} label={`Overall Progress: ${project.progress}%`} />
-        </div>
-      </div>
-
-      {/* Requirements checklist */}
-      <div className="context-section">
-        <h4 className="context-section-title">
-          <CheckSquare size={15} /> Project Requirements
-        </h4>
-        <div className="context-card requirements-list">
-          {requirements.map((req, idx) => (
-            <div key={idx} className="requirement-item">
-              {req.status === 'completed' ? (
-                <CheckCircle2 size={16} className="req-icon completed" />
-              ) : req.status === 'in-progress' ? (
-                <Clock size={16} className="req-icon in-progress" />
-              ) : (
-                <Circle size={16} className="req-icon pending" />
-              )}
-              <span className={`req-label ${req.status}`}>{req.label}</span>
-            </div>
-          ))}
         </div>
       </div>
 
@@ -83,7 +52,7 @@ export const ProjectContextPanel: React.FC<ProjectContextPanelProps> = ({
                   {ms.title}
                 </span>
                 <div style={{ fontSize: '0.75rem', color: 'var(--brand-dark-grey)' }}>
-                  {ms.dueDate} · <span style={{ fontWeight: 600 }}>{ms.status}</span>
+                  {ms.due_date || 'No due date'} · <span style={{ fontWeight: 600 }}>{ms.status}</span>
                 </div>
               </div>
             </div>

@@ -4,7 +4,7 @@ import { AppShell } from '../components/AppShell';
 import { LoadingState } from '../components/LoadingState';
 import { EmptyState } from '../components/EmptyState';
 import { RecommendationCard } from '../components/RecommendationCard';
-import type { RecommendationItem } from '../data/recommendations';
+import type { RecommendationItem } from '../services/learningService';
 import { getRecommendations } from '../services/learningService';
 
 export const RecommendationsPage: React.FC = () => {

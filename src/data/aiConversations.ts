@@ -58,10 +58,3 @@ export const mockQuickActions: QuickActionItem[] = [
 
 export const mockConversations: AIConversation[] = [];
 
-export const mockAIAnswers: Record<string, string> = {
-  default: `Here is an academic summary based on your query:\n\nKey Concepts:\n1. Understand core definitions and mathematical/theoretical principles.\n2. Review solved examples and past assessment questions.\n3. Practice hands-on implementations in lab exercises.\n\n[Frontend Mock Note: This response is simulated for frontend demonstration purposes.]`,
-  explain: `Normalization reduces redundancy by decomposing tables into well-defined relations.\n\n• 1NF: Ensures atomic column values.\n• 2NF: Eliminates partial key dependencies.\n• 3NF: Eliminates transitive dependencies.\n• BCNF: Stricter version of 3NF where every determinant must be a candidate key.`,
-  summarize: `Process Synchronization Overview:\n• Critical Section Problem: Ensures mutual exclusion, progress, and bounded waiting.\n• Semaphores: Integer variables accessed via wait() [P] and signal() [V] atomic operations.\n• Mutex: Binary semaphore used for locking resources.`,
-  quiz: `Practice Quiz Questions:\n\nQ1. Which OSI layer handles routing between networks?\nA) Data Link  B) Network  C) Transport  D) Application\n[Answer: B - Network Layer]\n\nQ2. What is the default port for HTTP traffic?\nA) 443  B) 80  C) 21  D) 22\n[Answer: B - Port 80]\n\nQ3. TCP is connection-oriented while UDP is connectionless. (True/False)\n[Answer: True]`,
-  exam: `15-Minute Exam Revision Cheat-Sheet:\n1. Neural Network Perceptrons: Output y = f(∑ w_i x_i + b).\n2. Activation Functions: Sigmoid, ReLU, Tanh.\n3. Backpropagation: Chain rule derivation for gradient descent weights update.\n4. Overfitting Mitigation: Regularization (L1/L2), Dropout layers.`
-};

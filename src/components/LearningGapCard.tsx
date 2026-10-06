@@ -1,6 +1,6 @@
 import React from 'react';
-import { AlertCircle, AlertTriangle, CheckCircle2, TrendingUp, BookOpen, ArrowRight } from 'lucide-react';
-import type { TopicGapItem } from '../data/learningGaps';
+import { AlertCircle, AlertTriangle, CheckCircle2, TrendingUp, ArrowRight } from 'lucide-react';
+import type { TopicGapItem } from '../services/learningService';
 import { ProgressBar } from './ProgressBar';
 
 interface LearningGapCardProps {
@@ -9,35 +9,28 @@ interface LearningGapCardProps {
 }
 
 export const LearningGapCard: React.FC<LearningGapCardProps> = ({ gap, onOpenDetail }) => {
-  const getStatusBadge = (status: TopicGapItem['status']) => {
-    switch (status) {
-      case 'Needs Practice':
+  const getSeverityBadge = (severity: TopicGapItem['severity']) => {
+    switch (severity) {
+      case 'Critical':
         return (
           <span className="badge badge-overdue font-mono" style={{ gap: '0.2rem' }}>
             <AlertCircle size={13} />
-            <span>Needs Practice</span>
+            <span>Critical</span>
           </span>
         );
-      case 'Needs Review':
+      case 'Moderate':
         return (
           <span className="badge badge-pending font-mono" style={{ gap: '0.2rem' }}>
             <AlertTriangle size={13} />
             <span>Needs Review</span>
           </span>
         );
-      case 'Moderate':
-        return (
-          <span className="badge badge-secondary font-mono" style={{ gap: '0.2rem' }}>
-            <TrendingUp size={13} />
-            <span>Moderate</span>
-          </span>
-        );
-      case 'Strong':
+      case 'Minor':
       default:
         return (
           <span className="badge badge-active font-mono" style={{ gap: '0.2rem' }}>
             <CheckCircle2 size={13} />
-            <span>Strong</span>
+            <span>Minor Gap</span>
           </span>
         );
     }
@@ -47,39 +40,39 @@ export const LearningGapCard: React.FC<LearningGapCardProps> = ({ gap, onOpenDet
     <div className="learning-gap-item-card">
       <div className="gap-card-top-bar">
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-          {getStatusBadge(gap.status)}
+          {getSeverityBadge(gap.severity)}
           <span className="font-mono text-dark-grey" style={{ fontSize: '0.75rem' }}>
-            {gap.courseCode} — {gap.courseName}
+            {gap.courseId} — {gap.courseName}
           </span>
         </div>
 
         <span className="font-mono font-bold" style={{ fontSize: '0.85rem', color: 'var(--brand-black)' }}>
-          {gap.performancePercent}% avg
+          {gap.scorePercent}% avg
         </span>
       </div>
 
-      <h3 className="gap-topic-title">{gap.topicName}</h3>
-      
+      <h3 className="gap-topic-title">{gap.topic}</h3>
+
       <div className="gap-progress-wrapper" style={{ margin: '0.5rem 0' }}>
-        <ProgressBar progress={gap.performancePercent} showPercentage={false} />
+        <ProgressBar progress={gap.scorePercent} showPercentage={false} />
       </div>
 
       <p className="gap-suggested-focus font-sans">
-        <strong>Suggested Focus:</strong> {gap.suggestedFocus}
+        <strong>Questions:</strong> {gap.correctAnswers} correct out of {gap.totalQuestions} ({gap.wrongAnswers} wrong)
       </p>
 
       <div className="gap-card-footer">
-        <span className="gap-materials-count font-mono">
-          <BookOpen size={13} style={{ display: 'inline', marginRight: '0.25rem' }} />
-          {gap.materials.length} material{gap.materials.length > 1 ? 's' : ''} available
+        <span className="font-mono text-dark-grey" style={{ fontSize: '0.8rem' }}>
+          <TrendingUp size={13} style={{ display: 'inline', marginRight: '0.25rem' }} />
+          {gap.trend || 'Stable'}
         </span>
 
-        <button 
-          className="btn btn-secondary" 
+        <button
+          className="btn btn-secondary"
           style={{ width: 'auto', padding: '0.4rem 0.75rem', fontSize: '0.8rem' }}
           onClick={() => onOpenDetail(gap)}
         >
-          <span>View Topic Details</span>
+          <span>View Details</span>
           <ArrowRight size={14} />
         </button>
       </div>

@@ -2,10 +2,17 @@ import React, { useEffect, useState } from 'react';
 import { Award, Filter, TrendingUp, Users, CheckCircle2, AlertTriangle, Eye, X, BookOpen } from 'lucide-react';
 import { HODAppShell } from '../components/HODAppShell';
 import { StatCard } from '../../components/StatCard';
-import { getDepartmentResults, getStudentResultSummary, getSemesterPerformanceSummary } from '../../services/resultService';
-import type { CourseResultSummary, StudentResultSummary } from '../../data/results';
+import {
+  getDepartmentResultSummaries,
+  getStudentResultSummary,
+  getSemesterPerformanceSummary,
+  type CourseResultSummary,
+  type StudentResultSummary,
+} from '../../services/resultService';
+import { useAuth } from '../../app/context/AuthContext';
 
 export const HODResultsPage: React.FC = () => {
+  const { profile } = useAuth();
   const [results, setResults] = useState<CourseResultSummary[]>([]);
   const [semPerformance, setSemPerformance] = useState<{ semester: number; averagePercent: number }[]>([]);
   const [semFilter, setSemFilter] = useState('All');
@@ -18,8 +25,8 @@ export const HODResultsPage: React.FC = () => {
       setLoading(true);
       try {
         const [cResults, sPerf] = await Promise.all([
-          getDepartmentResults(),
-          getSemesterPerformanceSummary()
+          getDepartmentResultSummaries(profile?.department_id || undefined),
+          getSemesterPerformanceSummary(profile?.department_id || undefined)
         ]);
         setResults(cResults);
         setSemPerformance(sPerf);
@@ -30,7 +37,7 @@ export const HODResultsPage: React.FC = () => {
       }
     };
     loadData();
-  }, []);
+  }, [profile?.department_id]);
 
   const handleOpenStudentResult = async (studentId: string) => {
     const data = await getStudentResultSummary(studentId);
@@ -50,17 +57,10 @@ export const HODResultsPage: React.FC = () => {
             Department Academic Results Overview
           </h1>
           <p style={{ fontSize: '0.9rem', color: 'var(--brand-dark-grey)', marginTop: '0.2rem' }}>
-            Data Science Department Examination Pass Rates, Semester Performance & Grade Analytics
+            {profile?.department?.name || 'Department'} examination results and semester performance
           </p>
         </div>
 
-        <button 
-          onClick={() => handleOpenStudentResult('std-1')}
-          className="btn btn-primary font-sans"
-        >
-          <Eye size={16} />
-          <span>Inspect Sample Student Result</span>
-        </button>
       </div>
 
       {/* Semester Performance Cards */}
@@ -198,7 +198,7 @@ export const HODResultsPage: React.FC = () => {
             <div style={{ display: 'flex', gap: '1.5rem', marginBottom: '1.25rem', backgroundColor: 'var(--brand-light-grey)', padding: '1rem', borderRadius: 'var(--border-radius)' }}>
               <div>
                 <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--brand-dark-grey)', textTransform: 'uppercase' }}>SEMESTER GPA</span>
-                <div style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--brand-orange)' }} className="font-mono">{selectedStudent.gpa}</div>
+                <div style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--brand-orange)' }} className="font-mono">{selectedStudent.sgpa ?? 'Not available'}</div>
               </div>
               <div>
                 <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--brand-dark-grey)', textTransform: 'uppercase' }}>TOTAL CREDITS</span>
@@ -219,16 +219,16 @@ export const HODResultsPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {selectedStudent.courseMarks.map((cm, idx) => (
-                  <tr key={idx} style={{ borderBottom: '1px solid rgba(156, 163, 175, 0.15)' }}>
+                {selectedStudent.results.map((result) => (
+                  <tr key={result.id} style={{ borderBottom: '1px solid rgba(156, 163, 175, 0.15)' }}>
                     <td style={{ padding: '0.65rem', fontWeight: 600 }}>
-                      <span className="font-mono text-blue">{cm.courseCode}</span> {cm.courseName}
+                      <span className="font-mono text-blue">{result.course_code || result.course_id}</span> {result.course_name}
                     </td>
-                    <td style={{ padding: '0.65rem' }} className="font-mono">{cm.internalMarks}</td>
-                    <td style={{ padding: '0.65rem' }} className="font-mono">{cm.externalMarks}</td>
-                    <td style={{ padding: '0.65rem', fontWeight: 700 }} className="font-mono">{cm.totalMarks}</td>
+                    <td style={{ padding: '0.65rem' }} className="font-mono">{result.internal_marks ?? '—'}</td>
+                    <td style={{ padding: '0.65rem' }} className="font-mono">{result.external_marks ?? '—'}</td>
+                    <td style={{ padding: '0.65rem', fontWeight: 700 }} className="font-mono">{result.total_marks ?? '—'}</td>
                     <td style={{ padding: '0.65rem' }}>
-                      <span className="badge badge-active font-mono font-bold">{cm.grade}</span>
+                      <span className="badge badge-active font-mono font-bold">{result.grade || '—'}</span>
                     </td>
                   </tr>
                 ))}

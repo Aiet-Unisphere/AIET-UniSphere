@@ -11,7 +11,6 @@ import { WorkspaceFileExplorer } from '../components/WorkspaceFileExplorer';
 import type { FileTreeNode } from '../components/WorkspaceFileExplorer';
 import { WorkspaceEditor } from '../components/WorkspaceEditor';
 import { WorkspaceTerminal } from '../components/WorkspaceTerminal';
-import { useAuth } from '../app/context/AuthContext';
 import {
   getSelectedRepository,
   getRemoteFileTree,
@@ -20,7 +19,14 @@ import {
   getGitChanges
 } from '../services/githubService';
 import type { GitHubRepositoryItem } from '../data/repositories';
-import { mockWorkspaceFiles } from '../data/repositories';
+import {
+  getProjectWorkspaceFiles,
+  updateFileContent,
+  createProjectFile,
+  renameProjectFile,
+  deleteProjectFile,
+  type ProjectFileNode,
+} from '../services/workspaceService';
 
 interface OpenTab extends FileTreeNode {
   isDirty?: boolean;
@@ -74,12 +80,23 @@ const convertGitHubTreeToNodes = (rawItems: any[]): FileTreeNode[] => {
   return rootNodes;
 };
 
+const convertProjectFilesToNodes = (files: ProjectFileNode[]): FileTreeNode[] => files.map(file => ({
+  id: file.id,
+  name: file.name,
+  type: file.type,
+  path: file.path,
+  language: file.language,
+  content: file.content || '',
+  parent_id: file.parent_id,
+  children: file.children ? convertProjectFilesToNodes(file.children) : undefined,
+}));
+
 export const ProjectWorkspace: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user } = useAuth();
 
   const [selectedRepo, setSelectedRepo] = useState<GitHubRepositoryItem | null>(null);
+  const [workspaceMode, setWorkspaceMode] = useState<'github' | 'project'>('project');
   const [treeFiles, setTreeFiles] = useState<FileTreeNode[]>([]);
   const [openTabs, setOpenTabs] = useState<OpenTab[]>([]);
   const [activeTab, setActiveTab] = useState<OpenTab | null>(null);
@@ -102,27 +119,28 @@ export const ProjectWorkspace: React.FC = () => {
     setIsLoading(true);
     setError(null);
     try {
+      if (!id) throw new Error('Open a project workspace from a project before editing files.');
       const repo = await getSelectedRepository();
       setSelectedRepo(repo);
 
       if (repo && repo.owner && repo.name) {
+        setWorkspaceMode('github');
         const rawTree = await getRemoteFileTree(repo.owner, repo.name, repo.selectedBranch || repo.defaultBranch || 'main');
-        if (rawTree && rawTree.length > 0) {
-          const parsedTree = convertGitHubTreeToNodes(rawTree);
-          setTreeFiles(parsedTree);
-        } else {
-          setTreeFiles(mockWorkspaceFiles as any);
-        }
+        setTreeFiles(convertGitHubTreeToNodes(rawTree));
       } else {
-        setTreeFiles(mockWorkspaceFiles as any);
+        setWorkspaceMode('project');
+        const projectFiles = await getProjectWorkspaceFiles(id);
+        setTreeFiles(convertProjectFilesToNodes(projectFiles));
       }
-    } catch (err: any) {
-      console.warn('[ProjectWorkspace] Failed to fetch remote GitHub tree:', err);
-      setTreeFiles(mockWorkspaceFiles as any);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unable to load project workspace files.';
+      console.error('[ProjectWorkspace] Workspace load failed:', message);
+      setTreeFiles([]);
+      setError(message);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [id]);
 
   useEffect(() => {
     loadWorkspace();
@@ -140,7 +158,7 @@ export const ProjectWorkspace: React.FC = () => {
       setActiveTab(existing);
     } else {
       let fileContent = file.content;
-      if (fileContent === undefined && selectedRepo?.owner && selectedRepo?.name) {
+      if (workspaceMode === 'github' && fileContent === undefined && selectedRepo?.owner && selectedRepo?.name) {
         setSaveStatus(`Fetching ${file.name} from GitHub...`);
         try {
           fileContent = await getRemoteFileContent(
@@ -149,8 +167,9 @@ export const ProjectWorkspace: React.FC = () => {
             file.path || file.id,
             selectedRepo.selectedBranch || selectedRepo.defaultBranch || 'main'
           );
-        } catch (e) {
-          fileContent = `// Unable to fetch content for ${file.name}`;
+        } catch (error) {
+          setSaveStatus(error instanceof Error ? error.message : 'Unable to fetch file content.');
+          return;
         }
         setSaveStatus(null);
       }
@@ -190,17 +209,21 @@ export const ProjectWorkspace: React.FC = () => {
   const handleSave = async () => {
     if (!activeTab || !activeTab.isDirty) return;
     try {
-      await recordWorkspaceFileChange(
-        activeTab.path || activeTab.id,
-        activeTab.content || '',
-        'MODIFIED',
-        activeTab.savedContent
-      );
+      if (workspaceMode === 'github') {
+        await recordWorkspaceFileChange(
+          activeTab.path || activeTab.id,
+          activeTab.content || '',
+          'MODIFIED',
+          activeTab.savedContent
+        );
+      } else {
+        await updateFileContent(activeTab.id, activeTab.content || '');
+      }
 
       const savedTab: OpenTab = { ...activeTab, isDirty: false, savedContent: activeTab.content || '' };
       setActiveTab(savedTab);
       setOpenTabs(prev => prev.map(t => t.id === activeTab.id ? savedTab : t));
-      setSaveStatus('File saved to workspace (tracked as uncommitted change).');
+      setSaveStatus(workspaceMode === 'github' ? 'Change saved to the GitHub workspace queue.' : 'File saved to the project workspace.');
       setTimeout(() => setSaveStatus(null), 3000);
     } catch (err: any) {
       setSaveStatus('Failed to save file: ' + (err.message || 'Unknown error'));
@@ -210,6 +233,10 @@ export const ProjectWorkspace: React.FC = () => {
 
   // File CRUD handlers
   const handleCreateFile = (parentId: string | null, parentPath: string, type: 'file' | 'folder') => {
+    if (workspaceMode === 'github' && type === 'folder') {
+      setSaveStatus('Git does not persist empty folders. Add a file inside the directory instead.');
+      return;
+    }
     setPromptMode(type === 'file' ? 'create-file' : 'create-folder');
     setPromptTarget({ parentId, parentPath });
     setPromptValue('');
@@ -222,6 +249,10 @@ export const ProjectWorkspace: React.FC = () => {
   };
 
   const handleDeleteFile = (file: FileTreeNode) => {
+    if (workspaceMode === 'github' && file.type === 'folder') {
+      setSaveStatus('Git does not persist folders. Delete tracked files individually.');
+      return;
+    }
     setConfirmDelete(file);
   };
 
@@ -229,46 +260,53 @@ export const ProjectWorkspace: React.FC = () => {
     if (!promptValue.trim()) return;
     const cleanName = promptValue.trim();
     try {
+      if (!id) throw new Error('Project identifier is required to change workspace files.');
       if (promptMode === 'create-file') {
         const fullPath = promptTarget?.parentPath ? `${promptTarget.parentPath}/${cleanName}` : cleanName;
-        const newFileNode: FileTreeNode = {
-          id: fullPath,
-          name: cleanName,
-          type: 'file',
-          path: fullPath,
-          content: '',
-          language: cleanName.endsWith('.tsx') || cleanName.endsWith('.ts') ? 'typescript' : 'javascript'
-        };
-
-        await recordWorkspaceFileChange(fullPath, '', 'ADDED');
-        setTreeFiles(prev => [...prev, newFileNode]);
-        handleSelectFile(newFileNode);
-        setSaveStatus(`Created file ${cleanName}`);
+        let newFileNode: FileTreeNode;
+        if (workspaceMode === 'github') {
+          await recordWorkspaceFileChange(fullPath, '', 'ADDED');
+          newFileNode = {
+            id: fullPath,
+            name: cleanName,
+            type: 'file',
+            path: fullPath,
+            content: '',
+            language: cleanName.endsWith('.tsx') || cleanName.endsWith('.ts') ? 'typescript' : 'javascript',
+          };
+        } else {
+          const created = await createProjectFile(id, promptTarget?.parentId || null, cleanName, 'file', promptTarget?.parentPath || '');
+          newFileNode = convertProjectFilesToNodes([created])[0];
+        }
+        if (workspaceMode === 'github') setTreeFiles(prev => [...prev, newFileNode]);
+        else await loadWorkspace();
+        await handleSelectFile(newFileNode);
+        setSaveStatus(workspaceMode === 'github' ? `Added ${cleanName} to the GitHub workspace queue.` : `Created ${cleanName} in the project workspace.`);
       } else if (promptMode === 'create-folder') {
         const fullPath = promptTarget?.parentPath ? `${promptTarget.parentPath}/${cleanName}` : cleanName;
-        const newFolderNode: FileTreeNode = {
-          id: fullPath,
-          name: cleanName,
-          type: 'folder',
-          path: fullPath,
-          children: []
-        };
-        setTreeFiles(prev => [...prev, newFolderNode]);
+        await createProjectFile(id, promptTarget?.parentId || null, cleanName, 'folder', promptTarget?.parentPath || '');
+        await loadWorkspace();
+        setSaveStatus(`Created folder ${cleanName} in the project workspace.`);
       } else if (promptMode === 'rename' && promptTarget?.file) {
         const oldFile = promptTarget.file;
         const filePathStr = oldFile.path || oldFile.id;
         const parentPath = filePathStr.includes('/') ? filePathStr.substring(0, filePathStr.lastIndexOf('/')) : '';
         const newPath = parentPath ? `${parentPath}/${cleanName}` : cleanName;
-
-        await recordWorkspaceFileChange(newPath, oldFile.content || '', 'RENAMED');
-        setOpenTabs(prev => prev.map(t => t.id === oldFile.id ? { ...t, name: cleanName, path: newPath } : t));
-        if (activeTab?.id === oldFile.id) {
-          setActiveTab(prev => prev ? { ...prev, name: cleanName, path: newPath } : null);
+        let renamedId = oldFile.id;
+        if (workspaceMode === 'github') {
+          await recordWorkspaceFileChange(filePathStr, '', 'DELETED');
+          await recordWorkspaceFileChange(newPath, oldFile.content || '', 'ADDED');
+          renamedId = newPath;
+        } else {
+          await renameProjectFile(oldFile.id, cleanName, newPath);
+          await loadWorkspace();
         }
-        await loadWorkspace();
+        setOpenTabs(prev => prev.map(tab => tab.id === oldFile.id ? { ...tab, id: renamedId, name: cleanName, path: newPath } : tab));
+        if (activeTab?.id === oldFile.id) setActiveTab(prev => prev ? { ...prev, id: renamedId, name: cleanName, path: newPath } : null);
+        setSaveStatus(`Renamed to ${cleanName}.`);
       }
-    } catch (err: any) {
-      console.error('File operation error:', err);
+    } catch (err: unknown) {
+      setSaveStatus(err instanceof Error ? err.message : 'File operation failed.');
     }
     setPromptMode(null);
     setPromptTarget(null);
@@ -277,17 +315,24 @@ export const ProjectWorkspace: React.FC = () => {
   const executeDelete = async () => {
     if (!confirmDelete) return;
     try {
-      await recordWorkspaceFileChange(confirmDelete.path || confirmDelete.id, '', 'DELETED');
+      if (workspaceMode === 'github') {
+        await recordWorkspaceFileChange(confirmDelete.path || confirmDelete.id, '', 'DELETED');
+      } else if (id) {
+        await deleteProjectFile(confirmDelete.id, id);
+      } else {
+        throw new Error('Project identifier is required to delete workspace files.');
+      }
       setOpenTabs(prev => prev.filter(t => t.id !== confirmDelete.id));
       if (activeTab?.id === confirmDelete.id) {
         const remaining = openTabs.filter(t => t.id !== confirmDelete.id);
         setActiveTab(remaining.length > 0 ? remaining[remaining.length - 1] : null);
       }
-      setTreeFiles(prev => prev.filter(t => t.id !== confirmDelete.id));
-      setSaveStatus(`Deleted ${confirmDelete.name}`);
+      if (workspaceMode === 'project') await loadWorkspace();
+      else setTreeFiles(prev => prev.filter(t => t.id !== confirmDelete.id));
+      setSaveStatus(`Deleted ${confirmDelete.name} from the ${workspaceMode === 'github' ? 'GitHub change queue' : 'project workspace'}.`);
       setTimeout(() => setSaveStatus(null), 3000);
-    } catch (err: any) {
-      console.error('Delete error:', err);
+    } catch (err: unknown) {
+      setSaveStatus(err instanceof Error ? err.message : 'Unable to delete file.');
     }
     setConfirmDelete(null);
   };
@@ -309,6 +354,14 @@ export const ProjectWorkspace: React.FC = () => {
     return (
       <AppShell>
         <LoadingState message="Loading GitHub repository workspace tree..." />
+      </AppShell>
+    );
+  }
+
+  if (error) {
+    return (
+      <AppShell>
+        <ErrorState message={error} onRetry={loadWorkspace} />
       </AppShell>
     );
   }

@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Calendar, FileText, Download, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, FileText, Download } from 'lucide-react';
 import { AppShell } from '../components/AppShell';
 import { LoadingState } from '../components/LoadingState';
 import { ErrorState } from '../components/ErrorState';
 import { RequestTimeline } from '../components/RequestTimeline';
 import type { ServiceRequestItem } from '../data/studentServices';
-import { getServiceRequestById } from '../services/studentService';
+import { getServiceRequestById, downloadServiceRequestAttachment } from '../services/studentService';
 
 export const ServiceRequestDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -48,7 +48,6 @@ export const ServiceRequestDetailPage: React.FC = () => {
 
   const getStatusBadge = (status: ServiceRequestItem['status']) => {
     switch (status) {
-      case 'Approved':
       case 'Resolved':
         return <span className="badge badge-active font-mono" style={{ fontSize: '0.85rem' }}>{status}</span>;
       case 'In Review':
@@ -125,21 +124,36 @@ export const ServiceRequestDetailPage: React.FC = () => {
             )}
 
             {request.attachmentName && (
-              <div style={{ marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px border var(--brand-border)' }}>
+              <div style={{ marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--brand-border)' }}>
                 <span className="font-mono text-dark-grey" style={{ fontSize: '0.75rem' }}>Attached Document:</span>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '0.35rem', padding: '0.5rem', background: 'var(--brand-light-grey)', borderRadius: '4px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                     <FileText size={16} className="text-orange" />
                     <span className="font-mono" style={{ fontSize: '0.825rem', fontWeight: 600 }}>{request.attachmentName}</span>
+                    {request.attachmentSize && (
+                      <span className="text-dark-grey" style={{ fontSize: '0.75rem' }}>
+                        ({(request.attachmentSize / (1024 * 1024)).toFixed(2)} MB)
+                      </span>
+                    )}
                   </div>
-                  <button 
-                    className="btn btn-secondary" 
-                    style={{ width: 'auto', padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
-                    onClick={() => alert(`Downloading attachment ${request.attachmentName}...`)}
-                  >
-                    <Download size={13} />
-                    <span>Download</span>
-                  </button>
+                  {request.attachmentPath ? (
+                    <button 
+                      className="btn btn-secondary" 
+                      style={{ width: 'auto', padding: '0.25rem 0.5rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}
+                      onClick={async () => {
+                        try {
+                          await downloadServiceRequestAttachment(request.attachmentPath!, request.attachmentName);
+                        } catch (err: any) {
+                          alert('Download failed: ' + (err.message || 'Unknown error'));
+                        }
+                      }}
+                    >
+                      <Download size={13} />
+                      <span>Download</span>
+                    </button>
+                  ) : (
+                    <span style={{ fontSize: '0.75rem', color: 'var(--brand-dark-grey)' }}>Saved in record</span>
+                  )}
                 </div>
               </div>
             )}

@@ -1,8 +1,10 @@
+import { ErrorState } from '../components/ErrorState';
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FileText, Plus, Clock, FileCheck } from 'lucide-react';
 import { AppShell } from '../components/AppShell';
 import { LoadingState } from '../components/LoadingState';
+import { EmptyState } from '../components/EmptyState';
 import { ServiceCard } from '../components/ServiceCard';
 import { RequestFormModal } from '../components/RequestFormModal';
 import type { ServiceTypeItem, CreateServiceRequestPayload } from '../data/studentServices';
@@ -15,13 +17,20 @@ export const StudentServicesPage: React.FC = () => {
   const [selectedServiceForModal, setSelectedServiceForModal] = useState<ServiceTypeItem | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     const loadData = async () => {
       setIsLoading(true);
-      const data = await getAvailableServices();
-      setServices(data);
-      setIsLoading(false);
+      setLoadError(null);
+      try {
+        const data = await getAvailableServices();
+        setServices(data);
+      } catch (error) {
+        setLoadError(error instanceof Error ? error.message : 'Unable to load student services.');
+      } finally {
+        setIsLoading(false);
+      }
     };
     loadData();
   }, []);
@@ -34,7 +43,7 @@ export const StudentServicesPage: React.FC = () => {
   const handleFormSubmit = async (payload: CreateServiceRequestPayload) => {
     await createServiceRequest(payload);
     setIsModalOpen(false);
-    navigate('/student/services/requests');
+    navigate('/student/services/requests', { state: { requestSubmitted: true } });
   };
 
   return (
@@ -66,6 +75,7 @@ export const StudentServicesPage: React.FC = () => {
           <button 
             className="btn btn-primary" 
             onClick={() => handleOpenModal(null)}
+            disabled={isLoading || Boolean(loadError) || services.length === 0}
           >
             <Plus size={16} />
             <span>New Request</span>
@@ -75,6 +85,14 @@ export const StudentServicesPage: React.FC = () => {
 
       {isLoading ? (
         <LoadingState message="Loading available student services..." />
+      ) : loadError ? (
+        <ErrorState message={loadError} onRetry={() => {
+          setIsLoading(true);
+          setLoadError(null);
+          getAvailableServices().then(setServices).catch((error: unknown) => setLoadError(error instanceof Error ? error.message : 'Unable to load student services.')).finally(() => setIsLoading(false));
+        }} />
+      ) : services.length === 0 ? (
+        <EmptyState title="No services available" message="The institution has not published any active student services." />
       ) : (
         <div className="services-catalog-grid">
           {services.map((srv) => (
@@ -93,7 +111,7 @@ export const StudentServicesPage: React.FC = () => {
           service={selectedServiceForModal}
           services={services}
           onClose={() => setIsModalOpen(false)}
-          onSubmitRequest={handleFormSubmit}
+            onSubmitRequest={handleFormSubmit}
         />
       )}
     </AppShell>

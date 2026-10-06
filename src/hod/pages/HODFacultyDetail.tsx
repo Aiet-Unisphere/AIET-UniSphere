@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Mail, Phone, BookOpen, Users, CalendarCheck, FileText, CheckCircle2, Shield } from 'lucide-react';
 import { HODAppShell } from '../components/HODAppShell';
+import { EmptyState } from '../../components/EmptyState';
 import { getFacultyById } from '../../services/facultyService';
 import type { FacultyMember } from '../../data/faculty';
 
@@ -189,29 +190,7 @@ export const HODFacultyDetail: React.FC = () => {
           {/* Activity Log Panel */}
           <div className="dashboard-panel">
             <h2 className="panel-title font-display" style={{ marginBottom: '0.75rem' }}>Recent Academic Activity</h2>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              <div style={{ padding: '0.75rem 0.9rem', backgroundColor: 'var(--brand-light-grey)', borderRadius: 'var(--border-radius)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-                  <FileText size={16} className="text-blue" />
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: '0.85rem', color: 'var(--brand-black)' }}>Posted Assignment: DBMS Transaction Management</div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--brand-dark-grey)' }}>CSE-601 · 62 Students Enrolled</div>
-                  </div>
-                </div>
-                <span className="font-mono text-dark-grey" style={{ fontSize: '0.75rem' }}>Today 09:15 AM</span>
-              </div>
-
-              <div style={{ padding: '0.75rem 0.9rem', backgroundColor: 'var(--brand-light-grey)', borderRadius: 'var(--border-radius)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-                  <CalendarCheck size={16} className="text-success" />
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: '0.85rem', color: 'var(--brand-black)' }}>Marked Attendance Session #18</div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--brand-dark-grey)' }}>Software Engineering · 58 Students Recorded Present</div>
-                  </div>
-                </div>
-                <span className="font-mono text-dark-grey" style={{ fontSize: '0.75rem' }}>Yesterday 02:30 PM</span>
-              </div>
-            </div>
+            <EmptyState title="Activity feed unavailable" message={`Recorded responsibilities: ${faculty.assignmentsCreatedCount} assignments and ${faculty.attendanceLogCount} attendance sessions.`} />
           </div>
         </div>
 

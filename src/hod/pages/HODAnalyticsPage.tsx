@@ -2,44 +2,82 @@ import React, { useEffect, useState } from 'react';
 import { BarChart2, TrendingUp, Users, CalendarCheck, Award, FileText, Printer, Filter, AlertTriangle, CheckCircle2, UserCheck } from 'lucide-react';
 import { HODAppShell } from '../components/HODAppShell';
 import { StatCard } from '../../components/StatCard';
+import { LoadingState } from '../../components/LoadingState';
+import { ErrorState } from '../../components/ErrorState';
+import { EmptyState } from '../../components/EmptyState';
 import { getDepartmentOverview, getDepartmentAttendanceMetrics } from '../../services/departmentService';
-import { getDepartmentResults } from '../../services/resultService';
-import { getFacultyRoster } from '../../services/facultyService';
-import type { FacultyMember } from '../../data/faculty';
-import type { CourseResultSummary } from '../../data/results';
+import { getDepartmentResultSummaries, type CourseResultSummary } from '../../services/resultService';
+import { getSemesterPerformanceSummary } from '../../services/resultService';
+import { getDepartmentDetailData } from '../../services/departmentService';
+import type { DepartmentOverview, DepartmentAttendanceMetrics } from '../../services/departmentService';
+import { useAuth } from '../../app/context/AuthContext';
 
 export const HODAnalyticsPage: React.FC = () => {
+  const { profile } = useAuth();
   const [activeTab, setActiveTab] = useState<'analytics' | 'reports'>('analytics');
   const [reportType, setReportType] = useState<'Overview' | 'Attendance' | 'Performance' | 'Course'>('Overview');
   const [semFilter, setSemFilter] = useState('All');
-  const [facultyRoster, setFacultyRoster] = useState<FacultyMember[]>([]);
+  const [facultyRoster, setFacultyRoster] = useState<NonNullable<Awaited<ReturnType<typeof getDepartmentDetailData>>>['faculty']>([]);
   const [courseResults, setCourseResults] = useState<CourseResultSummary[]>([]);
+  const [overview, setOverview] = useState<DepartmentOverview | null>(null);
+  const [attendance, setAttendance] = useState<DepartmentAttendanceMetrics | null>(null);
+  const [semesterPerformance, setSemesterPerformance] = useState<{ semester: number; averagePercent: number }[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     const loadAnalyticsData = async () => {
       setLoading(true);
+      setLoadError(null);
       try {
-        const [facList, cResults] = await Promise.all([
-          getFacultyRoster(),
-          getDepartmentResults()
+        const [overviewData, attendanceData, cResults, semesterData, departmentData] = await Promise.all([
+          getDepartmentOverview(),
+          getDepartmentAttendanceMetrics(),
+          getDepartmentResultSummaries(profile?.department_id || undefined),
+          getSemesterPerformanceSummary(profile?.department_id || undefined),
+          profile?.department_id ? getDepartmentDetailData(profile.department_id) : Promise.resolve(null),
         ]);
-        setFacultyRoster(facList);
+        setOverview(overviewData);
+        setAttendance(attendanceData);
+        setFacultyRoster(departmentData?.faculty || []);
         setCourseResults(cResults);
+        setSemesterPerformance(semesterData);
       } catch (err) {
+        setLoadError(err instanceof Error ? err.message : 'Unable to load department analytics.');
         console.error("Error loading analytics data:", err);
       } finally {
         setLoading(false);
       }
     };
     loadAnalyticsData();
-  }, []);
+  }, [profile?.department_id]);
 
   const handlePrintReport = () => {
     window.print();
   };
 
   const filteredCourseResults = courseResults.filter(r => semFilter === 'All' || r.semester === Number(semFilter));
+  const attendanceByCourse = new Map((attendance?.courseAttendance || []).map(course => [course.courseId, course]));
+
+  if (loading) return <HODAppShell><LoadingState message="Loading department analytics..." /></HODAppShell>;
+  if (loadError) return <HODAppShell><ErrorState message={loadError} onRetry={() => {
+    setLoading(true);
+    setLoadError(null);
+    Promise.all([
+      getDepartmentOverview(),
+      getDepartmentAttendanceMetrics(),
+      getDepartmentResultSummaries(profile?.department_id || undefined),
+      getSemesterPerformanceSummary(profile?.department_id || undefined),
+      profile?.department_id ? getDepartmentDetailData(profile.department_id) : Promise.resolve(null),
+    ]).then(([overviewData, attendanceData, resultsData, semesterData, departmentData]) => {
+      setOverview(overviewData);
+      setAttendance(attendanceData);
+      setCourseResults(resultsData);
+      setSemesterPerformance(semesterData);
+      setFacultyRoster(departmentData?.faculty || []);
+    }).catch(error => setLoadError(error instanceof Error ? error.message : 'Unable to load department analytics.')).finally(() => setLoading(false));
+  }} /></HODAppShell>;
+  if (!overview || !attendance) return <HODAppShell><EmptyState title="Analytics unavailable" message="No department analytics records are available." /></HODAppShell>;
 
   return (
     <HODAppShell>
@@ -51,7 +89,7 @@ export const HODAnalyticsPage: React.FC = () => {
             Department Analytics & Reports
           </h1>
           <p style={{ fontSize: '0.9rem', color: 'var(--brand-dark-grey)', marginTop: '0.2rem' }}>
-            Data Science Department Comprehensive Academic Performance & Compliance Intelligence
+            {overview.departmentName} academic performance and attendance
           </p>
         </div>
 
@@ -88,26 +126,26 @@ export const HODAnalyticsPage: React.FC = () => {
           <div className="stat-cards-grid" style={{ marginBottom: '1.75rem' }}>
             <StatCard
               title="AVERAGE CGPA"
-              value="7.62"
-              subtitle="Cumulative Dept Avg"
+              value={overview.averageCgpa ?? 'No data'}
+              subtitle="Weighted from recorded results"
               icon={<Award size={22} />}
             />
             <StatCard
               title="ATTENDANCE RATE"
-              value="84%"
-              subtitle="Mandatory Target ≥80%"
+              value={`${attendance.overallAttendance}%`}
+              subtitle="Calculated from recorded sessions"
               icon={<CalendarCheck size={22} />}
             />
             <StatCard
               title="ASSIGNMENT COMPLETION"
-              value="88.5%"
-              subtitle="Submission Rate"
+              value={overview.assignmentCompletionPercent == null ? 'No data' : `${overview.assignmentCompletionPercent}%`}
+              subtitle="Submitted assignments / enrolled course workload"
               icon={<CheckCircle2 size={22} />}
             />
             <StatCard
               title="OVERALL PASS RATE"
-              value="96.8%"
-              subtitle="Department Exams"
+              value={overview.passRatePercent == null ? 'No data' : `${overview.passRatePercent}%`}
+              subtitle="Pass / fail results only"
               icon={<TrendingUp size={22} />}
             />
           </div>
@@ -120,22 +158,18 @@ export const HODAnalyticsPage: React.FC = () => {
               <h2 className="panel-title font-display" style={{ marginBottom: '1rem' }}>Semester Academic Averages</h2>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                {[
-                  { sem: 3, avg: 78, label: 'Semester 3 (Data Science Core)' },
-                  { sem: 4, avg: 81, label: 'Semester 4 (Algorithms & Systems)' },
-                  { sem: 5, avg: 84, label: 'Semester 5 (Machine Learning & AI)' },
-                  { sem: 6, avg: 79, label: 'Semester 6 (Advanced Analytics)' }
-                ].map((item) => (
-                  <div key={item.sem}>
+                {semesterPerformance.map((item) => (
+                  <div key={item.semester}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', fontWeight: 700, color: 'var(--brand-black)', marginBottom: '0.35rem' }}>
-                      <span>{item.label}</span>
-                      <span className="font-mono text-blue">{item.avg}%</span>
+                      <span>Semester {item.semester}</span>
+                      <span className="font-mono text-blue">{item.averagePercent}%</span>
                     </div>
                     <div style={{ height: '8px', backgroundColor: 'var(--brand-light-grey)', borderRadius: '4px', overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: `${item.avg}%`, backgroundColor: item.avg >= 80 ? 'var(--color-success)' : 'var(--brand-blue)', borderRadius: '4px' }} />
+                      <div style={{ height: '100%', width: `${item.averagePercent}%`, backgroundColor: item.averagePercent >= 80 ? 'var(--color-success)' : 'var(--brand-blue)', borderRadius: '4px' }} />
                     </div>
                   </div>
                 ))}
+                {semesterPerformance.length === 0 && <EmptyState title="No semester results" message="Semester performance appears after results are recorded." />}
               </div>
             </div>
 
@@ -146,22 +180,15 @@ export const HODAnalyticsPage: React.FC = () => {
                 <span>Academic Alerts</span>
               </h2>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', fontSize: '0.85rem' }}>
-                <div style={{ backgroundColor: '#FEF2F2', border: '1px solid #FCA5A5', padding: '0.75rem', borderRadius: 'var(--border-radius)' }}>
-                  <div style={{ fontWeight: 700, color: '#991B1B' }}>Attendance Warning (&lt; 75%)</div>
-                  <div style={{ color: '#B91C1C', fontSize: '0.775rem', marginTop: '0.15rem' }}>18 Students below mandatory threshold</div>
+              {attendance.lowAttendanceStudents.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', fontSize: '0.85rem' }}>
+                  {attendance.lowAttendanceStudents.slice(0, 6).map(student => (
+                    <div key={student.studentId} style={{ backgroundColor: '#FEF2F2', border: '1px solid #FCA5A5', padding: '0.65rem', borderRadius: 'var(--border-radius)' }}>
+                      <strong>{student.studentName}</strong> ({student.usn}) · {student.attendancePercent}% attendance
+                    </div>
+                  ))}
                 </div>
-
-                <div style={{ backgroundColor: '#FFFBEB', border: '1px solid #FDE68A', padding: '0.75rem', borderRadius: 'var(--border-radius)' }}>
-                  <div style={{ fontWeight: 700, color: '#92400E' }}>Pending Assessment Evaluations</div>
-                  <div style={{ color: '#B45309', fontSize: '0.775rem', marginTop: '0.15rem' }}>CSE-603 evaluation overdue by 2 days</div>
-                </div>
-
-                <div style={{ backgroundColor: '#EFF6FF', border: '1px solid #BFDBFE', padding: '0.75rem', borderRadius: 'var(--border-radius)' }}>
-                  <div style={{ fontWeight: 700, color: '#1E40AF' }}>At-Risk Academic Warning</div>
-                  <div style={{ color: '#1D4ED8', fontSize: '0.775rem', marginTop: '0.15rem' }}>4 Students identified for HOD counselling</div>
-                </div>
-              </div>
+              ) : <EmptyState title="No attendance alerts" message="No student with recorded sessions is below 75%." />}
             </div>
 
           </div>
@@ -211,8 +238,8 @@ export const HODAnalyticsPage: React.FC = () => {
                       </td>
                       <td style={{ padding: '0.85rem 1rem', fontWeight: 600 }}>{cr.facultyName}</td>
                       <td style={{ padding: '0.85rem 1rem' }} className="font-mono">{cr.totalStudents}</td>
-                      <td style={{ padding: '0.85rem 1rem' }} className="font-mono font-bold text-blue">84%</td>
-                      <td style={{ padding: '0.85rem 1rem' }} className="font-mono font-bold">89%</td>
+                      <td style={{ padding: '0.85rem 1rem' }} className="font-mono font-bold text-blue">{attendanceByCourse.get(cr.courseId)?.attendancePercent ?? 'No sessions'}{attendanceByCourse.has(cr.courseId) ? '%' : ''}</td>
+                      <td style={{ padding: '0.85rem 1rem' }} className="font-mono font-bold">Not available</td>
                       <td style={{ padding: '0.85rem 1rem' }} className="font-mono font-bold">{cr.averageMarksPercent}%</td>
                       <td style={{ padding: '0.85rem 1rem' }} className="font-mono text-success font-bold">{cr.passRatePercent}%</td>
                     </tr>
@@ -233,9 +260,7 @@ export const HODAnalyticsPage: React.FC = () => {
                     <th style={{ padding: '0.85rem 1rem' }}>Faculty Name</th>
                     <th style={{ padding: '0.85rem 1rem' }}>Designation</th>
                     <th style={{ padding: '0.85rem 1rem' }}>Assigned Courses</th>
-                    <th style={{ padding: '0.85rem 1rem' }}>Students Taught</th>
-                    <th style={{ padding: '0.85rem 1rem' }}>Attendance Sessions</th>
-                    <th style={{ padding: '0.85rem 1rem' }}>Evaluations Completed</th>
+                    <th style={{ padding: '0.85rem 1rem' }}>Status</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -243,10 +268,8 @@ export const HODAnalyticsPage: React.FC = () => {
                     <tr key={fac.id} style={{ borderBottom: '1px solid rgba(156, 163, 175, 0.15)' }}>
                       <td style={{ padding: '0.85rem 1rem', fontWeight: 700, color: 'var(--brand-black)' }}>{fac.name}</td>
                       <td style={{ padding: '0.85rem 1rem', color: 'var(--brand-dark-grey)' }}>{fac.designation}</td>
-                      <td style={{ padding: '0.85rem 1rem' }} className="font-mono font-bold">{fac.allocatedCoursesCount} Courses</td>
-                      <td style={{ padding: '0.85rem 1rem' }} className="font-mono">{fac.totalStudentsTaught} Students</td>
-                      <td style={{ padding: '0.85rem 1rem' }} className="font-mono font-bold text-blue">{fac.attendanceLoggedCount} Logs</td>
-                      <td style={{ padding: '0.85rem 1rem' }} className="font-mono text-success font-bold">100%</td>
+                      <td style={{ padding: '0.85rem 1rem' }} className="font-mono font-bold">{fac.assignedCourseCount} Courses</td>
+                      <td style={{ padding: '0.85rem 1rem' }}><span className={`badge ${fac.status === 'ACTIVE' ? 'badge-active' : 'badge-pending'}`}>{fac.status}</span></td>
                     </tr>
                   ))}
                 </tbody>
@@ -294,18 +317,18 @@ export const HODAnalyticsPage: React.FC = () => {
                 ALVA'S INSTITUTE OF ENGINEERING & TECHNOLOGY
               </h2>
               <p style={{ fontSize: '0.85rem', color: 'var(--brand-dark-grey)', margin: '0.25rem 0 0 0' }}>
-                Department of Computer Science & Engineering (Data Science)
+                Department of {overview.departmentName}
               </p>
               <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--brand-blue)', marginTop: '0.5rem', margin: 0 }}>
-                {reportType.toUpperCase()} ACADEMIC REPORT — AY 2026–27
+                {reportType.toUpperCase()} ACADEMIC REPORT — AY {overview.academicYear}
               </h3>
             </div>
 
             {/* Report Metadata */}
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--brand-dark-grey)', marginBottom: '1.5rem' }}>
-              <div>Generated By: <strong>Dr. Sneha Reddy (HOD)</strong></div>
+              <div>Generated By: <strong>{overview.hodName}</strong></div>
               <div>Date: <strong className="font-mono">{new Date().toLocaleDateString()}</strong></div>
-              <div>Scope: <strong>CSE — Data Science</strong></div>
+              <div>Scope: <strong>{overview.departmentName}</strong></div>
             </div>
 
             {/* Content summary based on type */}
@@ -313,7 +336,7 @@ export const HODAnalyticsPage: React.FC = () => {
               <div style={{ backgroundColor: 'var(--brand-light-grey)', padding: '1rem', borderRadius: 'var(--border-radius)' }}>
                 <h4 style={{ fontSize: '0.95rem', fontWeight: 700, margin: '0 0 0.5rem 0' }}>Executive Summary</h4>
                 <p style={{ fontSize: '0.875rem', lineHeight: 1.5, margin: 0 }}>
-                  This report summarizes the academic standing, student performance metrics, and attendance compliance for the Data Science department. Overall department attendance stands at 84%, with a cumulative CGPA average of 7.62 across Semesters 3 through 6.
+                  This report summarizes currently recorded academic results, attendance sessions, assignment submissions, and departmental review workload for {overview.departmentName}. Missing source records are shown as unavailable rather than estimated.
                 </p>
               </div>
 
@@ -322,28 +345,24 @@ export const HODAnalyticsPage: React.FC = () => {
                   <tr style={{ backgroundColor: 'var(--brand-light-grey)', borderBottom: '1px solid var(--brand-black)', fontWeight: 700 }}>
                     <th style={{ padding: '0.75rem' }}>Indicator</th>
                     <th style={{ padding: '0.75rem' }}>Current Metric</th>
-                    <th style={{ padding: '0.75rem' }}>Target Standard</th>
-                    <th style={{ padding: '0.75rem' }}>Compliance Status</th>
+                    <th style={{ padding: '0.75rem' }}>Source</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr style={{ borderBottom: '1px solid rgba(156, 163, 175, 0.2)' }}>
                     <td style={{ padding: '0.75rem', fontWeight: 600 }}>Overall Attendance</td>
-                    <td style={{ padding: '0.75rem' }} className="font-mono font-bold">84%</td>
-                    <td style={{ padding: '0.75rem' }} className="font-mono">≥ 80%</td>
-                    <td style={{ padding: '0.75rem', color: 'var(--color-success)', fontWeight: 700 }}>Compliant</td>
+                    <td style={{ padding: '0.75rem' }} className="font-mono font-bold">{attendance.overallAttendance}%</td>
+                    <td style={{ padding: '0.75rem' }}>Attendance session records</td>
                   </tr>
                   <tr style={{ borderBottom: '1px solid rgba(156, 163, 175, 0.2)' }}>
                     <td style={{ padding: '0.75rem', fontWeight: 600 }}>Assignment Submissions</td>
-                    <td style={{ padding: '0.75rem' }} className="font-mono font-bold">88.5%</td>
-                    <td style={{ padding: '0.75rem' }} className="font-mono">≥ 85%</td>
-                    <td style={{ padding: '0.75rem', color: 'var(--color-success)', fontWeight: 700 }}>Compliant</td>
+                    <td style={{ padding: '0.75rem' }} className="font-mono font-bold">{overview.assignmentCompletionPercent == null ? 'Not available' : `${overview.assignmentCompletionPercent}%`}</td>
+                    <td style={{ padding: '0.75rem' }}>Course enrollments and assignment submissions</td>
                   </tr>
                   <tr style={{ borderBottom: '1px solid rgba(156, 163, 175, 0.2)' }}>
                     <td style={{ padding: '0.75rem', fontWeight: 600 }}>Examination Pass Rate</td>
-                    <td style={{ padding: '0.75rem' }} className="font-mono font-bold">96.8%</td>
-                    <td style={{ padding: '0.75rem' }} className="font-mono">≥ 90%</td>
-                    <td style={{ padding: '0.75rem', color: 'var(--color-success)', fontWeight: 700 }}>Compliant</td>
+                    <td style={{ padding: '0.75rem' }} className="font-mono font-bold">{overview.passRatePercent == null ? 'Not available' : `${overview.passRatePercent}%`}</td>
+                    <td style={{ padding: '0.75rem' }}>Recorded Pass/Fail results</td>
                   </tr>
                 </tbody>
               </table>
@@ -356,7 +375,7 @@ export const HODAnalyticsPage: React.FC = () => {
 
                 <div style={{ textAlign: 'center' }}>
                   <div style={{ borderBottom: '1px solid var(--brand-black)', width: '180px', marginBottom: '0.25rem' }}></div>
-                  <div style={{ fontSize: '0.8rem', fontWeight: 700 }}>Dr. Sneha Reddy (HOD)</div>
+                  <div style={{ fontSize: '0.8rem', fontWeight: 700 }}>{overview.hodName}</div>
                 </div>
               </div>
             </div>

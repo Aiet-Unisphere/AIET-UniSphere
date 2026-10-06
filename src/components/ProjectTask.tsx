@@ -1,14 +1,14 @@
 import React from 'react';
 import { CheckCircle, Circle, Clock, User } from 'lucide-react';
-import type { ProjectTaskItem } from '../data/projectTasks';
+import type { ProjectTask as ProjectTaskData } from '../services/projectService';
 
 interface ProjectTaskProps {
-  task: ProjectTaskItem;
+  task: ProjectTaskData;
   onToggle?: (id: string) => void;
 }
 
 export const ProjectTask: React.FC<ProjectTaskProps> = ({ task, onToggle }) => {
-  const getTaskStatusIcon = (status: ProjectTaskItem['status']) => {
+  const getTaskStatusIcon = (status: ProjectTaskData['status']) => {
     switch (status) {
       case 'Completed':
         return <CheckCircle size={16} style={{ color: 'var(--color-success)' }} />;
@@ -42,8 +42,8 @@ export const ProjectTask: React.FC<ProjectTaskProps> = ({ task, onToggle }) => {
             {task.title}
           </span>
           <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginTop: '0.25rem', fontSize: '0.75rem', color: 'var(--brand-dark-grey)' }}>
-            <span><User size={12} style={{ display: 'inline', marginRight: '0.2rem' }} />{task.assignee}</span>
-            <span>Due: {task.dueDate}</span>
+            <span><User size={12} style={{ display: 'inline', marginRight: '0.2rem' }} />{task.assigned_to || 'Unassigned'}</span>
+            <span>Due: {task.due_date || 'Not set'}</span>
           </div>
         </div>
         <span className={`badge ${task.status === 'Completed' ? 'badge-graded' : task.status === 'In Progress' ? 'badge-active' : 'badge-secondary'}`}>

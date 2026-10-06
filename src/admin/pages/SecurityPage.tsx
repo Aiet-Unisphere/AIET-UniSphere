@@ -9,15 +9,14 @@ import {
   Filter, 
   CheckCircle2, 
   AlertTriangle, 
-  RefreshCw,
   UserCheck,
   ShieldAlert,
   Clock
 } from 'lucide-react';
 import { AdminAppShell } from '../components/AdminAppShell';
 import { getAuditLogs } from '../../services/auditService';
-import { getUsers, resetUserPassword, generateTempCredential, lockUser, unlockUser } from '../../services/userService';
-import type { AuditLogEvent } from '../../shared/types/audit';
+import { getUsers, resetUserPassword, lockUser, unlockUser } from '../../services/userService';
+import type { AuditLogEvent } from '../../services/auditService';
 import type { User } from '../../shared/types/user';
 
 export const SecurityPage: React.FC = () => {
@@ -32,7 +31,6 @@ export const SecurityPage: React.FC = () => {
   // Selected User for Security Actions
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
-  const [tempToken, setTempToken] = useState<string | null>(null);
 
   const fetchSecurityData = async () => {
     setLoading(true);
@@ -62,17 +60,6 @@ export const SecurityPage: React.FC = () => {
     const res = await resetUserPassword(selectedUser.id);
     if (res) {
       setActionNotice(`Administrative password reset requested for ${selectedUser.name}.`);
-      setTempToken(null);
-      fetchSecurityData();
-    }
-  };
-
-  const handleGenerateTempCred = async () => {
-    if (!selectedUser) return;
-    const token = await generateTempCredential(selectedUser.id);
-    if (token) {
-      setTempToken(token);
-      setActionNotice(`Temporary one-time access token generated for ${selectedUser.name}.`);
       fetchSecurityData();
     }
   };
@@ -91,10 +78,12 @@ export const SecurityPage: React.FC = () => {
 
   const filteredLogs = auditLogs.filter(log => {
     const matchesAction = actionFilter === 'All' || log.action === actionFilter;
-    const matchesQuery = !searchQuery || 
-      log.actorName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      log.targetUserName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      log.targetUserId.toLowerCase().includes(searchQuery.toLowerCase());
+    const normalizedSearch = searchQuery.toLowerCase();
+    const matchesQuery = !searchQuery ||
+      (log.actor_email || '').toLowerCase().includes(normalizedSearch) ||
+      (log.actor_id || '').toLowerCase().includes(normalizedSearch) ||
+      (log.entity_type || '').toLowerCase().includes(normalizedSearch) ||
+      (log.entity_id || '').toLowerCase().includes(normalizedSearch);
     return matchesAction && matchesQuery;
   });
 
@@ -120,11 +109,6 @@ export const SecurityPage: React.FC = () => {
             <CheckCircle2 size={18} />
             <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>{actionNotice}</span>
           </div>
-          {tempToken && (
-            <div style={{ backgroundColor: 'var(--brand-black)', color: '#FFF', padding: '0.35rem 0.75rem', borderRadius: 'var(--border-radius)', fontSize: '0.8rem' }} className="font-mono font-bold">
-              Temporary Token: {tempToken}
-            </div>
-          )}
         </div>
       )}
 
@@ -200,14 +184,6 @@ export const SecurityPage: React.FC = () => {
                 </button>
 
                 <button 
-                  onClick={handleGenerateTempCred}
-                  className="btn btn-secondary font-sans"
-                >
-                  <RefreshCw size={16} />
-                  <span>Generate Temp Credential</span>
-                </button>
-
-                <button 
                   onClick={handleToggleLock}
                   className="btn btn-secondary font-sans"
                   style={{ color: selectedUser.status === 'Locked' ? 'var(--color-success)' : 'var(--color-error)' }}
@@ -269,11 +245,10 @@ export const SecurityPage: React.FC = () => {
             <thead>
               <tr style={{ backgroundColor: 'var(--brand-light-grey)', borderBottom: '1px solid rgba(156, 163, 175, 0.2)', color: 'var(--brand-black)', fontWeight: 700, textTransform: 'uppercase', fontSize: '0.75rem' }}>
                 <th style={{ padding: '0.85rem 1.25rem' }}>Audit Event & Action</th>
-                <th style={{ padding: '0.85rem 1.25rem' }}>Target User</th>
-                <th style={{ padding: '0.85rem 1.25rem' }}>Actor (Admin)</th>
+                <th style={{ padding: '0.85rem 1.25rem' }}>Entity</th>
+                <th style={{ padding: '0.85rem 1.25rem' }}>Actor</th>
                 <th style={{ padding: '0.85rem 1.25rem' }}>Event Metadata</th>
                 <th style={{ padding: '0.85rem 1.25rem' }}>Timestamp</th>
-                <th style={{ padding: '0.85rem 1.25rem' }}>Status</th>
               </tr>
             </thead>
             <tbody>
@@ -286,24 +261,20 @@ export const SecurityPage: React.FC = () => {
                   </td>
 
                   <td style={{ padding: '0.85rem 1.25rem' }}>
-                    <div style={{ fontWeight: 700, color: 'var(--brand-black)' }}>{log.targetUserName}</div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--brand-dark-grey)' }}>ID: <span className="font-mono text-blue">{log.targetUserId}</span></div>
+                    <div style={{ fontWeight: 700, color: 'var(--brand-black)' }}>{log.entity_type}</div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--brand-dark-grey)' }}>ID: <span className="font-mono text-blue">{log.entity_id || '—'}</span></div>
                   </td>
 
                   <td style={{ padding: '0.85rem 1.25rem', fontWeight: 600 }}>
-                    {log.actorName} (<span className="font-mono text-blue">{log.actorUserId}</span>)
+                    {log.actor_email || 'Unknown actor'}{log.actor_id ? <> (<span className="font-mono text-blue">{log.actor_id}</span>)</> : ''}
                   </td>
 
                   <td style={{ padding: '0.85rem 1.25rem', color: 'var(--brand-dark-grey)', fontSize: '0.8rem' }}>
-                    {log.metadata || '—'}
+                    {log.description || (log.metadata ? JSON.stringify(log.metadata) : '—')}
                   </td>
 
                   <td style={{ padding: '0.85rem 1.25rem' }} className="font-mono">
-                    {log.timestamp}
-                  </td>
-
-                  <td style={{ padding: '0.85rem 1.25rem' }}>
-                    <span className="badge badge-active">{log.status}</span>
+                    {new Date(log.created_at).toLocaleString()}
                   </td>
                 </tr>
               ))}

@@ -6,12 +6,11 @@ import { EmptyState } from '../components/EmptyState';
 import { ErrorState } from '../components/ErrorState';
 import { ProjectCard } from '../components/ProjectCard';
 import { CreateProjectModal } from '../components/CreateProjectModal';
-import type { ProjectItem } from '../data/projects';
+import type { Project, CreateProjectPayload } from '../services/projectService';
 import { getPersonalProjects, createProject } from '../services/projectService';
-import type { CreateProjectPayload } from '../services/projectService';
 
 export const MyProjectsList: React.FC = () => {
-  const [personalProjects, setPersonalProjects] = useState<ProjectItem[]>([]);
+  const [personalProjects, setPersonalProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -57,7 +56,7 @@ export const MyProjectsList: React.FC = () => {
 
   const filteredProjects = personalProjects.filter(p => 
     p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    p.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (p.description || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
     p.technology.some(t => t.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 

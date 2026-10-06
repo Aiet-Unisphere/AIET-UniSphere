@@ -5,15 +5,15 @@ import {
   Users, 
   Terminal
 } from 'lucide-react';
-import type { ProjectItem } from '../data/projects';
+import type { Project } from '../services/projectService';
 import { ProgressBar } from './ProgressBar';
 
 interface ProjectCardProps {
-  project: ProjectItem;
+  project: Project;
   showWorkspaceButton?: boolean;
 }
 
-export const getStatusBadgeClass = (status: ProjectItem['status']) => {
+export const getStatusBadgeClass = (status: Project['status']) => {
   switch (status) {
     case 'Active':
       return 'badge-active';
@@ -41,29 +41,29 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
           <span className={`badge ${getStatusBadgeClass(project.status)}`}>
             {project.status}
           </span>
-          <span className="project-type-tag">{project.projectType}</span>
+          <span className="project-type-tag">{project.project_type}</span>
         </div>
         <span className="project-deadline-badge">
           <Calendar size={13} />
-          Due: {project.deadline}
+          Due: {project.deadline || 'Not set'}
         </span>
       </div>
 
       <h3 className="project-card-title">{project.name}</h3>
-      <p className="project-card-description">{project.description}</p>
+      <p className="project-card-description">{project.description || 'No description provided.'}</p>
 
       <div className="project-card-meta-list">
         <div className="project-meta-item">
           <span className="meta-label">Course:</span>
-          <span className="meta-val">{project.course}</span>
+          <span className="meta-val">{project.course_name || 'Independent project'}</span>
         </div>
         <div className="project-meta-item">
           <span className="meta-label">Mentor:</span>
-          <span className="meta-val">{project.faculty}</span>
+          <span className="meta-val">{project.faculty_mentor || 'Not assigned'}</span>
         </div>
         <div className="project-meta-item">
           <span className="meta-label">Current Milestone:</span>
-          <span className="meta-val milestone-highlight">{project.currentMilestone}</span>
+          <span className="meta-val milestone-highlight">{project.status === 'Completed' ? 'Completed' : 'In progress'}</span>
         </div>
       </div>
 
@@ -85,7 +85,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
         <div className="project-team-avatars">
           <Users size={14} className="text-dark-grey" />
           <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--brand-dark-grey)' }}>
-            {project.team.length} member{project.team.length > 1 ? 's' : ''}
+            {project.team_members.length} member{project.team_members.length !== 1 ? 's' : ''}
           </span>
         </div>
 

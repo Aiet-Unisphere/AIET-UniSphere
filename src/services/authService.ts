@@ -14,62 +14,43 @@ export const authService = {
    * Sign in with email/USN/employee ID and password
    */
   async signIn(identifier: string, password: string): Promise<{ session: Session | null; profile: Profile | null }> {
-    let email = identifier.trim();
-
-    // If identifier is not an email format, lookup email by usn_or_employee_id via RPC
+    const normalizedIdentifier = identifier.trim();
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      let resolvedEmail: string | null = null;
+    let session: Session | null = null;
 
-      // 1. Primary: SECURITY DEFINER RPC function (bypasses pre-auth anon RLS safely)
-      const { data: rpcData, error: rpcError } = await (supabase.rpc as any)('get_email_by_identifier', {
-        identifier_input: email,
+    if (emailRegex.test(normalizedIdentifier)) {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: normalizedIdentifier,
+        password,
       });
-
-      if (!rpcError && rpcData && rpcData.length > 0 && rpcData[0].email) {
-        resolvedEmail = rpcData[0].email;
-      } else {
-        // 2. Fallback: Direct profiles query (case-insensitive)
-        const { data: matchedProfiles, error: lookupError } = await (supabase.from('profiles') as any)
-          .select('email')
-          .ilike('usn_or_employee_id', email)
-          .limit(1);
-
-        if (!lookupError && matchedProfiles && matchedProfiles.length > 0) {
-          resolvedEmail = matchedProfiles[0].email;
-        }
+      if (error) throw new Error(error.message || 'Invalid credentials.');
+      session = data.session;
+    } else {
+      const { data, error } = await supabase.functions.invoke('identifier-login', {
+        body: { identifier: normalizedIdentifier, password },
+      });
+      if (error || !data?.session?.access_token || !data?.session?.refresh_token) {
+        throw new Error(data?.error || error?.message || 'Invalid credentials or account unavailable.');
       }
-
-      if (!resolvedEmail) {
-        throw new Error('No user found matching the provided USN or Employee ID.');
-      }
-      email = resolvedEmail;
+      const { data: sessionData, error: sessionError } = await supabase.auth.setSession({
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
+      });
+      if (sessionError) throw new Error('Authentication failed.');
+      session = sessionData.session;
     }
 
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-    if (error) {
-      throw new Error(error.message || 'Invalid credentials.');
-    }
-
-    if (!data.user) {
-      throw new Error('Authentication failed.');
-    }
+    if (!session?.user) throw new Error('Authentication failed.');
 
     // Fetch user profile STRICTLY using the authenticated Supabase user's UUID (data.user.id)
-    const profile = await this.getCurrentProfile(data.user.id);
+    const profile = await this.getCurrentProfile(session.user.id);
 
-    if (profile) {
-      if (profile.account_status === 'INACTIVE' || profile.account_status === 'LOCKED') {
-        await this.signOut();
-        throw new Error(`Your account status is ${profile.account_status.toLowerCase()}. Please contact the administrator.`);
-      }
+    if (!profile || profile.account_status !== 'ACTIVE') {
+      await this.signOut();
+      throw new Error('Your account is unavailable. Please contact the administrator.');
     }
 
-    return { session: data.session, profile };
+    return { session, profile };
   },
 
   /**

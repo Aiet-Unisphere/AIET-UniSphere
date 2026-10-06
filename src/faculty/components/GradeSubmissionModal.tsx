@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { X, Award, FileText, CheckCircle2 } from 'lucide-react';
 import { gradeSubmission } from '../../services/assignmentService';
 import type { FacultyAssignmentSubmission } from '../../services/assignmentService';
@@ -16,14 +16,19 @@ export const GradeSubmissionModal: React.FC<GradeSubmissionModalProps> = ({
   onClose,
   onSuccess
 }) => {
-  if (!submission) return null;
-
-  const [marks, setMarks] = useState<number>(submission.marks !== undefined ? submission.marks : Math.floor(totalMarks * 0.85));
-  const [feedback, setFeedback] = useState<string>(
-    submission.feedback || "Good structure and technical clarity. All core query execution requirements were satisfied."
-  );
+  const [marks, setMarks] = useState<number>(0);
+  const [feedback, setFeedback] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!submission) return;
+    setMarks(submission.marks ?? 0);
+    setFeedback(submission.feedback || '');
+    setError('');
+  }, [submission, totalMarks]);
+
+  if (!submission) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,11 +40,11 @@ export const GradeSubmissionModal: React.FC<GradeSubmissionModalProps> = ({
     setIsSubmitting(true);
     try {
       await gradeSubmission(submission.assignmentId, submission.id, Number(marks), feedback.trim());
-      setIsSubmitting(false);
       onSuccess();
       onClose();
     } catch (err) {
-      console.error(err);
+      setError(err instanceof Error ? err.message : 'Unable to save this grade.');
+    } finally {
       setIsSubmitting(false);
     }
   };

@@ -1,8 +1,8 @@
 import React from 'react';
-import type { ProjectTeamMember } from '../data/projects';
+import type { TeamMember } from '../services/projectService';
 
 interface ProjectTeamProps {
-  members: ProjectTeamMember[];
+  members: TeamMember[];
 }
 
 export const ProjectTeam: React.FC<ProjectTeamProps> = ({ members }) => {
@@ -31,7 +31,7 @@ export const ProjectTeam: React.FC<ProjectTeamProps> = ({ members }) => {
             </span>
             
             <p style={{ fontSize: '0.8rem', color: 'var(--brand-dark-grey)', marginTop: '0.25rem' }}>
-              {member.contribution}
+              {member.contribution || 'Team member'}
             </p>
           </div>
         </div>

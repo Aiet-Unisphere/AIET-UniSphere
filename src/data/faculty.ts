@@ -4,10 +4,10 @@ export interface FacultyMember {
   name: string;
   department: string;
   departmentId: string;
-  designation: 'Professor & HOD' | 'Professor' | 'Associate Professor' | 'Assistant Professor';
+  designation: string;
   email: string;
   phone: string;
-  status: 'Active' | 'On Leave' | 'Busy';
+  status: 'Active' | 'Inactive' | 'Locked' | 'Pending';
   assignedCourses: {
     courseId: string;
     courseCode: string;

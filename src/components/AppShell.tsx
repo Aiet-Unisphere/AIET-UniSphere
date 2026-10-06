@@ -23,28 +23,40 @@ import {
   GraduationCap,
   Trophy,
   LifeBuoy,
-  Menu, 
+  ChevronLeft,
+  ChevronRight,
   Search, 
   LogOut, 
   User as UserIcon,
   ChevronDown
 } from 'lucide-react';
 import { AuthLogo } from './AuthLogo';
-import { mockStudentProfile } from '../data/students';
 import { getUnreadNotificationsCount } from '../services/notificationService';
 
 import { useAuth } from '../app/context/AuthContext';
 
+import { UserAvatar } from './UserAvatar';
+
 interface AppShellProps {
   children: React.ReactNode;
 }
+
+// Module-level state to persist sidebar collapse/expand state during route navigation
+let globalSidebarState: boolean | null = null;
 
 export const AppShell: React.FC<AppShellProps> = ({ children }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const { signOut, profile, user } = useAuth();
   
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
+    if (globalSidebarState !== null) return globalSidebarState;
+    if (typeof window !== 'undefined') {
+      return window.innerWidth >= 768;
+    }
+    return true;
+  });
+
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [unreadNotifications, setUnreadNotifications] = useState(2);
   
@@ -74,6 +86,21 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, []);
+
+  const toggleSidebar = () => {
+    setIsSidebarOpen((prev) => {
+      const next = !prev;
+      globalSidebarState = next;
+      return next;
+    });
+  };
+
+  const handleNavClick = () => {
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      setIsSidebarOpen(false);
+      globalSidebarState = false;
+    }
+  };
 
   const handleLogout = async () => {
     if (confirm("Are you sure you want to sign out?")) {
@@ -105,7 +132,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
   const navDevelopment = [
     { label: 'Projects', path: '/student/projects', icon: <FolderGit2 size={18} /> },
     { label: 'My Projects', path: '/student/projects/my', icon: <FolderPlus size={18} /> },
-    { label: 'Workspace', path: '/student/projects/proj-1/workspace', icon: <Terminal size={18} /> },
+    { label: 'Project Workspace', path: '/student/projects/my', icon: <Terminal size={18} /> },
     { label: 'Git / GitHub', path: '/student/github', icon: <GitBranch size={18} /> },
   ];
 
@@ -161,15 +188,19 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
   };
 
   return (
-    <div className="app-shell student-theme">
+    <div className={`app-shell student-theme ${isSidebarOpen ? 'sidebar-open' : 'sidebar-collapsed'}`}>
       {/* Sidebar overlay for mobile */}
       <div 
         className={`sidebar-overlay ${isSidebarOpen ? 'open' : ''}`} 
-        onClick={() => setIsSidebarOpen(false)}
+        onClick={() => {
+          setIsSidebarOpen(false);
+          globalSidebarState = false;
+        }}
+        aria-hidden="true"
       ></div>
 
       {/* Sidebar Component */}
-      <aside className={`app-sidebar ${isSidebarOpen ? 'open' : ''}`}>
+      <aside className={`app-sidebar ${isSidebarOpen ? 'open' : 'collapsed'}`}>
         <div className="app-sidebar-logo-container">
           <AuthLogo compact subtext="" />
         </div>
@@ -183,8 +214,9 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                 <NavLink
                   key={item.path}
                   to={item.path}
+                  title={item.label}
                   className={({ isActive }) => `app-sidebar-link ${isActive ? 'active' : ''}`}
-                  onClick={() => setIsSidebarOpen(false)}
+                  onClick={handleNavClick}
                 >
                   {item.icon}
                   <span>{item.label}</span>
@@ -201,8 +233,9 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                 <NavLink
                   key={item.path}
                   to={item.path}
+                  title={item.label}
                   className={({ isActive }) => `app-sidebar-link ${isActive ? 'active' : ''}`}
-                  onClick={() => setIsSidebarOpen(false)}
+                  onClick={handleNavClick}
                 >
                   {item.icon}
                   <span>{item.label}</span>
@@ -219,8 +252,9 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                 <NavLink
                   key={item.path}
                   to={item.path}
+                  title={item.label}
                   className={({ isActive }) => `app-sidebar-link ${isActive ? 'active' : ''}`}
-                  onClick={() => setIsSidebarOpen(false)}
+                  onClick={handleNavClick}
                 >
                   {item.icon}
                   <span style={{ flexGrow: 1 }}>{item.label}</span>
@@ -240,8 +274,9 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                 <NavLink
                   key={item.path}
                   to={item.path}
+                  title={item.label}
                   className={({ isActive }) => `app-sidebar-link ${isActive ? 'active' : ''}`}
-                  onClick={() => setIsSidebarOpen(false)}
+                  onClick={handleNavClick}
                 >
                   {item.icon}
                   <span>{item.label}</span>
@@ -258,8 +293,9 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                 <NavLink
                   key={item.path}
                   to={item.path}
+                  title={item.label}
                   className={({ isActive }) => `app-sidebar-link ${isActive ? 'active' : ''}`}
-                  onClick={() => setIsSidebarOpen(false)}
+                  onClick={handleNavClick}
                 >
                   {item.icon}
                   <span>{item.label}</span>
@@ -276,8 +312,9 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                 <NavLink
                   key={item.path}
                   to={item.path}
+                  title={item.label}
                   className={({ isActive }) => `app-sidebar-link ${isActive ? 'active' : ''}`}
-                  onClick={() => setIsSidebarOpen(false)}
+                  onClick={handleNavClick}
                 >
                   {item.icon}
                   <span>{item.label}</span>
@@ -294,8 +331,9 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                 <NavLink
                   key={item.path}
                   to={item.path}
+                  title={item.label}
                   className={({ isActive }) => `app-sidebar-link ${isActive ? 'active' : ''}`}
-                  onClick={() => setIsSidebarOpen(false)}
+                  onClick={handleNavClick}
                 >
                   {item.icon}
                   <span>{item.label}</span>
@@ -309,6 +347,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
           <button 
             onClick={handleLogout} 
             className="app-sidebar-link"
+            title="Sign Out"
             style={{ 
               width: '100%', 
               background: 'none', 
@@ -325,16 +364,17 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
       </aside>
 
       {/* Main Area */}
-      <div className="app-main">
+      <div className={`app-main ${isSidebarOpen ? 'sidebar-open' : 'sidebar-collapsed'}`}>
         {/* Top Header */}
         <header className="app-header">
           <div className="header-left">
             <button 
-              className="hamburger-btn" 
-              onClick={() => setIsSidebarOpen(true)}
-              aria-label="Open sidebar menu"
+              className="sidebar-toggle-btn" 
+              onClick={toggleSidebar}
+              aria-label={isSidebarOpen ? "Collapse navigation menu" : "Expand navigation menu"}
+              title={isSidebarOpen ? "Collapse navigation" : "Expand navigation"}
             >
-              <Menu size={24} />
+              {isSidebarOpen ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}
             </button>
             <h2 style={{ fontSize: '1.25rem', fontWeight: 600 }}>{getPageTitle()}</h2>
           </div>
@@ -370,9 +410,11 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                 aria-expanded={isProfileOpen}
                 aria-label="Open profile settings"
               >
-                <div className="profile-avatar">
-                  {((profile?.full_name || user?.email || 'Student').split(' ').map((n: string) => n[0]).join('')).substring(0, 2)}
-                </div>
+                <UserAvatar
+                  name={profile?.full_name || user?.email || 'Student'}
+                  avatarPath={profile?.avatar_path || profile?.avatar_url}
+                  size="sm"
+                />
                 <span style={{ fontSize: '0.9rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                   {profile?.full_name || user?.email?.split('@')[0] || 'Student'}
                   <ChevronDown size={14} />
@@ -418,3 +460,4 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
   );
 };
 export default AppShell;
+

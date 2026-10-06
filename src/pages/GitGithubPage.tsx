@@ -9,8 +9,6 @@ import {
   Terminal,
   AlertTriangle,
   FolderSync,
-  Key,
-  ShieldCheck,
   CheckCircle2,
   X,
   Gauge
@@ -43,7 +41,6 @@ import {
   getUserRepositories,
   saveSelectedRepository,
   getSelectedRepository,
-  connectGitHubWithToken,
   syncRepository,
   clearWorkspaceChanges,
   getRateLimitDiagnostics,
@@ -72,9 +69,7 @@ export const GitGithubPage: React.FC = () => {
   // Modals & Conflict state
   const [selectedCommitDetail, setSelectedCommitDetail] = useState<GitCommitItem | null>(null);
   const [showRepoModal, setShowRepoModal] = useState(false);
-  const [showConnectModal, setShowConnectModal] = useState(false);
   const [userRepos, setUserRepos] = useState<GitHubRepositoryItem[]>([]);
-  const [tokenInput, setTokenInput] = useState('');
   const [conflictState, setConflictState] = useState<{ remoteMsg?: string } | null>(null);
 
   const fetchGitData = useCallback(async () => {
@@ -152,24 +147,7 @@ export const GitGithubPage: React.FC = () => {
       const authUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=repo%20user%20read:user&state=${user?.id || ''}`;
       window.location.href = authUrl;
     } else {
-      setShowConnectModal(true);
-    }
-  };
-
-  const handleConnectWithToken = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!tokenInput.trim()) return;
-    try {
-      setIsLoading(true);
-      await connectGitHubWithToken(tokenInput.trim());
-      setShowConnectModal(false);
-      setTokenInput('');
-      setStatusMessage("GitHub connected successfully!");
-      await fetchGitData();
-    } catch (err: any) {
-      alert(err.message || "Failed to connect GitHub.");
-    } finally {
-      setIsLoading(false);
+      setError('GitHub OAuth is not configured. Set VITE_GITHUB_CLIENT_ID and deploy the github-oauth Edge Function.');
     }
   };
 
@@ -485,47 +463,6 @@ export const GitGithubPage: React.FC = () => {
         </div>
       )}
 
-      {/* GitHub Authorization / Token Fallback Modal */}
-      {showConnectModal && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1rem' }}>
-          <div className="dashboard-panel" style={{ width: '100%', maxWidth: '480px', padding: '1.5rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-              <h3 className="font-display" style={{ fontSize: '1.15rem', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <ShieldCheck size={18} className="text-orange-icon" /> Connect GitHub Identity
-              </h3>
-              <button className="ide-btn-icon" onClick={() => setShowConnectModal(false)}>
-                <X size={18} />
-              </button>
-            </div>
-
-            <p style={{ fontSize: '0.85rem', color: 'var(--brand-dark-grey)', marginBottom: '1rem', lineHeight: 1.4 }}>
-              Connect your GitHub account securely to fetch repositories, branches, commits, and push modifications directly from AIET-UniSphere.
-            </p>
-
-            <form onSubmit={handleConnectWithToken}>
-              <label className="form-label" style={{ fontSize: '0.85rem', fontWeight: 600 }}>
-                <Key size={14} style={{ display: 'inline', marginRight: '0.3rem' }} />
-                GitHub Personal Access Token (repo & user scope)
-              </label>
-              <input
-                type="password"
-                className="form-input font-mono"
-                placeholder="ghp_..."
-                value={tokenInput}
-                onChange={(e) => setTokenInput(e.target.value)}
-                style={{ marginTop: '0.35rem', marginBottom: '1rem' }}
-                autoFocus
-              />
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
-                <button type="button" className="btn btn-secondary" onClick={() => setShowConnectModal(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary" disabled={!tokenInput.trim()}>
-                  Connect Account
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </AppShell>
   );
 };

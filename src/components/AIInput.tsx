@@ -52,9 +52,6 @@ export const AIInput: React.FC<AIInputProps> = ({
         </button>
       </div>
       
-      <div className="ai-input-hint font-mono">
-        Shift + Enter for new line • Mock AI responses simulated for frontend trial
-      </div>
     </form>
   );
 };

@@ -1,9 +1,6 @@
 import { supabase } from '../lib/supabase';
-import { mockUsersList } from '../admin/data/users';
 import { addAuditLog } from './auditService';
 import type { User, UserRole, AccountStatus } from '../shared/types/user';
-
-let localUsersStore: User[] = [...mockUsersList];
 
 const mapProfileToUser = (profile: any): User => {
   const statusMap: Record<string, AccountStatus> = {
@@ -22,13 +19,13 @@ const mapProfileToUser = (profile: any): User => {
     userId: profile.usn_or_employee_id || profile.id.substring(0, 8),
     name: profile.full_name || profile.email.split('@')[0],
     email: profile.email,
-    phone: '+91 98765 00000',
+    ...(profile.phone ? { phone: profile.phone } : {}),
     role: profile.role,
     departmentId: profile.department_id || profile.department?.id || '',
     departmentName: deptName,
-    designation: profile.role === 'HOD' ? 'Professor & HOD' : (profile.role === 'FACULTY' ? 'Assistant Professor' : undefined),
-    status: statusMap[profile.account_status] || 'Active',
-    lastActivity: 'Active on platform',
+    designation: profile.designation || undefined,
+    status: statusMap[profile.account_status] || 'Pending',
+    lastActivity: 'Not available',
     createdAt: profile.created_at ? profile.created_at.split('T')[0] : new Date().toISOString().split('T')[0]
   };
 };
@@ -53,13 +50,8 @@ export const getUsers = async (
       `)
       .order('created_at', { ascending: false });
 
-    let result: User[] = [];
-
-    if (!error && dbProfiles && dbProfiles.length > 0) {
-      result = dbProfiles.map((p: any) => mapProfileToUser(p));
-    } else {
-      result = [...localUsersStore];
-    }
+    if (error) throw new Error(`Failed to load users: ${error.message}`);
+    let result: User[] = (dbProfiles || []).map((p: any) => mapProfileToUser(p));
 
     if (filterRole && filterRole !== 'All') {
       result = result.filter(u => u.role === filterRole);
@@ -94,7 +86,7 @@ export const getUsers = async (
     return result;
   } catch (err) {
     console.error("Error in getUsers:", err);
-    return localUsersStore;
+    throw err;
   }
 };
 
@@ -113,18 +105,17 @@ export const getUserById = async (id: string): Promise<User | null> => {
       .or(`id.eq.${id},usn_or_employee_id.eq.${id}`)
       .single();
 
-    if (!error && profile) {
-      return mapProfileToUser(profile);
-    }
-  } catch {
-    // Fallback to local
+    if (error?.code === 'PGRST116') return null;
+    if (error) throw new Error(`Failed to load user: ${error.message}`);
+    return profile ? mapProfileToUser(profile) : null;
+  } catch (err) {
+    console.error('Error in getUserById:', err);
+    throw err;
   }
-  const u = localUsersStore.find(user => user.id === id || user.userId.toLowerCase() === id.toLowerCase());
-  return u || null;
 };
 
 export const createUser = async (data: Omit<User, 'id' | 'createdAt' | 'lastActivity'> & { password?: string }): Promise<User> => {
-  const tempPassword = data.password || `Aiet@${Math.floor(100000 + Math.random() * 900000)}`;
+  if (!data.password) throw new Error('A password is required to provision this account.');
 
   try {
     const { data: edgeData, error: edgeError } = await supabase.functions.invoke('admin-provision-user', {
@@ -133,7 +124,7 @@ export const createUser = async (data: Omit<User, 'id' | 'createdAt' | 'lastActi
         usn_or_employee_id: data.userId,
         email: data.email,
         department_id: data.departmentId,
-        password: tempPassword,
+        password: data.password,
         role: data.role
       }
     });
@@ -161,35 +152,22 @@ export const createUser = async (data: Omit<User, 'id' | 'createdAt' | 'lastActi
       // Re-fetch user by ID to get full department relation
       const createdUser = await getUserById(edgeData.user.id);
       
-      addAuditLog({
-        actorUserId: 'ADM-001',
-        actorName: 'System Administrator',
+      await addAuditLog({
         action: 'USER_CREATED',
-        targetUserId: data.userId,
-        targetUserName: data.name,
-        timestamp: new Date().toLocaleString(),
-        metadata: `Provisioned via Edge Function. Role: ${data.role}`,
-        status: 'Success'
+        entity_type: 'profile',
+        entity_id: edgeData.user.id,
+        description: 'User provisioned via the admin Edge Function.',
+        metadata: { role: data.role },
       });
 
       return createdUser || mapProfileToUser(edgeData.user);
     }
   } catch (err: unknown) {
-    if (err instanceof Error && !err.message.includes('Failed to fetch')) {
-      throw err;
-    }
+    if (err instanceof Error) throw err;
+    throw new Error('User provisioning failed.');
   }
 
-  // Local fallback if edge function unavailable
-  const newUser: User = {
-    ...data,
-    id: `usr-${Math.floor(100 + Math.random() * 900)}`,
-    createdAt: new Date().toISOString().split('T')[0],
-    lastActivity: 'Just created'
-  };
-
-  localUsersStore.unshift(newUser);
-  return newUser;
+  throw new Error('User provisioning returned no account record.');
 };
 
 export const updateUser = async (id: string, updates: Partial<User>): Promise<User | null> => {
@@ -264,10 +242,6 @@ export const resetUserPassword = async (id: string): Promise<boolean> => {
   return false;
 };
 
-export const generateTempCredential = async (id: string): Promise<string | null> => {
-  return `TOKEN-TEMP-${Math.floor(1000 + Math.random() * 9000)}`;
-};
-
 const updateUserStatus = async (id: string, status: AccountStatus, auditAction: any, metadata: string): Promise<User | null> => {
   const dbStatusMap: Record<string, string> = {
     'Active': 'ACTIVE',
@@ -276,27 +250,23 @@ const updateUserStatus = async (id: string, status: AccountStatus, auditAction: 
     'Pending': 'PENDING'
   };
 
-  try {
-    const { error: edgeErr } = await supabase.functions.invoke('admin-provision-user', {
-      body: {
-        action: 'update_status',
-        targetUserId: id,
-        newStatus: dbStatusMap[status] || 'ACTIVE'
-      }
-    });
-
-    if (edgeErr) {
-      await (supabase as any)
-        .from('profiles')
-        .update({
-          account_status: dbStatusMap[status] || 'ACTIVE',
-          updated_at: new Date().toISOString()
-        })
-        .or(`id.eq.${id},usn_or_employee_id.eq.${id}`);
+  const { data, error } = await supabase.functions.invoke('admin-provision-user', {
+    body: {
+      action: 'update_status',
+      targetUserId: id,
+      newStatus: dbStatusMap[status] || 'ACTIVE'
     }
-  } catch {
-    // Ignored if offline
-  }
+  });
+  if (error) throw new Error(`Account status update failed: ${error.message}`);
+  if (!data?.success) throw new Error(data?.error || 'Account status update failed.');
+
+  await addAuditLog({
+    action: auditAction,
+    entity_type: 'profile',
+    entity_id: id,
+    description: metadata,
+    metadata: { account_status: dbStatusMap[status] || 'ACTIVE' },
+  });
 
   const updatedUser = await getUserById(id);
   return updatedUser;

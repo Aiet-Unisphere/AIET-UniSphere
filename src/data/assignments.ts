@@ -9,9 +9,16 @@ export interface Assignment {
   instructions: string;
   resources: string[];
   rubric: string[];
+  storagePath?: string;
+  fileName?: string;
+  fileSize?: number;
+  mimeType?: string;
   submittedFile?: {
     name: string;
     submittedAt: string;
+    storagePath?: string;
+    fileSize?: number;
+    mimeType?: string;
   };
   grade?: {
     score: number;

@@ -5,8 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "typecheck": "tsc -b --pretty false",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
+    "test": "node tests/ai_assistant.test.mjs && node tests/analytics_ai_contracts.test.mjs && node tests/local_llm_boundary.test.mjs && node tests/external_learning_student.test.mjs && node tests/external_learning_faculty.test.mjs && node tests/external_learning_hod.test.mjs && node tests/external_learning_security.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

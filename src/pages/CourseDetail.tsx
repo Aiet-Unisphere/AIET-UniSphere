@@ -3,9 +3,11 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { 
   ArrowLeft, 
   FolderDown, 
-  Megaphone
+  Megaphone,
+  FileText
 } from 'lucide-react';
-import { getCourseById } from '../services/courseService';
+import { getCourseById, getCourseMaterials, downloadCourseMaterial } from '../services/courseService';
+import type { CourseMaterialItem } from '../services/courseService';
 import { getAssignments } from '../services/assignmentService';
 import { getAssessments } from '../services/assessmentService';
 import { AppShell } from '../components/AppShell';
@@ -20,6 +22,7 @@ export const CourseDetail: React.FC = () => {
   const [course, setCourse] = useState<any>(null);
   const [courseAssignments, setCourseAssignments] = useState<any[]>([]);
   const [courseAssessments, setCourseAssessments] = useState<any[]>([]);
+  const [courseMaterials, setCourseMaterials] = useState<CourseMaterialItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,14 +41,16 @@ export const CourseDetail: React.FC = () => {
       }
       setCourse(courseData);
 
-      // Fetch related assignments & assessments
-      const [allAssignments, allAssessments] = await Promise.all([
+      // Fetch related assignments, assessments & materials
+      const [allAssignments, allAssessments, materials] = await Promise.all([
         getAssignments(),
-        getAssessments()
+        getAssessments(),
+        getCourseMaterials(courseData.id || id)
       ]);
 
       setCourseAssignments(allAssignments.filter(a => a.courseId === id));
       setCourseAssessments(allAssessments.filter(a => a.courseId === id));
+      setCourseMaterials(materials);
     } catch (err) {
       setError("Unable to load course details. Please try again.");
     } finally {
@@ -76,7 +81,7 @@ export const CourseDetail: React.FC = () => {
   const tabs = [
     { id: 'overview', label: 'Overview' },
     { id: 'modules', label: 'Modules' },
-    { id: 'materials', label: 'Materials' },
+    { id: 'materials', label: `Materials (${courseMaterials.length})` },
     { id: 'assignments', label: `Assignments (${courseAssignments.length})` },
     { id: 'assessments', label: `Assessments (${courseAssessments.length})` },
     { id: 'announcements', label: 'Announcements' },
@@ -222,50 +227,58 @@ export const CourseDetail: React.FC = () => {
         {activeTab === 'materials' && (
           <div className="dashboard-panel">
             <h3 className="panel-title" style={{ marginBottom: '0.75rem' }}>Reference Materials</h3>
-            <div className="data-table-container">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Material Title</th>
-                    <th>Module</th>
-                    <th>Type</th>
-                    <th style={{ textAlign: 'right' }}>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td><strong>Syllabus and Recommended Textbooks</strong></td>
-                    <td>General</td>
-                    <td>PDF File</td>
-                    <td style={{ textAlign: 'right' }}>
-                      <button className="btn btn-secondary" style={{ width: 'auto', padding: '0.35rem 0.65rem', fontSize: '0.8rem' }} onClick={() => alert("Downloading: Syllabus_DBMS.pdf")}>
-                        <FolderDown size={14} /> Download
-                      </button>
-                    </td>
-                  </tr>
-                  <tr>
-                    <td><strong>Module 1: E-R Models and Diagrams Slides</strong></td>
-                    <td>Module 1</td>
-                    <td>PPT Slide</td>
-                    <td style={{ textAlign: 'right' }}>
-                      <button className="btn btn-secondary" style={{ width: 'auto', padding: '0.35rem 0.65rem', fontSize: '0.8rem' }} onClick={() => alert("Downloading: ER_Slides_M1.pptx")}>
-                        <FolderDown size={14} /> Download
-                      </button>
-                    </td>
-                  </tr>
-                  <tr>
-                    <td><strong>Module 3: Advanced SQL Joins Exercises</strong></td>
-                    <td>Module 3</td>
-                    <td>PDF File</td>
-                    <td style={{ textAlign: 'right' }}>
-                      <button className="btn btn-secondary" style={{ width: 'auto', padding: '0.35rem 0.65rem', fontSize: '0.8rem' }} onClick={() => alert("Downloading: SQL_Joins_Exercises.pdf")}>
-                        <FolderDown size={14} /> Download
-                      </button>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
+            {courseMaterials.length === 0 ? (
+              <div style={{ padding: '2.5rem', textAlign: 'center', color: 'var(--brand-dark-grey)' }}>
+                <FileText size={32} style={{ margin: '0 auto 0.5rem', color: '#94A3B8' }} />
+                <p style={{ fontWeight: 600, fontSize: '0.95rem', color: 'var(--brand-black)', margin: 0 }}>No course materials uploaded yet</p>
+                <p style={{ fontSize: '0.8rem', color: '#64748B', marginTop: '0.25rem' }}>Materials uploaded by faculty will appear here for secure download.</p>
+              </div>
+            ) : (
+              <div className="data-table-container">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Material Title</th>
+                      <th>Module</th>
+                      <th>File Name</th>
+                      <th>Size</th>
+                      <th style={{ textAlign: 'right' }}>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {courseMaterials.map((mat) => (
+                      <tr key={mat.id}>
+                        <td><strong>{mat.title}</strong></td>
+                        <td>{mat.moduleId}</td>
+                        <td className="font-mono" style={{ fontSize: '0.85rem' }}>{mat.fileName}</td>
+                        <td style={{ fontSize: '0.85rem', color: '#64748B' }}>
+                          {mat.fileSize ? `${(mat.fileSize / (1024 * 1024)).toFixed(2)} MB` : 'N/A'}
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          {mat.storagePath ? (
+                            <button 
+                              className="btn btn-secondary" 
+                              style={{ width: 'auto', padding: '0.35rem 0.65rem', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }} 
+                              onClick={async () => {
+                                try {
+                                  await downloadCourseMaterial(mat.storagePath!, mat.fileName);
+                                } catch (err: any) {
+                                  alert('Download error: ' + (err.message || 'Unknown error'));
+                                }
+                              }}
+                            >
+                              <FolderDown size={14} /> Download
+                            </button>
+                          ) : (
+                            <span style={{ fontSize: '0.8rem', color: '#94A3B8' }}>No file</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 

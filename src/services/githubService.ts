@@ -8,14 +8,27 @@ import type {
   GitHubRepositoryItem
 } from '../data/repositories';
 
-const GITHUB_CONN_KEY = 'unisphere_github_connection';
-const GITHUB_REPO_KEY = 'unisphere_selected_github_repo';
-const GITHUB_CHANGES_KEY = 'unisphere_workspace_changes';
-
 export interface RateLimitDiagnostics {
   limit: number;
   remaining: number;
   resetTime: string;
+}
+
+async function githubApiFetch(input: string | URL, init?: RequestInit): Promise<Response> {
+  const url = new URL(input.toString(), 'https://api.github.com');
+  if (url.origin !== 'https://api.github.com') throw new Error('Unsupported GitHub API host.');
+  let body: unknown;
+  if (typeof init?.body === 'string') {
+    try { body = JSON.parse(init.body); } catch { throw new Error('Invalid GitHub request payload.'); }
+  }
+
+  const { data, error } = await supabase.functions.invoke('github-api', {
+    body: { path: `${url.pathname}${url.search}`, method: init?.method || 'GET', body },
+  });
+  if (error) throw new Error(`GitHub request failed: ${error.message}`);
+  const status = Number(data?.status || 500);
+  const responseBody = status === 204 || status === 304 ? null : JSON.stringify(data?.body ?? {});
+  return new Response(responseBody, { status, headers: { 'Content-Type': 'application/json' } });
 }
 
 // 0. HELPER FOR STANDARDIZED GITHUB ERROR MESSAGES (TEST 9)
@@ -29,187 +42,67 @@ export const handleGitHubApiError = (res: Response, errJson?: any): string => {
 };
 
 // Helper to get stored access token
-export const getStoredToken = async (): Promise<string | null> => {
-  // 1. Check Supabase github_connections table
-  try {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      const { data } = await (supabase as any)
-        .from('github_connections')
-        .select('access_token')
-        .eq('user_id', user.id)
-        .maybeSingle();
-
-      if (data?.access_token) return data.access_token;
-    }
-  } catch (err) {
-    // DB table fallback
-  }
-
-  // 2. Check local storage cache
-  const cached = localStorage.getItem(GITHUB_CONN_KEY);
-  if (cached) {
-    try {
-      const parsed = JSON.parse(cached);
-      if (parsed.accessToken) return parsed.accessToken;
-    } catch (e) {
-      /* ignore */
-    }
-  }
-
-  // 3. Check environment variable
-  const envToken = import.meta.env.VITE_GITHUB_ACCESS_TOKEN || import.meta.env.VITE_GITHUB_TOKEN;
-  if (envToken && typeof envToken === 'string' && envToken.trim()) {
-    return envToken.trim();
-  }
-
-  return null;
+export const hasGitHubConnection = async (): Promise<boolean> => {
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError) throw new Error(`Unable to verify session: ${authError.message}`);
+  if (!user) return false;
+  const { data, error } = await (supabase as any)
+    .from('github_connections')
+    .select('id')
+    .eq('user_id', user.id)
+    .maybeSingle();
+  if (error) throw new Error(`Unable to load GitHub connection: ${error.message}`);
+  return Boolean(data);
 };
 
 // 1. GET GITHUB CONNECTION (TEST 1 & TEST 8)
 export const getGitHubConnection = async (): Promise<GitHubConnection | null> => {
-  const token = await getStoredToken();
-  if (!token) return null;
-
-  // Validate token directly with GitHub API (TEST 1)
-  try {
-    const ghRes = await fetch('https://api.github.com/user', {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Accept': 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2022-11-28',
-        'User-Agent': 'AIET-UniSphere-App'
-      }
-    });
-
-    if (!ghRes.ok) {
-      console.warn('[githubService] GitHub API token authentication failed:', ghRes.status);
-      return null;
-    }
-
-    const ghUser = await ghRes.json();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    const connObj: GitHubConnection = {
-      id: `conn-${ghUser.id}`,
-      userId: user?.id || 'dev-user',
-      githubUserId: String(ghUser.id),
-      githubUsername: ghUser.login,
-      avatarUrl: ghUser.avatar_url,
-      accessToken: token,
-      scope: 'repo user'
-    };
-
-    localStorage.setItem(GITHUB_CONN_KEY, JSON.stringify(connObj));
-    return connObj;
-  } catch (err) {
-    console.error('[githubService] getGitHubConnection Error:', err);
-    return null;
-  }
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError) throw new Error(`Unable to verify session: ${authError.message}`);
+  if (!user) return null;
+  const { data, error } = await (supabase as any)
+    .from('github_connections')
+    .select('id, github_user_id, github_username, avatar_url, scope, created_at, updated_at')
+    .eq('user_id', user.id)
+    .maybeSingle();
+  if (error) throw new Error(`Unable to load GitHub connection: ${error.message}`);
+  if (!data) return null;
+  return {
+    id: data.id,
+    userId: user.id,
+    githubUserId: data.github_user_id,
+    githubUsername: data.github_username,
+    avatarUrl: data.avatar_url,
+    scope: data.scope,
+    createdAt: data.created_at,
+    updatedAt: data.updated_at,
+  };
 };
 
 // 2. CONNECT WITH OAUTH CODE VIA EDGE FUNCTION
 export const connectGitHubOAuth = async (code: string, redirectUri: string): Promise<GitHubConnection> => {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new Error("Authenticated session required to connect GitHub.");
-
-  const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/github-oauth`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${session.access_token}`
-    },
-    body: JSON.stringify({ code, redirect_uri: redirectUri })
-  });
-
-  const resData = await response.json();
-  if (!response.ok || resData.error) {
-    throw new Error(resData.error || "Failed to exchange GitHub authorization code.");
-  }
+  const { data, error } = await supabase.functions.invoke('github-oauth', { body: { code, redirect_uri: redirectUri } });
+  if (error || !data?.success) throw new Error(data?.error || error?.message || 'Failed to exchange GitHub authorization code.');
 
   const conn = await getGitHubConnection();
   if (!conn) throw new Error("Failed to retrieve connected GitHub profile.");
   return conn;
 };
 
-// 3. CONNECT WITH TOKEN DIRECTLY
-export const connectGitHubWithToken = async (token: string): Promise<GitHubConnection> => {
-  const cleanToken = token.trim();
-  if (!cleanToken) throw new Error("GitHub Access Token is required.");
-
-  const ghRes = await fetch('https://api.github.com/user', {
-    headers: {
-      'Authorization': `Bearer ${cleanToken}`,
-      'Accept': 'application/vnd.github+json',
-      'X-GitHub-Api-Version': '2022-11-28',
-      'User-Agent': 'AIET-UniSphere-App'
-    }
-  });
-
-  if (!ghRes.ok) {
-    const errJson = await ghRes.json().catch(() => ({}));
-    throw new Error(handleGitHubApiError(ghRes, errJson));
-  }
-
-  const ghUser = await ghRes.json();
-  const { data: { user } } = await supabase.auth.getUser();
-
-  const connObj: GitHubConnection = {
-    id: `conn-${ghUser.id}`,
-    userId: user?.id || 'dev-user',
-    githubUserId: String(ghUser.id),
-    githubUsername: ghUser.login,
-    avatarUrl: ghUser.avatar_url,
-    accessToken: cleanToken,
-    scope: 'repo user'
-  };
-
-  if (user) {
-    try {
-      await (supabase as any)
-        .from('github_connections')
-        .upsert({
-          user_id: user.id,
-          github_user_id: String(ghUser.id),
-          github_username: ghUser.login,
-          avatar_url: ghUser.avatar_url,
-          access_token: cleanToken,
-          scope: 'repo user',
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'user_id' });
-    } catch (err) {
-      console.warn('[githubService] Failed to save GitHub connection to DB:', err);
-    }
-  }
-
-  localStorage.setItem(GITHUB_CONN_KEY, JSON.stringify(connObj));
-  return connObj;
-};
-
-// 4. DISCONNECT GITHUB
+// 3. DISCONNECT GITHUB
 export const disconnectGitHub = async (): Promise<void> => {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (user) {
-    try {
-      await (supabase as any)
-        .from('github_connections')
-        .delete()
-        .eq('user_id', user.id);
-    } catch (e) {
-      console.warn('[githubService] Delete connection DB error:', e);
-    }
-  }
-  localStorage.removeItem(GITHUB_CONN_KEY);
-  localStorage.removeItem(GITHUB_REPO_KEY);
-  localStorage.removeItem(GITHUB_CHANGES_KEY);
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError || !user) throw new Error('Authenticated session required to disconnect GitHub.');
+  const { error } = await (supabase as any).from('github_connections').delete().eq('user_id', user.id);
+  if (error) throw new Error(`Failed to disconnect GitHub: ${error.message}`);
 };
 
 // 5. FETCH USER ACCESSIBLE REPOSITORIES FROM GITHUB API (TEST 2)
 export const getUserRepositories = async (): Promise<GitHubRepositoryItem[]> => {
-  const token = await getStoredToken();
+  const token = await hasGitHubConnection();
   if (!token) return [];
 
-  const res = await fetch('https://api.github.com/user/repos?sort=updated&per_page=100&type=all', {
+  const res = await githubApiFetch('https://api.github.com/user/repos?sort=updated&per_page=100&type=all', {
     headers: {
       'Authorization': `Bearer ${token}`,
       'Accept': 'application/vnd.github+json',
@@ -241,63 +134,68 @@ export const getUserRepositories = async (): Promise<GitHubRepositoryItem[]> => 
 
 // 6. SAVE & GET SELECTED REPOSITORY (TEST 3)
 export const saveSelectedRepository = async (repo: GitHubRepositoryItem): Promise<void> => {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (user) {
-    try {
-      await (supabase as any)
-        .from('github_repositories')
-        .update({ is_selected: false })
-        .eq('user_id', user.id);
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError || !user) throw new Error('Authenticated session required to select a repository.');
+  const connection = await getGitHubConnection();
+  if (!connection) throw new Error('Connect GitHub before selecting a repository.');
+  const { error: clearError } = await (supabase as any)
+    .from('github_repositories')
+    .update({ is_selected: false })
+    .eq('user_id', user.id);
+  if (clearError) throw new Error(`Failed to clear previous repository selection: ${clearError.message}`);
 
-      await (supabase as any)
-        .from('github_repositories')
-        .upsert({
-          user_id: user.id,
-          github_repository_id: typeof repo.id === 'number' ? repo.id : null,
-          owner: repo.owner,
-          name: repo.name,
-          full_name: repo.fullName,
-          default_branch: repo.defaultBranch,
-          selected_branch: repo.selectedBranch || repo.defaultBranch,
-          is_private: repo.visibility === 'Private',
-          html_url: repo.htmlUrl,
-          is_selected: true,
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'user_id,owner,name' });
-    } catch (e) {
-      console.warn('[githubService] saveSelectedRepository DB error:', e);
-    }
-  }
-  localStorage.setItem(GITHUB_REPO_KEY, JSON.stringify(repo));
+  const { data, error } = await (supabase as any)
+    .from('github_repositories')
+    .upsert({
+      connection_id: connection.id,
+      user_id: user.id,
+      github_repository_id: typeof repo.id === 'number' ? repo.id : null,
+      owner: repo.owner,
+      name: repo.name,
+      full_name: repo.fullName,
+      default_branch: repo.defaultBranch,
+      selected_branch: repo.selectedBranch || repo.defaultBranch,
+      is_private: repo.visibility === 'Private',
+      html_url: repo.htmlUrl,
+      is_selected: true,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id,owner,name' })
+    .select('id')
+    .single();
+  if (error || !data) throw new Error(`Failed to save repository selection: ${error?.message || 'No record returned.'}`);
+  repo.dbId = data.id;
 };
 
 export const getSelectedRepository = async (): Promise<GitHubRepositoryItem | null> => {
-  // Check local storage first
-  const cached = localStorage.getItem(GITHUB_REPO_KEY);
-  if (cached) {
-    try {
-      const parsed = JSON.parse(cached);
-      if (parsed && parsed.owner && parsed.name) return parsed;
-    } catch (e) {
-      /* ignore */
-    }
-  }
-
-  // Fetch real repositories from GitHub API
-  const repos = await getUserRepositories();
-  if (repos.length > 0) {
-    // Prefer Aiet-Unisphere/AIET-UniSphere if available
-    const defaultTarget = repos.find(r => r.fullName.toLowerCase() === 'aiet-unisphere/aiet-unisphere') || repos[0];
-    await saveSelectedRepository(defaultTarget);
-    return defaultTarget;
-  }
-
-  return null;
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError) throw new Error(`Unable to verify session: ${authError.message}`);
+  if (!user) return null;
+  const { data, error } = await (supabase as any)
+    .from('github_repositories')
+    .select('*')
+    .eq('user_id', user.id)
+    .eq('is_selected', true)
+    .maybeSingle();
+  if (error) throw new Error(`Unable to load selected repository: ${error.message}`);
+  if (!data) return null;
+  return {
+    id: data.github_repository_id || data.id,
+    dbId: data.id,
+    name: data.name,
+    owner: data.owner,
+    fullName: data.full_name,
+    visibility: data.is_private ? 'Private' : 'Public',
+    defaultBranch: data.default_branch,
+    selectedBranch: data.selected_branch,
+    htmlUrl: data.html_url,
+    starsCount: 0,
+    forksCount: 0,
+  };
 };
 
 // 7. GET REPOSITORY OVERVIEW INFO FROM GITHUB API (TEST 3)
 export const getRepositoryInfo = async (): Promise<RepositoryInfo> => {
-  const token = await getStoredToken();
+  const token = await hasGitHubConnection();
   const conn = await getGitHubConnection();
   const selectedRepo = await getSelectedRepository();
 
@@ -319,7 +217,7 @@ export const getRepositoryInfo = async (): Promise<RepositoryInfo> => {
     };
   }
 
-  const repoRes = await fetch(`https://api.github.com/repos/${selectedRepo.owner}/${selectedRepo.name}`, {
+  const repoRes = await githubApiFetch(`https://api.github.com/repos/${selectedRepo.owner}/${selectedRepo.name}`, {
     headers: {
       'Authorization': `Bearer ${token}`,
       'Accept': 'application/vnd.github+json',
@@ -342,7 +240,7 @@ export const getRepositoryInfo = async (): Promise<RepositoryInfo> => {
   let lastCommitAuthor = '';
   let lastCommitDate = '';
 
-  const commitRes = await fetch(`https://api.github.com/repos/${selectedRepo.owner}/${selectedRepo.name}/commits/${activeBranch}`, {
+  const commitRes = await githubApiFetch(`https://api.github.com/repos/${selectedRepo.owner}/${selectedRepo.name}/commits/${activeBranch}`, {
     headers: {
       'Authorization': `Bearer ${token}`,
       'Accept': 'application/vnd.github+json',
@@ -382,11 +280,11 @@ export const getRepositoryInfo = async (): Promise<RepositoryInfo> => {
 
 // 8. GET REAL BRANCHES FROM GITHUB (TEST 4)
 export const getBranches = async (): Promise<GitBranchItem[]> => {
-  const token = await getStoredToken();
+  const token = await hasGitHubConnection();
   const repo = await getSelectedRepository();
   if (!token || !repo) return [];
 
-  const res = await fetch(`https://api.github.com/repos/${repo.owner}/${repo.name}/branches`, {
+  const res = await githubApiFetch(`https://api.github.com/repos/${repo.owner}/${repo.name}/branches`, {
     headers: {
       'Authorization': `Bearer ${token}`,
       'Accept': 'application/vnd.github+json',
@@ -410,7 +308,7 @@ export const getBranches = async (): Promise<GitBranchItem[]> => {
 
     if (b.commit?.url) {
       try {
-        const cRes = await fetch(b.commit.url, {
+        const cRes = await githubApiFetch(b.commit.url, {
           headers: {
             'Authorization': `Bearer ${token}`,
             'Accept': 'application/vnd.github+json',
@@ -451,13 +349,13 @@ export const switchBranch = async (branchName: string): Promise<RepositoryInfo> 
 
 // 10. GET COMMITS FROM GITHUB API (TEST 5)
 export const getCommits = async (): Promise<GitCommitItem[]> => {
-  const token = await getStoredToken();
+  const token = await hasGitHubConnection();
   const repo = await getSelectedRepository();
   if (!token || !repo) return [];
 
   const activeBranch = repo.selectedBranch || repo.defaultBranch || 'main';
 
-  const res = await fetch(`https://api.github.com/repos/${repo.owner}/${repo.name}/commits?sha=${activeBranch}&per_page=30`, {
+  const res = await githubApiFetch(`https://api.github.com/repos/${repo.owner}/${repo.name}/commits?sha=${activeBranch}&per_page=30`, {
     headers: {
       'Authorization': `Bearer ${token}`,
       'Accept': 'application/vnd.github+json',
@@ -488,11 +386,11 @@ export const getCommits = async (): Promise<GitCommitItem[]> => {
 
 // 11. GET DETAILED COMMIT SPECIFICALLY FOR MODAL (TEST 5)
 export const getCommitDetails = async (sha: string): Promise<GitCommitItem | null> => {
-  const token = await getStoredToken();
+  const token = await hasGitHubConnection();
   const repo = await getSelectedRepository();
   if (!token || !repo) return null;
 
-  const res = await fetch(`https://api.github.com/repos/${repo.owner}/${repo.name}/commits/${sha}`, {
+  const res = await githubApiFetch(`https://api.github.com/repos/${repo.owner}/${repo.name}/commits/${sha}`, {
     headers: {
       'Authorization': `Bearer ${token}`,
       'Accept': 'application/vnd.github+json',
@@ -527,41 +425,28 @@ export const getCommitDetails = async (sha: string): Promise<GitCommitItem | nul
 // 12. UNCOMMITTED CHANGES TRACKING
 export const getGitChanges = async (): Promise<GitFileChange> => {
   const repo = await getSelectedRepository();
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError) throw new Error(`Unable to verify session: ${authError.message}`);
+  if (!user || !repo?.dbId) return { modified: [], added: [], deleted: [], renamed: [] };
 
-  if (user && repo) {
-    try {
-      const { data } = await (supabase as any)
-        .from('github_workspace_changes')
-        .select('*')
-        .eq('user_id', user.id);
+  const { data, error } = await (supabase as any)
+    .from('github_workspace_changes')
+    .select('file_path, status')
+    .eq('user_id', user.id)
+    .eq('repository_id', repo.dbId);
+  if (error) throw new Error(`Unable to load workspace changes: ${error.message}`);
 
-      if (data && data.length > 0) {
-        const modified: string[] = [];
-        const added: string[] = [];
-        const deleted: string[] = [];
-        const renamed: string[] = [];
-
-        data.forEach((row: any) => {
-          if (row.status === 'MODIFIED') modified.push(row.file_path);
-          else if (row.status === 'ADDED') added.push(row.file_path);
-          else if (row.status === 'DELETED') deleted.push(row.file_path);
-          else if (row.status === 'RENAMED') renamed.push(row.file_path);
-        });
-
-        return { modified, added, deleted, renamed };
-      }
-    } catch (e) {
-      /* ignore */
-    }
-  }
-
-  const cached = localStorage.getItem(GITHUB_CHANGES_KEY);
-  if (cached) {
-    try { return JSON.parse(cached); } catch (e) { /* ignore */ }
-  }
-
-  return { modified: [], added: [], deleted: [], renamed: [] };
+  const modified: string[] = [];
+  const added: string[] = [];
+  const deleted: string[] = [];
+  const renamed: string[] = [];
+  (data || []).forEach((row: any) => {
+    if (row.status === 'MODIFIED') modified.push(row.file_path);
+    else if (row.status === 'ADDED') added.push(row.file_path);
+    else if (row.status === 'DELETED') deleted.push(row.file_path);
+    else if (row.status === 'RENAMED') renamed.push(row.file_path);
+  });
+  return { modified, added, deleted, renamed };
 };
 
 export const recordWorkspaceFileChange = async (
@@ -573,10 +458,9 @@ export const recordWorkspaceFileChange = async (
   const repo = await getSelectedRepository();
   const { data: { user } } = await supabase.auth.getUser();
 
-  if (user && repo) {
-    try {
-      await (supabase as any)
-        .from('github_workspace_changes')
+  if (!user || !repo) throw new Error('Select a repository before recording workspace changes.');
+  const { error } = await (supabase as any)
+    .from('github_workspace_changes')
         .upsert({
           user_id: user.id,
           repository_id: repo.dbId || null,
@@ -586,10 +470,7 @@ export const recordWorkspaceFileChange = async (
           status: status,
           updated_at: new Date().toISOString()
         }, { onConflict: 'user_id,repository_id,file_path' });
-    } catch (e) {
-      /* ignore */
-    }
-  }
+  if (error) throw new Error(`Failed to persist workspace change: ${error.message}`);
 
   const changes = await getGitChanges();
   if (status === 'MODIFIED' && !changes.modified.includes(filePath)) changes.modified.push(filePath);
@@ -599,22 +480,15 @@ export const recordWorkspaceFileChange = async (
     changes.renamed = [...(changes.renamed || []), filePath];
   }
 
-  localStorage.setItem(GITHUB_CHANGES_KEY, JSON.stringify(changes));
 };
 
-export const clearWorkspaceChanges = async (): Promise<void> => {
+export const clearWorkspaceChanges = async (repositoryId?: string): Promise<void> => {
   const { data: { user } } = await supabase.auth.getUser();
-  if (user) {
-    try {
-      await (supabase as any)
-        .from('github_workspace_changes')
-        .delete()
-        .eq('user_id', user.id);
-    } catch (e) {
-      /* ignore */
-    }
-  }
-  localStorage.setItem(GITHUB_CHANGES_KEY, JSON.stringify({ modified: [], added: [], deleted: [], renamed: [] }));
+  if (!user) throw new Error('Authenticated session required to clear workspace changes.');
+  let query = (supabase as any).from('github_workspace_changes').delete().eq('user_id', user.id);
+  if (repositoryId) query = query.eq('repository_id', repositoryId);
+  const { error } = await query;
+  if (error) throw new Error(`Failed to clear workspace changes: ${error.message}`);
 };
 
 // 13. COMMIT AND PUSH CHANGES TO GITHUB
@@ -622,7 +496,7 @@ export const addCommit = async (message: string, targetBranchInput?: string): Pr
   const cleanMsg = message.trim();
   if (!cleanMsg) throw new Error("Commit message cannot be empty.");
 
-  const token = await getStoredToken();
+  const token = await hasGitHubConnection();
   const conn = await getGitHubConnection();
   const repo = await getSelectedRepository();
 
@@ -638,11 +512,25 @@ export const addCommit = async (message: string, targetBranchInput?: string): Pr
     throw new Error("No uncommitted changes found in workspace to commit.");
   }
 
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError || !user || !repo.dbId) throw new Error('Authenticated GitHub repository session required.');
+  const { data: persistedChanges, error: changesError } = await (supabase as any)
+    .from('github_workspace_changes')
+    .select('file_path, status, content')
+    .eq('user_id', user.id)
+    .eq('repository_id', repo.dbId);
+  if (changesError) throw new Error(`Unable to load saved workspace content: ${changesError.message}`);
+  const changeByPath = new Map<string, { status: string; content: string | null }>(
+    (persistedChanges || []).map((change: any) => [change.file_path, { status: change.status, content: change.content }])
+  );
+
   for (const filePath of filePaths) {
     const apiPath = filePath.replace(/^\//, '');
+    const change = changeByPath.get(filePath);
+    if (!change) throw new Error(`Saved workspace data for ${filePath} is missing.`);
 
     if (changes.deleted.includes(filePath)) {
-      const fileRes = await fetch(`https://api.github.com/repos/${repo.owner}/${repo.name}/contents/${apiPath}?ref=${targetBranch}`, {
+      const fileRes = await githubApiFetch(`https://api.github.com/repos/${repo.owner}/${repo.name}/contents/${apiPath}?ref=${targetBranch}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Accept': 'application/vnd.github+json',
@@ -653,7 +541,7 @@ export const addCommit = async (message: string, targetBranchInput?: string): Pr
 
       if (fileRes.ok) {
         const fileData = await fileRes.json();
-        const deleteRes = await fetch(`https://api.github.com/repos/${repo.owner}/${repo.name}/contents/${apiPath}`, {
+        const deleteRes = await githubApiFetch(`https://api.github.com/repos/${repo.owner}/${repo.name}/contents/${apiPath}`, {
           method: 'DELETE',
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -676,7 +564,7 @@ export const addCommit = async (message: string, targetBranchInput?: string): Pr
       }
     } else {
       let existingSha: string | undefined = undefined;
-      const checkRes = await fetch(`https://api.github.com/repos/${repo.owner}/${repo.name}/contents/${apiPath}?ref=${targetBranch}`, {
+      const checkRes = await githubApiFetch(`https://api.github.com/repos/${repo.owner}/${repo.name}/contents/${apiPath}?ref=${targetBranch}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Accept': 'application/vnd.github+json',
@@ -690,10 +578,11 @@ export const addCommit = async (message: string, targetBranchInput?: string): Pr
         existingSha = existingData.sha;
       }
 
-      const rawContent = `// Updated ${apiPath}\n`;
+      const rawContent = change.content;
+      if (rawContent === null) throw new Error(`Saved content for ${filePath} is missing.`);
       const base64Content = btoa(unescape(encodeURIComponent(rawContent)));
 
-      const putRes = await fetch(`https://api.github.com/repos/${repo.owner}/${repo.name}/contents/${apiPath}`, {
+      const putRes = await githubApiFetch(`https://api.github.com/repos/${repo.owner}/${repo.name}/contents/${apiPath}`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -717,17 +606,10 @@ export const addCommit = async (message: string, targetBranchInput?: string): Pr
     }
   }
 
-  await clearWorkspaceChanges();
+  await clearWorkspaceChanges(repo.dbId);
   const latestCommits = await getCommits();
-  return latestCommits[0] || {
-    id: `cmt-${Date.now()}`,
-    hash: 'latest',
-    shortHash: 'latest',
-    message: cleanMsg,
-    author: conn.githubUsername,
-    date: 'Just now',
-    branch: targetBranch
-  };
+  if (!latestCommits[0]) throw new Error('GitHub accepted the change, but the new commit could not be verified. Refresh commits to confirm.');
+  return latestCommits[0];
 };
 
 // 14. FETCH / SYNC WITH GITHUB (TEST 7)
@@ -737,7 +619,7 @@ export const syncRepository = async (): Promise<{
   conflict: boolean;
   remoteCommitMessage?: string;
 }> => {
-  const token = await getStoredToken();
+  const token = await hasGitHubConnection();
   const repo = await getSelectedRepository();
   if (!token || !repo) {
     throw new Error("Connect your GitHub account to sync repositories.");
@@ -745,7 +627,7 @@ export const syncRepository = async (): Promise<{
 
   const activeBranch = repo.selectedBranch || repo.defaultBranch || 'main';
 
-  const commitRes = await fetch(`https://api.github.com/repos/${repo.owner}/${repo.name}/commits/${activeBranch}`, {
+  const commitRes = await githubApiFetch(`https://api.github.com/repos/${repo.owner}/${repo.name}/commits/${activeBranch}`, {
     headers: {
       'Authorization': `Bearer ${token}`,
       'Accept': 'application/vnd.github+json',
@@ -773,10 +655,10 @@ export const syncRepository = async (): Promise<{
 
 // 15. FETCH REAL GITHUB TREE & FILES FOR PROJECT WORKSPACE (TEST 6)
 export const getRemoteFileTree = async (owner: string, repoName: string, branch: string): Promise<any[]> => {
-  const token = await getStoredToken();
-  if (!token) return [];
+  const token = await hasGitHubConnection();
+  if (!token) throw new Error('Connect GitHub before loading repository files.');
 
-  const res = await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/trees/${branch}?recursive=1`, {
+  const res = await githubApiFetch(`https://api.github.com/repos/${owner}/${repoName}/git/trees/${branch}?recursive=1`, {
     headers: {
       'Authorization': `Bearer ${token}`,
       'Accept': 'application/vnd.github+json',
@@ -787,8 +669,7 @@ export const getRemoteFileTree = async (owner: string, repoName: string, branch:
 
   if (!res.ok) {
     const errJson = await res.json().catch(() => ({}));
-    console.error('[githubService] getRemoteFileTree failed:', handleGitHubApiError(res, errJson));
-    return [];
+    throw new Error(handleGitHubApiError(res, errJson));
   }
 
   const data = await res.json();
@@ -796,10 +677,10 @@ export const getRemoteFileTree = async (owner: string, repoName: string, branch:
 };
 
 export const getRemoteFileContent = async (owner: string, repoName: string, path: string, branch: string): Promise<string> => {
-  const token = await getStoredToken();
-  if (!token) return '';
+  const token = await hasGitHubConnection();
+  if (!token) throw new Error('Connect GitHub before loading repository files.');
 
-  const res = await fetch(`https://api.github.com/repos/${owner}/${repoName}/contents/${path}?ref=${branch}`, {
+  const res = await githubApiFetch(`https://api.github.com/repos/${owner}/${repoName}/contents/${path}?ref=${branch}`, {
     headers: {
       'Authorization': `Bearer ${token}`,
       'Accept': 'application/vnd.github+json',
@@ -808,7 +689,10 @@ export const getRemoteFileContent = async (owner: string, repoName: string, path
     }
   });
 
-  if (!res.ok) return '';
+  if (!res.ok) {
+    const errJson = await res.json().catch(() => ({}));
+    throw new Error(handleGitHubApiError(res, errJson));
+  }
   const data = await res.json();
   if (data.content && data.encoding === 'base64') {
     try {
@@ -822,11 +706,11 @@ export const getRemoteFileContent = async (owner: string, repoName: string, path
 
 // 16. RATE LIMIT DIAGNOSTICS (TEST 10)
 export const getRateLimitDiagnostics = async (): Promise<RateLimitDiagnostics | null> => {
-  const token = await getStoredToken();
+  const token = await hasGitHubConnection();
   if (!token) return null;
 
   try {
-    const res = await fetch('https://api.github.com/rate_limit', {
+    const res = await githubApiFetch('https://api.github.com/rate_limit', {
       headers: {
         'Authorization': `Bearer ${token}`,
         'Accept': 'application/vnd.github+json',

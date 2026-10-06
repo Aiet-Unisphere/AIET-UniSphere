@@ -57,6 +57,10 @@ import { FacultyAssignmentDetail } from './faculty/pages/FacultyAssignmentDetail
 import { FacultyAssessmentList } from './faculty/pages/FacultyAssessmentList';
 import { FacultyAssessmentDetail } from './faculty/pages/FacultyAssessmentDetail';
 import { FacultyAnnouncementPage } from './faculty/pages/FacultyAnnouncementPage';
+import { FacultyAIAssistantPage } from './faculty/pages/FacultyAIAssistantPage';
+import { FacultyTimetablePage } from './faculty/pages/FacultyTimetablePage';
+import { FacultyProfilePage } from './faculty/pages/FacultyProfilePage';
+import { FacultyNotificationsPage } from './faculty/pages/FacultyNotificationsPage';
 
 // Phase 7 & 8 HOD Portal Pages & Role Guard
 import { RoleGuard } from './app/guards/RoleGuard';
@@ -78,6 +82,9 @@ import { HODResultsPage } from './hod/pages/HODResultsPage';
 import { HODTimetablePage } from './hod/pages/HODTimetablePage';
 import { HODAnnouncementPage } from './hod/pages/HODAnnouncementPage';
 import { HODAnalyticsPage } from './hod/pages/HODAnalyticsPage';
+import { HODAIAssistantPage } from './hod/pages/HODAIAssistantPage';
+import { HODNotificationsPage } from './hod/pages/HODNotificationsPage';
+import { HODProfilePage } from './hod/pages/HODProfilePage';
 
 // Phase 9 Admin Portal Batch 1 Pages
 import { AdminDashboard } from './admin/pages/AdminDashboard';
@@ -150,11 +157,16 @@ const App: React.FC = () => {
         <Route path="/faculty/students" element={<RoleGuard allowedRoles={['FACULTY', 'ADMIN']}><FacultyStudentList /></RoleGuard>} />
         <Route path="/faculty/students/:id" element={<RoleGuard allowedRoles={['FACULTY', 'ADMIN']}><FacultyStudentDetail /></RoleGuard>} />
         <Route path="/faculty/attendance" element={<RoleGuard allowedRoles={['FACULTY', 'ADMIN']}><FacultyAttendancePage /></RoleGuard>} />
+        <Route path="/faculty/timetable" element={<RoleGuard allowedRoles={['FACULTY', 'HOD', 'ADMIN']}><FacultyTimetablePage /></RoleGuard>} />
         <Route path="/faculty/assignments" element={<RoleGuard allowedRoles={['FACULTY', 'ADMIN']}><FacultyAssignmentList /></RoleGuard>} />
         <Route path="/faculty/assignments/:id" element={<RoleGuard allowedRoles={['FACULTY', 'ADMIN']}><FacultyAssignmentDetail /></RoleGuard>} />
         <Route path="/faculty/assessments" element={<RoleGuard allowedRoles={['FACULTY', 'ADMIN']}><FacultyAssessmentList /></RoleGuard>} />
-        <Route path="/faculty/assessments/:id" element={<RoleGuard allowedRoles={['FACULTY', 'ADMIN']}><FacultyAssessmentDetail /></RoleGuard>} />
+        <Route path="/faculty/assessments/:id" element={<RoleGuard allowedRoles={['FACULTY', 'HOD', 'ADMIN']}><FacultyAssessmentDetail /></RoleGuard>} />
+        <Route path="/faculty/assessments/:id/results/:attemptId" element={<RoleGuard allowedRoles={['FACULTY', 'HOD', 'ADMIN']}><FacultyAssessmentDetail /></RoleGuard>} />
         <Route path="/faculty/announcements" element={<RoleGuard allowedRoles={['FACULTY', 'ADMIN']}><FacultyAnnouncementPage /></RoleGuard>} />
+        <Route path="/faculty/ai-assistant" element={<RoleGuard allowedRoles={['FACULTY', 'HOD', 'ADMIN']}><FacultyAIAssistantPage /></RoleGuard>} />
+        <Route path="/faculty/profile" element={<RoleGuard allowedRoles={['FACULTY', 'ADMIN']}><FacultyProfilePage /></RoleGuard>} />
+        <Route path="/faculty/notifications" element={<RoleGuard allowedRoles={['FACULTY', 'ADMIN']}><FacultyNotificationsPage /></RoleGuard>} />
 
         {/* Phase 7 HOD Portal Routes */}
         <Route path="/hod/dashboard" element={<RoleGuard allowedRoles={['HOD', 'ADMIN']}><HODDashboard /></RoleGuard>} />
@@ -175,6 +187,9 @@ const App: React.FC = () => {
         <Route path="/hod/timetable" element={<RoleGuard allowedRoles={['HOD', 'ADMIN']}><HODTimetablePage /></RoleGuard>} />
         <Route path="/hod/announcements" element={<RoleGuard allowedRoles={['HOD', 'ADMIN']}><HODAnnouncementPage /></RoleGuard>} />
         <Route path="/hod/analytics" element={<RoleGuard allowedRoles={['HOD', 'ADMIN']}><HODAnalyticsPage /></RoleGuard>} />
+        <Route path="/hod/ai-assistant" element={<RoleGuard allowedRoles={['HOD', 'ADMIN']}><HODAIAssistantPage /></RoleGuard>} />
+        <Route path="/hod/notifications" element={<RoleGuard allowedRoles={['HOD', 'ADMIN']}><HODNotificationsPage /></RoleGuard>} />
+        <Route path="/hod/profile" element={<RoleGuard allowedRoles={['HOD', 'ADMIN']}><HODProfilePage /></RoleGuard>} />
 
         {/* Phase 9 Admin Portal Batch 1 Routes */}
         <Route path="/admin/dashboard" element={<RoleGuard allowedRoles={['ADMIN']}><AdminDashboard /></RoleGuard>} />

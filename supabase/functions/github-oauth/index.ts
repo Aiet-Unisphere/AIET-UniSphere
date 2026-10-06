@@ -37,6 +37,18 @@ serve(async (req) => {
       );
     }
 
+    const { data: callerProfile, error: profileError } = await userClient
+      .from("profiles")
+      .select("account_status")
+      .eq("id", caller.id)
+      .maybeSingle();
+    if (profileError || callerProfile?.account_status !== "ACTIVE") {
+      return new Response(
+        JSON.stringify({ error: "An active account is required to connect GitHub." }),
+        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     const body = await req.json();
     const { code, redirect_uri } = body;
 
@@ -123,8 +135,12 @@ serve(async (req) => {
       .select()
       .single();
 
-    if (dbError) {
-      console.error("Database connection storage error:", dbError);
+    if (dbError || !connectionRecord) {
+      console.error("GitHub connection could not be stored securely:", dbError?.message || "No record returned.");
+      return new Response(
+        JSON.stringify({ error: "GitHub connection could not be saved. Please try again." }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
     return new Response(
@@ -132,7 +148,7 @@ serve(async (req) => {
         success: true,
         message: "GitHub account connected successfully.",
         connection: {
-          id: connectionRecord?.id || "temp",
+          id: connectionRecord.id,
           username: ghUser.login,
           avatarUrl: ghUser.avatar_url,
           githubUserId: ghUser.id,

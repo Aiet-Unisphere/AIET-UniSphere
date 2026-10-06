@@ -1,6 +1,13 @@
 import { supabase } from '../lib/supabase';
 import type { LeaveRequest } from '../data/leaveRequests';
 export type { LeaveRequest };
+import { 
+  STORAGE_BUCKETS, 
+  uploadFile, 
+  getSignedUrl, 
+  downloadStorageFile, 
+  sanitizeFileName 
+} from './storageService';
 
 const isUuid = (str: string): boolean => {
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -28,6 +35,11 @@ const mapLeaveRow = (l: any): LeaveRequest => {
   const deptName = l.student_profile?.department?.name || l.department_name || 'Department';
   const reviewerName = l.reviewer_profile?.full_name || undefined;
 
+  const docName = l.supporting_doc_name || (l.leave_attachments && l.leave_attachments[0]?.file_name) || undefined;
+  const docPath = l.supporting_doc_path || (l.leave_attachments && l.leave_attachments[0]?.storage_path) || undefined;
+  const docSize = l.supporting_doc_size || (l.leave_attachments && l.leave_attachments[0]?.file_size) || undefined;
+  const docType = l.supporting_doc_type || (l.leave_attachments && l.leave_attachments[0]?.mime_type) || undefined;
+
   return {
     id: l.reference_id || l.id,
     dbId: l.id,
@@ -48,6 +60,11 @@ const mapLeaveRow = (l: any): LeaveRequest => {
     reviewedBy: l.reviewed_by ? (reviewerName || 'HOD') : undefined,
     reviewerName: reviewerName || undefined,
     remark: l.rejection_reason || undefined,
+    supportingDocument: docName,
+    supportingDocName: docName,
+    supportingDocPath: docPath,
+    supportingDocSize: docSize ? Number(docSize) : undefined,
+    supportingDocType: docType,
     semester: l.student_academic?.semester ?? null,
     cgpa: l.student_academic?.cgpa ?? null
   };
@@ -72,7 +89,8 @@ export const getStudentLeaveRequests = async (): Promise<LeaveRequest[]> => {
     .select(`
       *,
       student_profile:profiles!leave_requests_student_id_fkey(full_name, usn_or_employee_id, email, role, department:departments(name, code)),
-      reviewer_profile:profiles!leave_requests_reviewed_by_fkey(full_name)
+      reviewer_profile:profiles!leave_requests_reviewed_by_fkey(full_name),
+      leave_attachments(id, file_name, storage_path, file_size, mime_type)
     `)
     .eq('student_id', user.id)
     .order('created_at', { ascending: false });
@@ -80,13 +98,13 @@ export const getStudentLeaveRequests = async (): Promise<LeaveRequest[]> => {
   data = joinResult.data;
   error = joinResult.error;
 
-  // If join fails (foreign key name mismatch), try without joins
+  // If join fails, try simple query
   if (error) {
     console.warn('[leaveService] Join query failed, trying simple query:', error.message);
 
     const simpleResult = await (supabase as any)
       .from('leave_requests')
-      .select('*')
+      .select('*, leave_attachments(id, file_name, storage_path, file_size, mime_type)')
       .eq('student_id', user.id)
       .order('created_at', { ascending: false });
 
@@ -100,7 +118,6 @@ export const getStudentLeaveRequests = async (): Promise<LeaveRequest[]> => {
   }
 
   if (!data || data.length === 0) {
-    console.log('[leaveService] No leave requests found for student', user.id);
     return [];
   }
 
@@ -138,7 +155,8 @@ export const getDepartmentLeaveRequests = async (): Promise<LeaveRequest[]> => {
     .select(`
       *,
       student_profile:profiles!leave_requests_student_id_fkey(full_name, usn_or_employee_id, email, role, department:departments(name, code)),
-      reviewer_profile:profiles!leave_requests_reviewed_by_fkey(full_name)
+      reviewer_profile:profiles!leave_requests_reviewed_by_fkey(full_name),
+      leave_attachments(id, file_name, storage_path, file_size, mime_type)
     `)
     .eq('department_id', profile.department_id)
     .order('created_at', { ascending: false });
@@ -152,26 +170,12 @@ export const getDepartmentLeaveRequests = async (): Promise<LeaveRequest[]> => {
 
     const simpleResult = await (supabase as any)
       .from('leave_requests')
-      .select('*')
+      .select('*, leave_attachments(id, file_name, storage_path, file_size, mime_type)')
       .eq('department_id', profile.department_id)
       .order('created_at', { ascending: false });
 
     data = simpleResult.data;
     error = simpleResult.error;
-
-    // If still failing, try fetching by hod_id instead of department_id
-    if (error || !data) {
-      console.warn('[leaveService] department_id query failed, trying hod_id:', error?.message);
-
-      const hodResult = await (supabase as any)
-        .from('leave_requests')
-        .select('*')
-        .eq('hod_id', user.id)
-        .order('created_at', { ascending: false });
-
-      data = hodResult.data;
-      error = hodResult.error;
-    }
   }
 
   if (error) {
@@ -183,7 +187,7 @@ export const getDepartmentLeaveRequests = async (): Promise<LeaveRequest[]> => {
     return [];
   }
 
-  // Enrich rows: fetch student profile names if join didn't work
+  // Enrich rows if needed
   const needsEnrichment = data.length > 0 && !data[0].student_profile;
   if (needsEnrichment) {
     const studentIds = [...new Set(data.map((r: any) => r.student_id).filter(Boolean))];
@@ -235,7 +239,7 @@ export const getLeaveRequestById = async (idOrUuid: string): Promise<LeaveReques
   // Build query
   let baseQuery = (supabase as any)
     .from('leave_requests')
-    .select('*');
+    .select('*, leave_attachments(id, file_name, storage_path, file_size, mime_type)');
 
   if (isUuid(idOrUuid)) {
     baseQuery = baseQuery.eq('id', idOrUuid);
@@ -296,6 +300,7 @@ export const submitLeaveRequest = async (payload: {
   reason: string;
   startDate: string;
   endDate: string;
+  file?: File;
 }): Promise<LeaveRequest> => {
   const { data: { user } } = await (supabase as any).auth.getUser();
   if (!user) throw new Error("Authenticated session required.");
@@ -321,7 +326,6 @@ export const submitLeaveRequest = async (payload: {
   // Find HOD for the department
   let hodProfile: { id: string; full_name: string } | null = null;
 
-  // Try RPC first
   try {
     const { data: rpcData, error: rpcError } = await (supabase.rpc as any)('get_department_hod', {
       p_department_id: studentProfile.department_id
@@ -334,7 +338,6 @@ export const submitLeaveRequest = async (payload: {
     console.warn('[leaveService] RPC get_department_hod failed:', e);
   }
 
-  // Fallback: direct query
   if (!hodProfile) {
     const { data: directHod } = await (supabase as any)
       .from('profiles')
@@ -354,10 +357,34 @@ export const submitLeaveRequest = async (payload: {
     throw new Error("No active HOD is assigned to your department. Please contact the administration.");
   }
 
+  const tempLeaveId = crypto.randomUUID ? crypto.randomUUID() : `lv-${Date.now()}`;
+  let storagePath: string | null = null;
+  let fileName: string | null = null;
+  let fileSize: number | null = null;
+  let mimeType: string | null = null;
+
+  if (payload.file) {
+    fileName = payload.file.name;
+    fileSize = payload.file.size;
+    mimeType = payload.file.type || 'application/pdf';
+    const safeName = sanitizeFileName(payload.file.name);
+
+    // Predictable path: student-documents/{student_id}/leave-requests/{leave_id}/{file_name}
+    storagePath = `${user.id}/leave-requests/${tempLeaveId}/${safeName}`;
+
+    await uploadFile({
+      bucket: STORAGE_BUCKETS.STUDENT_DOCUMENTS,
+      path: storagePath,
+      file: payload.file,
+      upsert: true
+    });
+  }
+
   // INSERT leave request
   const { data, error } = await (supabase as any)
     .from('leave_requests')
     .insert({
+      id: tempLeaveId,
       student_id: user.id,
       department_id: studentProfile.department_id,
       hod_id: hodProfile.id,
@@ -365,7 +392,11 @@ export const submitLeaveRequest = async (payload: {
       reason: payload.reason.trim(),
       start_date: payload.startDate,
       end_date: payload.endDate,
-      status: 'PENDING'
+      status: 'PENDING',
+      supporting_doc_path: storagePath,
+      supporting_doc_name: fileName,
+      supporting_doc_size: fileSize,
+      supporting_doc_type: mimeType
     })
     .select('*')
     .single();
@@ -375,9 +406,25 @@ export const submitLeaveRequest = async (payload: {
     throw new Error(error?.message || "Failed to submit leave request.");
   }
 
-  console.log('[leaveService] Leave request created successfully:', data.id, data.reference_id);
+  // Insert into leave_attachments table if file was attached
+  if (storagePath && fileName) {
+    try {
+      await (supabase as any)
+        .from('leave_attachments')
+        .insert({
+          leave_request_id: data.id,
+          student_id: user.id,
+          file_name: fileName,
+          storage_path: storagePath,
+          file_size: fileSize,
+          mime_type: mimeType
+        });
+    } catch (attErr) {
+      console.warn('[leaveService] leave_attachments record insert note:', attErr);
+    }
+  }
 
-  // Send notifications (non-blocking — don't let notification failures break the submit)
+  // Send notifications
   try {
     await (supabase as any).from('notifications').insert({
       user_id: hodProfile.id,
@@ -413,7 +460,6 @@ export const approveLeaveRequest = async (referenceOrId: string): Promise<boolea
   const { data: { user } } = await (supabase as any).auth.getUser();
   if (!user) throw new Error("Authenticated session required.");
 
-  // Find the leave request
   let leaveReqQuery = (supabase as any)
     .from('leave_requests')
     .select('id, reference_id, student_id, leave_type, department_id, status');
@@ -430,7 +476,6 @@ export const approveLeaveRequest = async (referenceOrId: string): Promise<boolea
     throw new Error("Leave request record not found.");
   }
 
-  // Security check
   const { data: callerProfile } = await (supabase as any)
     .from('profiles')
     .select('role, department_id')
@@ -445,7 +490,6 @@ export const approveLeaveRequest = async (referenceOrId: string): Promise<boolea
     throw new Error(`This leave request is already ${leaveReq.status.toLowerCase()} and cannot be modified.`);
   }
 
-  // Try RPC first
   let updated = false;
   try {
     const { error: rpcErr } = await (supabase.rpc as any)('review_leave_request', {
@@ -459,7 +503,6 @@ export const approveLeaveRequest = async (referenceOrId: string): Promise<boolea
     console.warn('[leaveService] RPC approve exception:', e);
   }
 
-  // Direct update fallback
   if (!updated) {
     const { error: directErr } = await (supabase as any)
       .from('leave_requests')
@@ -476,7 +519,6 @@ export const approveLeaveRequest = async (referenceOrId: string): Promise<boolea
     }
   }
 
-  // Notify student (non-blocking)
   try {
     await (supabase as any).from('notifications').insert({
       user_id: leaveReq.student_id,
@@ -504,7 +546,6 @@ export const rejectLeaveRequest = async (referenceOrId: string, _reviewedBy?: st
     throw new Error("Rejection reason is required when rejecting a leave request.");
   }
 
-  // Find the leave request
   let leaveReqQuery = (supabase as any)
     .from('leave_requests')
     .select('id, reference_id, student_id, leave_type, department_id, status');
@@ -521,7 +562,6 @@ export const rejectLeaveRequest = async (referenceOrId: string, _reviewedBy?: st
     throw new Error("Leave request record not found.");
   }
 
-  // Security check
   const { data: callerProfile } = await (supabase as any)
     .from('profiles')
     .select('role, department_id')
@@ -536,7 +576,6 @@ export const rejectLeaveRequest = async (referenceOrId: string, _reviewedBy?: st
     throw new Error(`This leave request is already ${leaveReq.status.toLowerCase()} and cannot be modified.`);
   }
 
-  // Try RPC first
   let updated = false;
   try {
     const { error: rpcErr } = await (supabase.rpc as any)('review_leave_request', {
@@ -550,7 +589,6 @@ export const rejectLeaveRequest = async (referenceOrId: string, _reviewedBy?: st
     console.warn('[leaveService] RPC reject exception:', e);
   }
 
-  // Direct update fallback
   if (!updated) {
     const { error: directErr } = await (supabase as any)
       .from('leave_requests')
@@ -568,7 +606,6 @@ export const rejectLeaveRequest = async (referenceOrId: string, _reviewedBy?: st
     }
   }
 
-  // Notify student (non-blocking)
   try {
     await (supabase as any).from('notifications').insert({
       user_id: leaveReq.student_id,
@@ -582,4 +619,18 @@ export const rejectLeaveRequest = async (referenceOrId: string, _reviewedBy?: st
   } catch (e) { console.warn('[leaveService] Rejection notification failed:', e); }
 
   return true;
+};
+
+/**
+ * Helper to download a leave request supporting document from Supabase Storage.
+ */
+export const downloadLeaveDocument = async (storagePath: string, fileName?: string): Promise<void> => {
+  await downloadStorageFile(STORAGE_BUCKETS.STUDENT_DOCUMENTS, storagePath, fileName);
+};
+
+/**
+ * Get signed URL for leave supporting document
+ */
+export const getLeaveDocumentUrl = async (storagePath: string): Promise<string | null> => {
+  return await getSignedUrl(STORAGE_BUCKETS.STUDENT_DOCUMENTS, storagePath, 3600);
 };

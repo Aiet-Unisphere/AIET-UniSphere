@@ -9,7 +9,7 @@ interface RoleGuardProps {
 }
 
 export const RoleGuard: React.FC<RoleGuardProps> = ({ children, allowedRoles }) => {
-  const { session, role, isLoading } = useAuth();
+  const { session, role, profile, isLoading } = useAuth();
   const location = useLocation();
 
   // 1. App loading state while checking session/profile
@@ -57,8 +57,7 @@ export const RoleGuard: React.FC<RoleGuardProps> = ({ children, allowedRoles }) 
   }
 
   // 3. Role authorization check (STRICTLY database profile role linked to authenticated user UUID)
-  const { profile, user } = useAuth();
-  const activeRole: UserRole | null = profile?.role || role || (user?.user_metadata?.role as UserRole) || null;
+  const activeRole: UserRole | null = profile?.role || role || null;
 
   // If session is present but activeRole is still loading, wait for hydration instead of redirecting to /
   if (!activeRole) {

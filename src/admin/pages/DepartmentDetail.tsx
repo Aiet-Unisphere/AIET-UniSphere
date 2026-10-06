@@ -1,16 +1,44 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Building2, ArrowLeft, Users, ShieldCheck, BookOpen, Layers, CheckCircle2, UserCheck } from 'lucide-react';
+import { Building2, ArrowLeft, Users, BookOpen } from 'lucide-react';
 import { AdminAppShell } from '../components/AdminAppShell';
-import { mockDepartmentsList } from '../data/departments';
-import { mockFacultyRoster } from '../../data/faculty';
+import { LoadingState } from '../../components/LoadingState';
+import { ErrorState } from '../../components/ErrorState';
+import { EmptyState } from '../../components/EmptyState';
+import { getDepartmentDetailData, type DepartmentDetailData } from '../../services/departmentService';
 
 export const DepartmentDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
-  const dept = mockDepartmentsList.find(d => d.id === id || d.code.toLowerCase() === (id || '').toLowerCase()) || mockDepartmentsList[0];
-  const facultyMembers = mockFacultyRoster.filter(f => f.departmentId === dept.id || dept.id === 'dept-ds');
+  const [department, setDepartment] = useState<DepartmentDetailData | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadDepartment = useCallback(async () => {
+    if (!id) {
+      setError('Department identifier is missing.');
+      setIsLoading(false);
+      return;
+    }
+    setIsLoading(true);
+    setError(null);
+    try {
+      const data = await getDepartmentDetailData(id);
+      if (!data) setError('Department not found.');
+      setDepartment(data);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : 'Unable to load department details.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => { void loadDepartment(); }, [loadDepartment]);
+
+  if (isLoading) return <AdminAppShell><LoadingState message="Loading department records..." /></AdminAppShell>;
+  if (error || !department) return <AdminAppShell><ErrorState message={error || 'Department not found.'} onRetry={loadDepartment} /></AdminAppShell>;
+  const dept = department;
 
   return (
     <AdminAppShell>
@@ -36,7 +64,7 @@ export const DepartmentDetail: React.FC = () => {
         {/* Faculty Roster in Department */}
         <div className="dashboard-panel" style={{ padding: 0, overflow: 'hidden' }}>
           <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid rgba(156, 163, 175, 0.2)' }}>
-            <h2 className="panel-title font-display" style={{ margin: 0 }}>Assigned Faculty Roster ({facultyMembers.length})</h2>
+            <h2 className="panel-title font-display" style={{ margin: 0 }}>Assigned Faculty Roster ({dept.faculty.length})</h2>
           </div>
 
           <div style={{ overflowX: 'auto' }}>
@@ -50,16 +78,16 @@ export const DepartmentDetail: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {facultyMembers.map((f) => (
+                {dept.faculty.map((f) => (
                   <tr key={f.id} style={{ borderBottom: '1px solid rgba(156, 163, 175, 0.15)' }}>
                     <td style={{ padding: '0.85rem 1.25rem' }}>
                       <div style={{ fontWeight: 700, color: 'var(--brand-black)' }}>{f.name}</div>
                       <div style={{ fontSize: '0.75rem', color: 'var(--brand-dark-grey)' }}>{f.email}</div>
                     </td>
                     <td style={{ padding: '0.85rem 1.25rem', fontWeight: 600 }}>{f.designation}</td>
-                    <td style={{ padding: '0.85rem 1.25rem' }} className="font-mono font-bold">{f.assignedCourses.length} Courses</td>
+                    <td style={{ padding: '0.85rem 1.25rem' }} className="font-mono font-bold">{f.assignedCourseCount} Courses</td>
                     <td style={{ padding: '0.85rem 1.25rem' }}>
-                      <span className={`badge ${f.status === 'Active' ? 'badge-active' : 'badge-pending'}`}>{f.status}</span>
+                      <span className={`badge ${f.status === 'ACTIVE' ? 'badge-active' : 'badge-pending'}`}>{f.status}</span>
                     </td>
                   </tr>
                 ))}
@@ -73,8 +101,8 @@ export const DepartmentDetail: React.FC = () => {
           <h2 className="panel-title font-display" style={{ marginBottom: '1rem' }}>Active Sections</h2>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            {dept.sections.map((s, idx) => (
-              <div key={idx} style={{ padding: '0.85rem', backgroundColor: 'var(--brand-light-grey)', borderRadius: 'var(--border-radius)', border: '1px solid rgba(156, 163, 175, 0.2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            {dept.sections.map((s) => (
+              <div key={`${s.semester}-${s.section}`} style={{ padding: '0.85rem', backgroundColor: 'var(--brand-light-grey)', borderRadius: 'var(--border-radius)', border: '1px solid rgba(156, 163, 175, 0.2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
                   <div style={{ fontWeight: 700, color: 'var(--brand-black)' }}>Semester {s.semester}</div>
                   <span className="badge badge-active font-mono font-bold">{s.section}</span>
@@ -84,6 +112,7 @@ export const DepartmentDetail: React.FC = () => {
                 </div>
               </div>
             ))}
+            {dept.sections.length === 0 && <EmptyState title="No active sections" message="No active course enrollments include semester and section details." />}
           </div>
         </div>
 

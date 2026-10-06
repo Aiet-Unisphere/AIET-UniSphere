@@ -1,7 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, UserCheck, Eye, Filter, Mail, Phone, BookOpen, Users } from 'lucide-react';
+import { Search, UserCheck, Eye, Filter, Mail, BookOpen, Users } from 'lucide-react';
 import { HODAppShell } from '../components/HODAppShell';
+import { LoadingState } from '../../components/LoadingState';
+import { ErrorState } from '../../components/ErrorState';
+import { EmptyState } from '../../components/EmptyState';
 import { getAllFaculty } from '../../services/facultyService';
 import type { FacultyMember } from '../../data/faculty';
 
@@ -15,19 +18,23 @@ export const HODFacultyList: React.FC = () => {
   const [designationFilter, setDesignationFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadFaculty = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await getAllFaculty();
+      setFacultyList(data);
+    } catch (err: any) {
+      console.error("Error loading faculty list:", err);
+      setError(err?.message || "Unable to load department faculty members.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const loadFaculty = async () => {
-      setLoading(true);
-      try {
-        const data = await getAllFaculty();
-        setFacultyList(data);
-      } catch (err) {
-        console.error("Error loading faculty list:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
     loadFaculty();
   }, []);
 
@@ -44,6 +51,22 @@ export const HODFacultyList: React.FC = () => {
 
     return matchesSearch && matchesDesignation && matchesStatus;
   });
+
+  if (loading) {
+    return (
+      <HODAppShell>
+        <LoadingState message="Loading department faculty roster..." />
+      </HODAppShell>
+    );
+  }
+
+  if (error) {
+    return (
+      <HODAppShell>
+        <ErrorState message={error} onRetry={loadFaculty} />
+      </HODAppShell>
+    );
+  }
 
   return (
     <HODAppShell>
@@ -98,6 +121,7 @@ export const HODFacultyList: React.FC = () => {
               <option value="Professor">Professor</option>
               <option value="Associate Professor">Associate Professor</option>
               <option value="Assistant Professor">Assistant Professor</option>
+              <option value="Faculty">Faculty</option>
             </select>
 
             <select 
@@ -108,6 +132,7 @@ export const HODFacultyList: React.FC = () => {
             >
               <option value="All">All Status</option>
               <option value="Active">Active</option>
+              <option value="Inactive">Inactive</option>
               <option value="On Leave">On Leave</option>
             </select>
           </div>
@@ -116,16 +141,16 @@ export const HODFacultyList: React.FC = () => {
 
       {/* Main Faculty Table Container */}
       <div className="dashboard-panel" style={{ padding: 0, overflow: 'hidden' }}>
-        {loading ? (
-          <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--brand-dark-grey)' }}>
-            Loading Faculty Members...
-          </div>
-        ) : filteredFaculty.length === 0 ? (
-          <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--brand-dark-grey)' }}>
-            <UserCheck size={36} style={{ margin: '0 auto 0.75rem', color: '#94A3B8' }} />
-            <p style={{ fontWeight: 600, fontSize: '1rem', color: 'var(--brand-black)' }}>No faculty members found</p>
-            <p style={{ fontSize: '0.85rem', color: 'var(--brand-dark-grey)' }}>Try adjusting your search query or filter selection.</p>
-          </div>
+        {filteredFaculty.length === 0 ? (
+          <EmptyState
+            icon={UserCheck}
+            title="No faculty members found"
+            description={
+              searchQuery || designationFilter !== 'All' || statusFilter !== 'All'
+                ? "Try adjusting your search query or filter selection."
+                : "No faculty members exist for your department in the database."
+            }
+          />
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.875rem' }}>
@@ -143,10 +168,7 @@ export const HODFacultyList: React.FC = () => {
               </thead>
               <tbody>
                 {filteredFaculty.map((fac) => (
-                  <tr 
-                    key={fac.id}
-                    style={{ borderBottom: '1px solid rgba(156, 163, 175, 0.15)', transition: 'var(--transition-smooth)' }}
-                  >
+                  <tr key={fac.id} style={{ borderBottom: '1px solid rgba(156, 163, 175, 0.15)' }}>
                     <td style={{ padding: '1rem 1.25rem' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                         <div style={{ width: '38px', height: '38px', borderRadius: '50%', backgroundColor: 'var(--brand-blue)', color: 'var(--brand-white)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '0.85rem' }}>

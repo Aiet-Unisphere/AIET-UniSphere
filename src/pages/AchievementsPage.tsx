@@ -5,21 +5,25 @@ import { LoadingState } from '../components/LoadingState';
 import { EmptyState } from '../components/EmptyState';
 import { AchievementCard } from '../components/AchievementCard';
 import { AchievementDetailModal } from '../components/AchievementDetailModal';
-import type { AchievementItem } from '../data/achievements';
-import { getAchievements } from '../services/skillService';
+import type { StudentAchievement } from '../services/skillService';
+import { getAchievements, computeAndSyncAchievements } from '../services/skillService';
 
 export const AchievementsPage: React.FC = () => {
-  const [achievements, setAchievements] = useState<AchievementItem[]>([]);
-  const [selectedAchievement, setSelectedAchievement] = useState<AchievementItem | null>(null);
+  const [achievements, setAchievements] = useState<StudentAchievement[]>([]);
+  const [selectedAchievement, setSelectedAchievement] = useState<StudentAchievement | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<string>('All');
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     const loadData = async () => {
       setIsLoading(true);
-      const data = await getAchievements(categoryFilter);
-      setAchievements(data);
-      setIsLoading(false);
+      try {
+        await computeAndSyncAchievements();
+        const data = await getAchievements(undefined, categoryFilter);
+        setAchievements(data);
+      } finally {
+        setIsLoading(false);
+      }
     };
     loadData();
   }, [categoryFilter]);

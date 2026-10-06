@@ -7,19 +7,18 @@ import { ErrorState } from '../components/ErrorState';
 import { ProjectCard } from '../components/ProjectCard';
 import { ProjectStats } from '../components/ProjectStats';
 import { CreateProjectModal } from '../components/CreateProjectModal';
-import type { ProjectItem } from '../data/projects';
+import type { Project, CreateProjectPayload } from '../services/projectService';
 import { getProjects, getProjectStats, createProject } from '../services/projectService';
-import type { CreateProjectPayload } from '../services/projectService';
 
 export const ProjectsList: React.FC = () => {
 
-  const [projects, setProjects] = useState<ProjectItem[]>([]);
-  const [stats, setStats] = useState({ active: 3, completed: 8, pendingReview: 2, upcoming: 2, total: 15 });
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [stats, setStats] = useState({ active: 0, completed: 0, pendingReview: 0, upcoming: 0, total: 0 });
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Filters & Sorting
-  const [selectedCategory, setSelectedCategory] = useState<string>('Assigned Projects');
+  const [selectedCategory, setSelectedCategory] = useState<string>('All Projects');
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterType, setFilterType] = useState<string>('all');
@@ -69,25 +68,27 @@ export const ProjectsList: React.FC = () => {
     );
   }
 
-  const categories: string[] = ['Assigned Projects', 'My Projects', 'Team Projects', 'Completed Projects'];
+  const categories: string[] = ['All Projects', 'Team Projects', 'Completed Projects'];
 
   // Filtering
   let filteredProjects = projects.filter((project) => {
     // Category match
-    const matchesCategory = selectedCategory === 'All' || project.category === selectedCategory;
+    const matchesCategory = selectedCategory === 'All Projects' ||
+      (selectedCategory === 'Team Projects' && project.project_type === 'Team') ||
+      (selectedCategory === 'Completed Projects' && project.status === 'Completed');
 
     // Search query match
     const matchesSearch = 
       project.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      project.course.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      project.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      project.faculty.toLowerCase().includes(searchQuery.toLowerCase());
+      (project.course_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (project.description || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (project.faculty_mentor || '').toLowerCase().includes(searchQuery.toLowerCase());
 
     // Status filter
     const matchesStatus = filterStatus === 'all' || project.status === filterStatus;
 
     // Type filter
-    const matchesType = filterType === 'all' || project.projectType === filterType;
+    const matchesType = filterType === 'all' || project.project_type === filterType;
 
     return matchesCategory && matchesSearch && matchesStatus && matchesType;
   });
@@ -98,7 +99,7 @@ export const ProjectsList: React.FC = () => {
       return b.progress - a.progress;
     }
     if (sortBy === 'deadline') {
-      return new Date(a.deadline).getTime() - new Date(b.deadline).getTime();
+      return new Date(a.deadline || '9999-12-31').getTime() - new Date(b.deadline || '9999-12-31').getTime();
     }
     return 0; // Recent default
   });
@@ -185,7 +186,8 @@ export const ProjectsList: React.FC = () => {
             onChange={(e) => setFilterType(e.target.value)}
           >
             <option value="all">All Types</option>
-            <option value="Course Project">Course Project</option>
+            <option value="Team">Team</option>
+            <option value="Mini">Mini</option>
             <option value="Capstone">Capstone</option>
             <option value="Research">Research</option>
             <option value="Personal">Personal</option>
@@ -207,14 +209,10 @@ export const ProjectsList: React.FC = () => {
       {/* Projects Grid or Empty State */}
       {filteredProjects.length === 0 ? (
         <EmptyState 
-          title="No projects found."
-          message={searchQuery ? `No projects matching "${searchQuery}".` : `No projects listed under ${selectedCategory}.`}
-          actionLabel="Clear Filters"
-          onAction={() => {
-            setSearchQuery('');
-            setFilterStatus('all');
-            setFilterType('all');
-          }}
+          title="No projects yet"
+          message={searchQuery ? `No projects matching "${searchQuery}".` : "You don't have any projects assigned or created yet."}
+          actionLabel="Create Project"
+          onAction={() => setIsCreateModalOpen(true)}
         />
       ) : (
         <div className="projects-grid">

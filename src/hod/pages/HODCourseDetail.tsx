@@ -112,7 +112,7 @@ export const HODCourseDetail: React.FC = () => {
             <div>
               <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--brand-dark-grey)', textTransform: 'uppercase' }}>CURRENT ACTIVE MODULE</span>
               <div style={{ fontWeight: 600, color: 'var(--brand-orange)', marginTop: '0.2rem' }}>
-                {course.nextActivity}
+                No upcoming activity
               </div>
             </div>
           </div>

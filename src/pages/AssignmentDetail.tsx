@@ -7,9 +7,16 @@ import {
   Upload, 
   CheckCircle,
   FileCheck, 
-  AlertCircle
+  AlertCircle,
+  FileText,
+  Clock
 } from 'lucide-react';
-import { getAssignmentById, submitAssignment } from '../services/assignmentService';
+import { 
+  getAssignmentById, 
+  submitAssignment, 
+  downloadAssignmentFile, 
+  downloadSubmissionFile 
+} from '../services/assignmentService';
 import { AppShell } from '../components/AppShell';
 import { LoadingState } from '../components/LoadingState';
 import { ErrorState } from '../components/ErrorState';
@@ -25,6 +32,7 @@ export const AssignmentDetail: React.FC = () => {
   // File Upload states
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error' | null; message: string | null }>({
     type: null,
     message: null
@@ -82,17 +90,66 @@ export const AssignmentDetail: React.FC = () => {
     setStatusMessage({ type: null, message: null });
 
     try {
-      const updated = await submitAssignment(id, selectedFile.name);
+      const updated = await submitAssignment(id, selectedFile);
       setAssignment(updated);
       setSelectedFile(null);
       setStatusMessage({ 
         type: 'success', 
-        message: "Assignment Submitted Successfully! (Mock Submission completed)" 
+        message: "Assignment submitted successfully to Supabase Storage! Ready for faculty review." 
       });
-    } catch (err) {
-      setStatusMessage({ type: 'error', message: "Failed to submit assignment. Please try again." });
+    } catch (err: any) {
+      setStatusMessage({ type: 'error', message: err.message || "Failed to submit assignment. Please try again." });
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleDownloadResource = async (res: string) => {
+    setDownloading(true);
+    setStatusMessage({ type: null, message: null });
+    try {
+      if (assignment.storagePath) {
+        await downloadAssignmentFile(assignment.storagePath, assignment.fileName || res);
+      } else {
+        setStatusMessage({
+          type: 'error',
+          message: 'File is no longer available.'
+        });
+      }
+    } catch (err: any) {
+      const msg = err.message || '';
+      setStatusMessage({
+        type: 'error',
+        message: msg.toLowerCase().includes('not found') || msg.toLowerCase().includes('no longer available') || msg.toLowerCase().includes('404')
+          ? 'File is no longer available.'
+          : (msg || 'Unable to download file. Please try again.')
+      });
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  const handleDownloadSubmission = async () => {
+    if (!assignment?.submittedFile?.storagePath) {
+      setStatusMessage({
+        type: 'error',
+        message: 'No storage path found for this submission.'
+      });
+      return;
+    }
+    setDownloading(true);
+    try {
+      await downloadSubmissionFile(
+        assignment.submittedFile.storagePath, 
+        assignment.submittedFile.name
+      );
+    } catch (err: any) {
+      setStatusMessage({
+        type: 'error',
+        message: `Failed to download submitted file: ${err.message}`
+      });
+    } finally {
+      setDownloading(false);
     }
   };
 
@@ -168,12 +225,48 @@ export const AssignmentDetail: React.FC = () => {
             <p style={{ fontSize: '0.925rem', lineHeight: '1.6' }}>{assignment.instructions}</p>
           </div>
 
-          {/* Resources */}
-          {assignment.resources.length > 0 && (
+          {/* Resources & Question Paper */}
+          {(assignment.resources.length > 0 || assignment.fileName) && (
             <div className="dashboard-panel">
-              <h3 className="panel-title">Reference Resources</h3>
+              <h3 className="panel-title">Assignment Attachments &amp; Resources</h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                {assignment.resources.map((res: string, idx: number) => (
+                {assignment.fileName && (
+                  <div 
+                    style={{ 
+                      display: 'flex', 
+                      justifyContent: 'space-between', 
+                      alignItems: 'center', 
+                      padding: '0.75rem 1rem', 
+                      backgroundColor: 'var(--brand-light-grey)', 
+                      borderRadius: 'var(--border-radius)',
+                      border: '1px solid rgba(156, 163, 175, 0.15)'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <FileText size={18} style={{ color: 'var(--brand-blue)' }} />
+                      <div>
+                        <span style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--brand-black)' }}>
+                          {assignment.fileName}
+                        </span>
+                        {assignment.fileSize && (
+                          <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--brand-dark-grey)' }}>
+                            {(assignment.fileSize / 1024 / 1024).toFixed(2)} MB · Supabase Storage
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => handleDownloadResource(assignment.fileName)}
+                      disabled={downloading}
+                      className="btn btn-secondary" 
+                      style={{ width: 'auto', padding: '0.35rem 0.65rem', fontSize: '0.75rem', gap: '0.25rem' }}
+                    >
+                      <Download size={12} /> {downloading ? 'Downloading...' : 'Download'}
+                    </button>
+                  </div>
+                )}
+
+                {assignment.resources.filter((r: string) => r !== assignment.fileName).map((res: string, idx: number) => (
                   <div 
                     key={idx} 
                     style={{ 
@@ -190,7 +283,8 @@ export const AssignmentDetail: React.FC = () => {
                       📄 {res}
                     </span>
                     <button 
-                      onClick={() => alert(`Downloading reference resource: ${res}`)}
+                      onClick={() => handleDownloadResource(res)}
+                      disabled={downloading}
                       className="btn btn-secondary" 
                       style={{ width: 'auto', padding: '0.35rem 0.65rem', fontSize: '0.75rem', gap: '0.25rem' }}
                     >
@@ -265,13 +359,26 @@ export const AssignmentDetail: React.FC = () => {
                 </div>
 
                 <div style={{ borderTop: '1px solid rgba(156, 163, 175, 0.1)', paddingTop: '0.75rem' }}>
-                  <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--brand-dark-grey)' }}>Submitted File</span>
-                  <p style={{ fontSize: '0.85rem', fontWeight: 500, color: 'var(--brand-black)', marginTop: '0.15rem' }}>
-                    📄 {assignment.submittedFile?.name}
-                  </p>
-                  <span style={{ fontSize: '0.7rem', color: 'var(--brand-dark-grey)' }}>
-                    Uploaded on {new Date(assignment.submittedFile?.submittedAt).toLocaleString()}
-                  </span>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--brand-dark-grey)' }}>Submitted Deliverable</span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.25rem' }}>
+                    <div>
+                      <p style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--brand-black)', margin: 0 }}>
+                        📄 {assignment.submittedFile?.name}
+                      </p>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--brand-dark-grey)' }}>
+                        Turned in on {new Date(assignment.submittedFile?.submittedAt).toLocaleString()}
+                      </span>
+                    </div>
+                    {assignment.submittedFile?.storagePath && (
+                      <button 
+                        onClick={handleDownloadSubmission}
+                        className="btn btn-secondary"
+                        style={{ width: 'auto', padding: '0.35rem 0.65rem', fontSize: '0.75rem' }}
+                      >
+                        <Download size={12} /> Download
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             ) : assignment.status === 'Submitted' ? (
@@ -287,24 +394,37 @@ export const AssignmentDetail: React.FC = () => {
                 >
                   <p style={{ fontSize: '0.875rem', fontWeight: 500, color: 'var(--brand-blue)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
                     <FileCheck size={18} />
-                    Ready for grading
+                    Ready for faculty grading
                   </p>
                 </div>
 
                 <div>
                   <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--brand-dark-grey)' }}>Submitted File</span>
-                  <p style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--brand-black)', marginTop: '0.15rem' }}>
-                    📄 {assignment.submittedFile?.name}
-                  </p>
-                  <span style={{ fontSize: '0.7rem', color: 'var(--brand-dark-grey)' }}>
-                    Uploaded on {new Date(assignment.submittedFile?.submittedAt || '').toLocaleString()}
-                  </span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.25rem' }}>
+                    <div>
+                      <p style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--brand-black)', margin: 0 }}>
+                        📄 {assignment.submittedFile?.name}
+                      </p>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--brand-dark-grey)' }}>
+                        Uploaded to Supabase Storage on {new Date(assignment.submittedFile?.submittedAt || '').toLocaleString()}
+                      </span>
+                    </div>
+                    {assignment.submittedFile?.storagePath && (
+                      <button 
+                        onClick={handleDownloadSubmission}
+                        className="btn btn-secondary"
+                        style={{ width: 'auto', padding: '0.35rem 0.65rem', fontSize: '0.75rem' }}
+                      >
+                        <Download size={12} /> Download
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {/* Resubmission zone */}
                 <div style={{ borderTop: '1px solid rgba(156, 163, 175, 0.1)', paddingTop: '1rem', marginTop: '0.5rem' }}>
                   <span style={{ fontSize: '0.825rem', fontWeight: 600, color: 'var(--brand-black)', display: 'block', marginBottom: '0.5rem' }}>
-                    Resubmit File (Overwrites previous)
+                    Resubmit File (Overwrites previous Storage file)
                   </span>
                   <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                     <div 
@@ -313,7 +433,7 @@ export const AssignmentDetail: React.FC = () => {
                       onDrop={handleDrop}
                     >
                       <Upload size={24} className="file-uploader-icon" />
-                      <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>Drag & Drop or Click to Browse</span>
+                      <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>Drag &amp; Drop or Click to Browse</span>
                       <input 
                         type="file" 
                         id="assignment-file-re"
@@ -329,7 +449,7 @@ export const AssignmentDetail: React.FC = () => {
                     {selectedFile && (
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'var(--brand-light-grey)', padding: '0.5rem', borderRadius: '4px', fontSize: '0.8rem' }}>
                         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '200px' }}>
-                          📄 {selectedFile.name}
+                          📄 {selectedFile.name} ({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)
                         </span>
                         <button type="button" onClick={() => setSelectedFile(null)} style={{ border: 'none', background: 'none', color: 'var(--color-error)', cursor: 'pointer', fontWeight: 600 }}>
                           Remove
@@ -346,7 +466,7 @@ export const AssignmentDetail: React.FC = () => {
                       {isSubmitting ? (
                         <>
                           <span className="spinner"></span>
-                          <span>Uploading...</span>
+                          <span>Uploading to Storage...</span>
                         </>
                       ) : 'Resubmit Assignment'}
                     </button>
@@ -363,24 +483,24 @@ export const AssignmentDetail: React.FC = () => {
                 >
                   <Upload size={28} className="file-uploader-icon" />
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
-                    <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Drag & Drop file here</span>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--brand-dark-grey)' }}>Supported: PDF, ZIP, TXT up to 10MB</span>
+                    <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Drag &amp; Drop file here</span>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--brand-dark-grey)' }}>Supported: PDF, DOCX, ZIP, Code files up to 20MB</span>
                   </div>
                   <input 
                     type="file" 
-                    id="assignment-file"
+                    id="assignment-file-input"
                     onChange={handleFileChange}
                     disabled={isSubmitting}
                     style={{ display: 'none' }}
                   />
-                  <label htmlFor="assignment-file" className="btn btn-secondary" style={{ width: 'auto', padding: '0.4rem 1rem', fontSize: '0.8rem', cursor: 'pointer', marginTop: '0.25rem' }}>
+                  <label htmlFor="assignment-file-input" className="btn btn-secondary" style={{ width: 'auto', padding: '0.4rem 0.85rem', fontSize: '0.8rem', cursor: 'pointer' }}>
                     Browse Files
                   </label>
                 </div>
 
                 {selectedFile && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'var(--brand-light-grey)', padding: '0.65rem', borderRadius: '4px', fontSize: '0.825rem' }}>
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '220px', fontWeight: 500 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'var(--brand-light-grey)', padding: '0.5rem 0.75rem', borderRadius: '4px', fontSize: '0.85rem' }}>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '240px', fontWeight: 600 }}>
                       📄 {selectedFile.name}
                     </span>
                     <button type="button" onClick={() => setSelectedFile(null)} style={{ border: 'none', background: 'none', color: 'var(--color-error)', cursor: 'pointer', fontWeight: 600 }}>
@@ -393,12 +513,11 @@ export const AssignmentDetail: React.FC = () => {
                   type="submit" 
                   className="btn btn-primary"
                   disabled={!selectedFile || isSubmitting}
-                  style={{ backgroundColor: 'var(--brand-orange)', marginTop: '0.5rem' }}
                 >
                   {isSubmitting ? (
                     <>
                       <span className="spinner"></span>
-                      <span>Uploading...</span>
+                      <span>Uploading to Supabase Storage...</span>
                     </>
                   ) : 'Submit Assignment'}
                 </button>
@@ -407,9 +526,21 @@ export const AssignmentDetail: React.FC = () => {
 
           </div>
 
+          {/* Submission Integrity Card */}
+          <div className="dashboard-panel">
+            <h4 style={{ fontSize: '0.875rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--brand-black)' }}>
+              Submission Guidelines &amp; Policies
+            </h4>
+            <p style={{ fontSize: '0.8rem', color: 'var(--brand-dark-grey)', lineHeight: '1.5' }}>
+              Files uploaded are encrypted and stored in private Supabase Storage buckets. Only your assigned faculty evaluator and department head have grading authorization.
+            </p>
+          </div>
+
         </div>
+
       </div>
     </AppShell>
   );
 };
+
 export default AssignmentDetail;

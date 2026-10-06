@@ -10,6 +10,10 @@ export interface Announcement {
   targetAudience: 'Students' | 'Faculty' | 'Students + Faculty';
   publishedAt: string;
   status: 'Published' | 'Draft';
+  attachmentPath?: string;
+  attachmentName?: string;
+  attachmentSize?: number;
+  attachmentType?: string;
 }
 
 export const mockAnnouncements: Announcement[] = [];

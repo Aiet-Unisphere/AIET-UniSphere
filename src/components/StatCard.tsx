@@ -13,10 +13,15 @@ export const StatCard: React.FC<StatCardProps> = ({ title, value, icon, subtitle
     <div className="stat-card">
       <div className="stat-label-row">
         <span className="stat-card-title">{title}</span>
-        <span className="stat-card-icon">{icon}</span>
+        <div className="stat-icon-wrapper">{icon}</div>
       </div>
       <span className="stat-card-value">{value}</span>
-      {subtitle && <span className="stat-card-subtitle" style={{ fontSize: '0.75rem', color: 'var(--brand-dark-grey)', marginTop: '0.25rem', display: 'block' }}>{subtitle}</span>}
+      {subtitle && (
+        <span className="stat-card-subtitle" style={{ fontSize: '0.75rem', color: 'var(--brand-dark-grey)', marginTop: '0.2rem', display: 'block' }}>
+          {subtitle}
+        </span>
+      )}
     </div>
   );
 };
+

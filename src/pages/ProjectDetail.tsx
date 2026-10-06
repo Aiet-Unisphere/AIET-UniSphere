@@ -14,11 +14,8 @@ import { ProjectTask } from '../components/ProjectTask';
 import { ProjectMilestone } from '../components/ProjectMilestone';
 import { ProjectTeam } from '../components/ProjectTeam';
 import { ProjectTimeline } from '../components/ProjectTimeline';
-import type { ProjectItem } from '../data/projects';
-import type { ProjectTaskItem } from '../data/projectTasks';
-import type { ProjectMilestoneItem } from '../data/projectMilestones';
-import { getProjectById } from '../services/projectService';
-import { getProjectTasks, getProjectMilestones, toggleTaskStatus } from '../services/workspaceService';
+import type { Project, ProjectTask as ProjectTaskData, ProjectMilestone as ProjectMilestoneData } from '../services/projectService';
+import { getProjectById, getProjectTasks, getProjectMilestones, toggleTaskStatus } from '../services/projectService';
 import { getStatusBadgeClass } from '../components/ProjectCard';
 
 type DetailTab = 'overview' | 'tasks' | 'milestones' | 'team' | 'resources' | 'activity';
@@ -27,9 +24,9 @@ export const ProjectDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
-  const [project, setProject] = useState<ProjectItem | null>(null);
-  const [tasks, setTasks] = useState<ProjectTaskItem[]>([]);
-  const [milestones, setMilestones] = useState<ProjectMilestoneItem[]>([]);
+  const [project, setProject] = useState<Project | null>(null);
+  const [tasks, setTasks] = useState<ProjectTaskData[]>([]);
+  const [milestones, setMilestones] = useState<ProjectMilestoneData[]>([]);
   const [activeTab, setActiveTab] = useState<DetailTab>('overview');
   
   const [isLoading, setIsLoading] = useState(true);
@@ -39,7 +36,11 @@ export const ProjectDetail: React.FC = () => {
     setIsLoading(true);
     setError(null);
     try {
-      const projId = id || 'proj-1';
+      if (!id) {
+        setError('Project not found.');
+        return;
+      }
+      const projId = id;
       const proj = await getProjectById(projId);
       if (!proj) {
         setError("Unable to load project information.");
@@ -65,8 +66,10 @@ export const ProjectDetail: React.FC = () => {
   }, [id]);
 
   const handleToggleTask = async (taskId: string) => {
-    const updated = await toggleTaskStatus(taskId);
-    setTasks(updated.filter(t => t.projectId === (id || 'proj-1') || t.projectId === 'proj-1'));
+    await toggleTaskStatus(taskId);
+    if (!id) return;
+    const taskData = await getProjectTasks(id);
+    setTasks(taskData);
   };
 
   if (isLoading) {
@@ -84,6 +87,27 @@ export const ProjectDetail: React.FC = () => {
       </AppShell>
     );
   }
+
+  const activityEvents = [
+    { id: `project-${project.id}`, timestamp: project.created_at, title: 'Project created', description: project.description || undefined, type: 'milestone' as const },
+    ...tasks.map(task => ({
+      id: `task-${task.id}`,
+      timestamp: task.updated_at,
+      title: `Task ${task.status.toLowerCase()}: ${task.title}`,
+      description: task.description || undefined,
+      type: 'task' as const,
+    })),
+    ...milestones.map(milestone => ({
+      id: `milestone-${milestone.id}`,
+      timestamp: milestone.updated_at,
+      title: `Milestone ${milestone.status.toLowerCase()}: ${milestone.title}`,
+      description: milestone.description || undefined,
+      type: 'milestone' as const,
+    })),
+  ].sort((a, b) => b.timestamp.localeCompare(a.timestamp)).map(event => ({
+    ...event,
+    timeGroup: new Date(event.timestamp).toLocaleString(),
+  }));
 
   return (
     <AppShell>
@@ -137,11 +161,11 @@ export const ProjectDetail: React.FC = () => {
       <div className="project-detail-banner-card">
         <div className="banner-stat-item">
           <span className="stat-lbl">Course / Subject</span>
-          <span className="stat-val">{project.course}</span>
+          <span className="stat-val">{project.course_name || 'Independent project'}</span>
         </div>
         <div className="banner-stat-item">
           <span className="stat-lbl">Faculty Mentor</span>
-          <span className="stat-val">{project.faculty}</span>
+          <span className="stat-val">{project.faculty_mentor || 'Not assigned'}</span>
         </div>
         <div className="banner-stat-item">
           <span className="stat-lbl">Target Deadline</span>
@@ -195,7 +219,7 @@ export const ProjectDetail: React.FC = () => {
 
             <div className="card-box" style={{ marginTop: '1.5rem' }}>
               <h3 style={{ fontSize: '1.15rem', fontWeight: 700, marginBottom: '1rem' }}>
-                Current Milestone: <span style={{ color: 'var(--brand-orange)' }}>{project.currentMilestone}</span>
+                Current Milestone: <span style={{ color: 'var(--brand-orange)' }}>{milestones.find(ms => ms.status !== 'Completed')?.title || 'No pending milestone'}</span>
               </h3>
               <div className="milestones-list">
                 {milestones.map(ms => (
@@ -208,9 +232,9 @@ export const ProjectDetail: React.FC = () => {
           <div className="detail-side-col">
             <div className="card-box">
               <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1rem' }}>
-                Project Team ({project.team.length})
+                Project Team ({project.team_members.length})
               </h3>
-              <ProjectTeam members={project.team} />
+              <ProjectTeam members={project.team_members} />
             </div>
 
             <div className="card-box" style={{ marginTop: '1.5rem' }}>
@@ -267,7 +291,7 @@ export const ProjectDetail: React.FC = () => {
           <h3 style={{ fontSize: '1.25rem', fontWeight: 700, marginBottom: '1rem' }}>
             Team Roster & Contributions
           </h3>
-          <ProjectTeam members={project.team} />
+          <ProjectTeam members={project.team_members} />
         </div>
       )}
 
@@ -304,7 +328,7 @@ export const ProjectDetail: React.FC = () => {
           <h3 style={{ fontSize: '1.25rem', fontWeight: 700, marginBottom: '1rem' }}>
             Project Activity Log
           </h3>
-          <ProjectTimeline />
+          <ProjectTimeline events={activityEvents} />
         </div>
       )}
     </AppShell>
