@@ -1,116 +1,174 @@
+<!-- markdownlint-disable MD033 MD041 -->
+
 <div align="center">
 
-# 🌐 AIET UniSphere
+<img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=12,14,18&height=200&section=header&text=AIET%20UniSphere&fontSize=62&fontColor=ffffff&animation=fadeIn&fontAlignY=38&desc=One%20platform.%20Every%20corner%20of%20campus.&descAlignY=60&descSize=20" alt="AIET UniSphere banner" width="100%" />
 
-**A unified campus platform for Alva's Institute of Engineering and Technology (AIET), built with React, TypeScript, Vite and Supabase.**
+<p>
+  <a href="https://react.dev"><img src="https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=black" alt="React" /></a>
+  <a href="https://www.typescriptlang.org"><img src="https://img.shields.io/badge/TypeScript-6-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" /></a>
+  <a href="https://vite.dev"><img src="https://img.shields.io/badge/Vite-8-646CFF?style=for-the-badge&logo=vite&logoColor=white" alt="Vite" /></a>
+  <a href="https://supabase.com"><img src="https://img.shields.io/badge/Supabase-Backend-3ECF8E?style=for-the-badge&logo=supabase&logoColor=white" alt="Supabase" /></a>
+  <a href="https://reactrouter.com"><img src="https://img.shields.io/badge/React_Router-7-CA4245?style=for-the-badge&logo=reactrouter&logoColor=white" alt="React Router" /></a>
+</p>
 
-![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white)
-![TypeScript](https://img.shields.io/badge/TypeScript-6-3178C6?logo=typescript&logoColor=white)
-![Vite](https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white)
-![Supabase](https://img.shields.io/badge/Supabase-Backend-3ECF8E?logo=supabase&logoColor=white)
-![React Router](https://img.shields.io/badge/React_Router-7-CA4245?logo=reactrouter&logoColor=white)
-![Status](https://img.shields.io/badge/status-in%20development-orange)
+<p>
+  <img src="https://img.shields.io/github/last-commit/Aiet-Unisphere/AIET-UniSphere?style=flat-square&color=blueviolet" alt="Last commit" />
+  <img src="https://img.shields.io/github/languages/top/Aiet-Unisphere/AIET-UniSphere?style=flat-square" alt="Top language" />
+  <img src="https://img.shields.io/github/repo-size/Aiet-Unisphere/AIET-UniSphere?style=flat-square" alt="Repo size" />
+  <img src="https://img.shields.io/github/issues/Aiet-Unisphere/AIET-UniSphere?style=flat-square" alt="Issues" />
+  <img src="https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square" alt="PRs welcome" />
+  <img src="https://img.shields.io/badge/status-in%20development-orange?style=flat-square" alt="Status" />
+</p>
 
-[Live Demo](#-live-demo) · [Features](#-features) · [Getting Started](#-getting-started) · [Project Structure](#-project-structure) · [Contributing](#-contributing)
+<h3>A fast, modern campus platform for Alva's Institute of Engineering and Technology (AIET), built on React, TypeScript, Vite and Supabase.</h3>
+
+<p>
+  <a href="#-quick-start"><b>Quick Start</b></a> ·
+  <a href="#-features"><b>Features</b></a> ·
+  <a href="#-architecture"><b>Architecture</b></a> ·
+  <a href="#-supabase-setup"><b>Supabase</b></a> ·
+  <a href="#-deployment"><b>Deploy</b></a> ·
+  <a href="#-contributing"><b>Contribute</b></a>
+</p>
 
 </div>
 
 ---
 
-## 📖 Table of Contents
+## 📑 Table of Contents
 
-- [About the Project](#-about-the-project)
-- [Live Demo](#-live-demo)
+<details>
+<summary>Click to expand</summary>
+
+- [Overview](#-overview)
 - [Features](#-features)
 - [Tech Stack](#-tech-stack)
 - [Architecture](#-architecture)
 - [Project Structure](#-project-structure)
-- [Getting Started](#-getting-started)
+- [Quick Start](#-quick-start)
 - [Environment Variables](#-environment-variables)
 - [Supabase Setup](#-supabase-setup)
-- [Available Scripts](#-available-scripts)
+- [Scripts](#-scripts)
 - [Code Quality](#-code-quality)
 - [Deployment](#-deployment)
+- [Continuous Integration](#-continuous-integration)
 - [Roadmap](#-roadmap)
 - [Contributing](#-contributing)
-- [Troubleshooting](#-troubleshooting)
+- [Security](#-security)
+- [FAQ & Troubleshooting](#-faq--troubleshooting)
 - [License](#-license)
 - [Acknowledgements](#-acknowledgements)
 
----
-
-## 📌 About the Project
-
-**AIET UniSphere** is a web application that brings campus life at AIET into one place. It is a single-page application (SPA) built on a modern frontend stack, with **Supabase** providing authentication, database and storage.
-
-> **Problem:** Campus information, announcements and student services are usually scattered across notice boards, group chats and separate portals.
->
-> **Solution:** UniSphere gives students and staff a single, fast, responsive web interface backed by a managed Postgres database.
-
-<!-- TODO: Replace the two lines above with 2–3 sentences about what UniSphere specifically does. -->
+</details>
 
 ---
 
-## 🚀 Live Demo
+## 🎯 Overview
 
-<!-- TODO: Add your deployed URL, e.g. Netlify / Vercel -->
+Campus information is usually scattered across notice boards, group chats and separate portals. **AIET UniSphere** aims to bring it together in one responsive web app.
 
-| Environment | URL |
-| ----------- | --- |
-| Production  | _coming soon_ |
+It is a single-page application (SPA) with a typed React frontend and **Supabase** as the backend, which provides Postgres, authentication, storage and realtime features without a custom server to maintain.
 
-### Screenshots
-
-<!-- TODO: Add screenshots to /public/screenshots and link them here -->
-
-| Home | Dashboard |
-| ---- | --------- |
-| ![Home](public/screenshots/home.png) | ![Dashboard](public/screenshots/dashboard.png) |
+| | |
+|---|---|
+| 🧑‍🎓 **For** | Students, faculty and campus administrators at AIET |
+| ⚡ **Built for** | Speed (Vite), safety (TypeScript, Row Level Security) and easy deployment (static hosting) |
+| 🧩 **Designed to** | Be modular, so new campus services can be added as routes and Supabase tables |
 
 ---
 
 ## ✨ Features
 
-<!-- TODO: Edit this list to match what is actually implemented. -->
+> The sections below describe the platform's capabilities and the foundation already in place. Keep this list in sync with what ships.
 
-- 🔐 **Authentication**: sign up, log in and session handling via Supabase Auth
-- 🧭 **Client-side routing**: fast page transitions with React Router v7
-- 🗄️ **Cloud database**: Postgres tables, policies and migrations managed in the `supabase/` folder
-- 🎨 **Modern UI**: clean, responsive interface with [Lucide](https://lucide.dev) icons
-- ⚡ **Instant dev experience**: Vite HMR and TypeScript type-checking
-- 🧹 **Fast linting**: Oxlint for near-instant feedback
-- 🔒 **Secure config**: secrets kept in environment variables, never committed
+<table>
+<tr>
+<td width="50%" valign="top">
+
+### 🔐 Authentication
+Secure sign-up, login and session handling powered by Supabase Auth, with JWT-based sessions.
+
+### 🗄️ Managed Database
+Postgres schema, migrations and policies versioned in the [`supabase/`](./supabase) folder.
+
+### 🛡️ Row Level Security
+Access rules are enforced in the database, so the browser never has to be trusted.
+
+</td>
+<td width="50%" valign="top">
+
+### 🧭 Seamless Navigation
+Client-side routing with React Router v7 for instant page transitions and deep-linkable URLs.
+
+### 🎨 Clean, Responsive UI
+Built with React 19 and [Lucide](https://lucide.dev) icons. Works on phones, tablets and desktops.
+
+### ⚡ Developer Experience
+Vite HMR, strict TypeScript and Oxlint give instant feedback while you code.
+
+</td>
+</tr>
+</table>
 
 ---
 
 ## 🛠 Tech Stack
 
-| Layer            | Technology |
-| ---------------- | ---------- |
-| Framework        | [React 19](https://react.dev) |
-| Language         | [TypeScript](https://www.typescriptlang.org) |
-| Build tool       | [Vite](https://vite.dev) with `@vitejs/plugin-react` |
-| Routing          | [React Router DOM v7](https://reactrouter.com) |
-| Backend / BaaS   | [Supabase](https://supabase.com) (`@supabase/supabase-js`) |
-| Icons            | [Lucide React](https://lucide.dev) |
-| Linting          | [Oxlint](https://oxc.rs) |
+| Layer | Technology | Why |
+|:--|:--|:--|
+| **UI framework** | [React 19](https://react.dev) | Component model, modern concurrent features |
+| **Language** | [TypeScript 6](https://www.typescriptlang.org) | Type safety across the whole codebase |
+| **Build tool** | [Vite 8](https://vite.dev) + `@vitejs/plugin-react` | Near-instant dev server and optimized builds |
+| **Routing** | [React Router DOM 7](https://reactrouter.com) | Declarative client-side routing |
+| **Backend (BaaS)** | [Supabase](https://supabase.com) via `@supabase/supabase-js` | Auth, Postgres, storage, realtime |
+| **Icons** | [Lucide React](https://lucide.dev) | Consistent, lightweight icon set |
+| **Linting** | [Oxlint](https://oxc.rs) | Rust-powered, extremely fast linter |
 
 ---
 
 ## 🏗 Architecture
 
-```text
-┌──────────────────────────┐        HTTPS / WebSocket        ┌────────────────────────┐
-│   React + TypeScript     │ ──────────────────────────────▶ │        Supabase        │
-│   SPA (Vite build)       │                                 │  Auth · Postgres · RLS │
-│                          │ ◀────────────────────────────── │  Storage · Realtime    │
-│  React Router • Lucide   │        JSON / session JWT       │                        │
-└──────────────────────────┘                                 └────────────────────────┘
+### System overview
+
+```mermaid
+flowchart LR
+    U([👤 User Browser]) -->|loads static bundle| CDN[Static Host<br/>Netlify / Vercel]
+    U <-->|HTTPS + JWT| SB
+
+    subgraph SB [Supabase Project]
+        direction TB
+        AUTH[🔐 Auth]
+        DB[(🗄️ Postgres + RLS)]
+        STO[📦 Storage]
+        RT[⚡ Realtime]
+    end
+
+    CDN -.serves.-> APP[React SPA<br/>Vite build]
+    APP --> U
 ```
 
-1. The browser loads the static Vite bundle.
-2. `@supabase/supabase-js` initialises a client using the project URL and publishable (anon) key.
-3. Auth sessions are issued as JWTs; Row Level Security (RLS) policies in Postgres decide what each user can read or write.
+### Request flow
+
+```mermaid
+sequenceDiagram
+    participant B as Browser (React SPA)
+    participant A as Supabase Auth
+    participant D as Postgres (RLS)
+
+    B->>A: Sign in (email / provider)
+    A-->>B: Session + JWT
+    B->>D: Query with JWT (supabase-js)
+    D->>D: Evaluate RLS policies for auth.uid()
+    D-->>B: Only rows the user is allowed to see
+```
+
+**How it fits together**
+
+1. The browser downloads the static Vite bundle from any static host.
+2. `@supabase/supabase-js` creates a client from the project URL and publishable (anon) key.
+3. Users authenticate with Supabase Auth and receive a JWT.
+4. Every query carries that JWT, and **Row Level Security** policies decide what each user can read or write.
 
 ---
 
@@ -118,227 +176,385 @@
 
 ```text
 AIET-UniSphere/
-├── public/                 # Static assets served as-is
-├── src/                    # Application source (components, pages, hooks, lib)
-├── supabase/               # Supabase config, SQL migrations and policies
-├── .env.example            # Template for required environment variables
+├── public/                  # Static assets served as-is
+├── src/                     # Application source code
+├── supabase/                # Supabase config, migrations and policies
+├── .env.example             # Template for required environment variables
 ├── .gitignore
-├── .oxlintrc.json          # Oxlint configuration
-├── index.html              # Vite HTML entry point
-├── package.json            # Dependencies and npm scripts
-├── tsconfig.json           # TypeScript project references
-├── tsconfig.app.json       # TypeScript config for app code
-├── tsconfig.node.json      # TypeScript config for Vite/Node tooling
-└── vite.config.ts          # Vite configuration
+├── .oxlintrc.json           # Oxlint configuration
+├── index.html               # Vite HTML entry point
+├── package.json             # Dependencies and npm scripts
+├── tsconfig.json            # TypeScript project references
+├── tsconfig.app.json        # TypeScript config for app code
+├── tsconfig.node.json       # TypeScript config for Vite / Node tooling
+└── vite.config.ts           # Vite configuration
 ```
 
-<!-- TODO: Expand `src/` with your real sub-folders, for example:
+<details>
+<summary><b>Suggested layout inside <code>src/</code></b> (adapt to your codebase)</summary>
+
+```text
 src/
-├── components/   # Reusable UI components
-├── pages/        # Route-level pages
-├── lib/          # Supabase client and helpers
-├── hooks/        # Custom React hooks
-└── main.tsx      # App entry
--->
+├── components/     # Reusable UI components
+├── pages/          # Route-level pages
+├── lib/            # Supabase client and shared helpers
+├── hooks/          # Custom React hooks
+├── types/          # Shared TypeScript types
+└── main.tsx        # Application entry point
+```
+
+</details>
 
 ---
 
-## 🏁 Getting Started
+## 🚀 Quick Start
 
 ### Prerequisites
 
-- **Node.js** 20 or later (22 LTS recommended)
-- **npm** 10 or later
-- A free **[Supabase](https://supabase.com)** account and project
+| Tool | Version | Check |
+|:--|:--|:--|
+| Node.js | 20+ (22 LTS recommended) | `node -v` |
+| npm | 10+ | `npm -v` |
+| Supabase account | free tier is enough | [supabase.com](https://supabase.com) |
 
-### 1. Clone the repository
+### Run it locally
 
 ```bash
+# 1. Clone
 git clone https://github.com/Aiet-Unisphere/AIET-UniSphere.git
 cd AIET-UniSphere
-```
 
-### 2. Install dependencies
-
-```bash
+# 2. Install dependencies
 npm install
-```
 
-### 3. Configure environment variables
-
-```bash
+# 3. Create your environment file
 cp .env.example .env
-```
+#    then open .env and add your Supabase URL and key
 
-Open `.env` and fill in your Supabase credentials (see [Environment Variables](#-environment-variables)).
-
-### 4. Start the development server
-
-```bash
+# 4. Start the dev server
 npm run dev
 ```
 
-The app will be available at **http://localhost:5173** by default.
+Open **http://localhost:5173** and you're running. 🎉
+
+> 💡 **Windows (PowerShell):** use `Copy-Item .env.example .env` instead of `cp`.
 
 ---
 
 ## 🔑 Environment Variables
 
-Create a `.env` file in the project root (never commit it):
+Create a `.env` file in the project root. It is git-ignored, so never commit it.
 
-| Variable                        | Required | Description |
-| ------------------------------- | :------: | ----------- |
-| `VITE_SUPABASE_URL`             | ✅ | Your Supabase project URL, e.g. `https://xyzcompany.supabase.co` |
-| `VITE_SUPABASE_PUBLISHABLE_KEY` | ✅ | Your Supabase publishable / anon key |
+```env
+VITE_SUPABASE_URL=https://your-supabase-project.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=your-supabase-anon-key
+```
 
-Where to find them: **Supabase Dashboard → Project Settings → API**.
+| Variable | Required | Description |
+|:--|:--:|:--|
+| `VITE_SUPABASE_URL` | ✅ | Your Supabase project URL |
+| `VITE_SUPABASE_PUBLISHABLE_KEY` | ✅ | Publishable (anon) key from your Supabase project |
 
-> ⚠️ Vite exposes every variable prefixed with `VITE_` to the browser. Only use the **publishable/anon** key here. **Never** put the `service_role` key in a `VITE_` variable.
+📍 Find both in **Supabase Dashboard → Project Settings → API**.
+
+> [!WARNING]
+> Vite exposes every variable prefixed with `VITE_` to the browser. Only use the **publishable/anon** key here. Never put a `service_role` key in a `VITE_` variable.
+
+<details>
+<summary><b>Example Supabase client</b> (<code>src/lib/supabase.ts</code>)</summary>
+
+```ts
+import { createClient } from '@supabase/supabase-js'
+
+const url = import.meta.env.VITE_SUPABASE_URL
+const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
+
+if (!url || !key) {
+  throw new Error('Missing Supabase environment variables. Check your .env file.')
+}
+
+export const supabase = createClient(url, key)
+```
+
+</details>
 
 ---
 
 ## 🗄 Supabase Setup
 
-The `supabase/` directory holds the database definition for the project.
+The [`supabase/`](./supabase) folder holds the database definition for the project.
 
-1. Create a new project at [supabase.com](https://supabase.com).
-2. Copy the project URL and publishable key into your `.env`.
-3. Apply the schema, using one of these approaches:
+**1. Create a project** at [supabase.com](https://supabase.com) and copy the URL and publishable key into `.env`.
 
-   **Option A: Supabase CLI (recommended)**
+**2. Apply the schema**, using one of these options:
 
-   ```bash
-   npm install -g supabase        # or: npx supabase ...
-   supabase login
-   supabase link --project-ref <your-project-ref>
-   supabase db push
-   ```
+<details open>
+<summary><b>Option A: Supabase CLI (recommended)</b></summary>
 
-   **Option B: SQL Editor**
+```bash
+npx supabase login
+npx supabase link --project-ref <your-project-ref>
+npx supabase db push
+```
 
-   Open the SQL files inside `supabase/` and run them in order in the Supabase **SQL Editor**.
+</details>
 
-4. In **Authentication → Providers**, enable the sign-in methods you want (Email, Google, etc.).
-5. In **Authentication → URL Configuration**, add `http://localhost:5173` (and your production URL) to the allowed redirect URLs.
+<details>
+<summary><b>Option B: SQL Editor</b></summary>
 
-<!-- TODO: List your tables, e.g. profiles, announcements, events, and any storage buckets. -->
+Open the SQL files in `supabase/` and run them in order in the Supabase **SQL Editor**.
+
+</details>
+
+**3. Configure Auth** in **Authentication → Providers** by enabling the sign-in methods you need.
+
+**4. Add redirect URLs** in **Authentication → URL Configuration**:
+
+```text
+http://localhost:5173
+https://your-production-domain.com
+```
+
+<details>
+<summary><b>Row Level Security pattern</b> (example)</summary>
+
+Always enable RLS on tables that hold user data:
+
+```sql
+alter table public.profiles enable row level security;
+
+create policy "Users can read their own profile"
+  on public.profiles for select
+  using (auth.uid() = id);
+
+create policy "Users can update their own profile"
+  on public.profiles for update
+  using (auth.uid() = id);
+```
+
+</details>
 
 ---
 
-## 📜 Available Scripts
+## 📜 Scripts
 
-| Command           | Description |
-| ----------------- | ----------- |
-| `npm run dev`     | Start the Vite dev server with hot module replacement |
-| `npm run build`   | Type-check with `tsc -b`, then create a production build in `dist/` |
-| `npm run preview` | Serve the production build locally for testing |
-| `npm run lint`    | Run Oxlint across the project |
+| Command | What it does |
+|:--|:--|
+| `npm run dev` | Starts the Vite dev server with hot module replacement |
+| `npm run build` | Type-checks with `tsc -b`, then builds to `dist/` |
+| `npm run preview` | Serves the production build locally |
+| `npm run lint` | Lints the project with Oxlint |
 
 ---
 
 ## 🧹 Code Quality
 
-- **TypeScript** is used in strict project-reference mode (`tsconfig.app.json` and `tsconfig.node.json`).
-- **Oxlint** is configured in `.oxlintrc.json`. For stricter, type-aware linting, install `oxlint-tsgolint` and enable it:
+- **Strict TypeScript** using project references (`tsconfig.app.json` and `tsconfig.node.json`).
+- **Oxlint** configured in [`.oxlintrc.json`](./.oxlintrc.json).
+- **Pre-PR check:**
 
-  ```json
-  {
-    "$schema": "./node_modules/oxlint/configuration_schema.json",
-    "plugins": ["react", "typescript", "oxc"],
-    "options": { "typeAware": true },
-    "rules": {
-      "react/rules-of-hooks": "error",
-      "react/only-export-components": ["warn", { "allowConstantExport": true }]
-    }
-  }
+  ```bash
+  npm run lint && npm run build
   ```
 
-- Run `npm run lint && npm run build` before opening a pull request.
+<details>
+<summary><b>Enable type-aware linting</b> (recommended for production)</summary>
+
+Install `oxlint-tsgolint` and update `.oxlintrc.json`:
+
+```json
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["react", "typescript", "oxc"],
+  "options": { "typeAware": true },
+  "rules": {
+    "react/rules-of-hooks": "error",
+    "react/only-export-components": ["warn", { "allowConstantExport": true }]
+  }
+}
+```
+
+</details>
 
 ---
 
 ## ☁️ Deployment
 
-The build output is a static site in `dist/`, so it can be hosted almost anywhere.
+`npm run build` outputs a static site to `dist/`, so it can be hosted almost anywhere.
 
-### Netlify / Vercel
+| Setting | Value |
+|:--|:--|
+| Build command | `npm run build` |
+| Output directory | `dist` |
+| Environment variables | `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` |
 
-| Setting          | Value |
-| ---------------- | ----- |
-| Build command    | `npm run build` |
-| Publish / output | `dist` |
-| Env variables    | `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` |
+Because the app uses client-side routing, add an SPA fallback so deep links and page refreshes don't return 404.
 
-Because the app uses client-side routing, add an SPA fallback so deep links don't 404:
+<details>
+<summary><b>Netlify</b></summary>
 
-**Netlify**: create `public/_redirects`:
+Create `public/_redirects`:
 
 ```text
 /*    /index.html   200
 ```
 
-**Vercel**: create `vercel.json`:
+</details>
+
+<details>
+<summary><b>Vercel</b></summary>
+
+Create `vercel.json` in the project root:
 
 ```json
-{ "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }] }
+{
+  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+}
 ```
+
+</details>
 
 After deploying, add the production URL to Supabase **Authentication → URL Configuration**.
 
 ---
 
+## 🔄 Continuous Integration
+
+Add this workflow at `.github/workflows/ci.yml` to lint and build every push and pull request:
+
+```yaml
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+        env:
+          VITE_SUPABASE_URL: https://placeholder.supabase.co
+          VITE_SUPABASE_PUBLISHABLE_KEY: placeholder-key
+```
+
+---
+
 ## 🗺 Roadmap
 
-<!-- TODO: Replace with your real plans. -->
-
 - [x] Project scaffold with React, TypeScript and Vite
-- [x] Supabase integration
+- [x] Supabase integration and environment configuration
+- [x] Linting with Oxlint
 - [ ] Complete authentication flow
 - [ ] Role-based access (student, faculty, admin)
 - [ ] Announcements and events module
 - [ ] Notifications
 - [ ] Automated tests and CI pipeline
 - [ ] Accessibility and performance audit
+- [ ] Dark mode
+
+Have an idea? [Open a feature request](https://github.com/Aiet-Unisphere/AIET-UniSphere/issues/new).
 
 ---
 
 ## 🤝 Contributing
 
-Contributions are welcome!
+Contributions make open source great, and they are very welcome.
 
-1. **Fork** the repository
-2. Create a feature branch
+1. **Fork** the repository.
+2. **Create a branch:**
    ```bash
-   git checkout -b feature/your-feature-name
+   git checkout -b feat/your-feature-name
    ```
-3. Commit your changes using [Conventional Commits](https://www.conventionalcommits.org)
+3. **Commit** using [Conventional Commits](https://www.conventionalcommits.org):
    ```bash
    git commit -m "feat: add event listing page"
    ```
-4. Make sure `npm run lint` and `npm run build` pass
-5. Push your branch and open a **Pull Request**
+4. **Verify:** `npm run lint && npm run build`
+5. **Push** and open a **Pull Request**.
 
-Please open an [issue](https://github.com/Aiet-Unisphere/AIET-UniSphere/issues) first for large changes so we can discuss the approach.
+| Prefix | Use for |
+|:--|:--|
+| `feat:` | New feature |
+| `fix:` | Bug fix |
+| `docs:` | Documentation only |
+| `refactor:` | Code change that neither fixes a bug nor adds a feature |
+| `chore:` | Tooling, dependencies, config |
+
+<details>
+<summary><b>Pull request checklist</b></summary>
+
+- [ ] Code builds with `npm run build`
+- [ ] Lint passes with `npm run lint`
+- [ ] No secrets or `.env` files committed
+- [ ] New database changes include a migration in `supabase/`
+- [ ] UI changes checked on mobile and desktop
+
+</details>
+
+For larger changes, please [open an issue](https://github.com/Aiet-Unisphere/AIET-UniSphere/issues) first to discuss the approach.
 
 ---
 
-## 🩺 Troubleshooting
+## 🔒 Security
 
-| Problem | Fix |
-| ------- | --- |
-| Blank page and `supabaseUrl is required` in the console | `.env` is missing or variable names are wrong. Restart `npm run dev` after editing `.env`. |
-| Auth redirects to the wrong URL | Add your local and production URLs in Supabase **Authentication → URL Configuration**. |
-| 404 on page refresh after deploy | Add the SPA fallback rule (see [Deployment](#-deployment)). |
-| Data returns empty or `permission denied` | Check that RLS policies exist for the table and that you are signed in. |
-| TypeScript errors after pulling | Run `npm install` to sync dependency versions. |
+- Never commit `.env` files or any `service_role` key.
+- Enable **Row Level Security** on every table that stores user data.
+- Found a vulnerability? Please **do not open a public issue**. Contact the maintainers privately instead.
+
+---
+
+## 🩺 FAQ & Troubleshooting
+
+<details>
+<summary><b>Blank page, with <code>supabaseUrl is required</code> in the console</b></summary>
+
+Your `.env` file is missing or a variable name is wrong. Fix it, then **restart** `npm run dev`, because Vite only reads env files on startup.
+
+</details>
+
+<details>
+<summary><b>Login redirects to the wrong URL</b></summary>
+
+Add your local and production URLs in Supabase **Authentication → URL Configuration**.
+
+</details>
+
+<details>
+<summary><b>404 when refreshing a page after deploying</b></summary>
+
+Add the SPA fallback rule from the [Deployment](#-deployment) section.
+
+</details>
+
+<details>
+<summary><b>Queries return empty data or <code>permission denied</code></b></summary>
+
+Check that RLS policies exist for the table and that you are signed in. With RLS enabled and no policies, nothing is readable.
+
+</details>
+
+<details>
+<summary><b>TypeScript errors after pulling new changes</b></summary>
+
+Run `npm install` to sync dependencies, then restart your editor's TypeScript server.
+
+</details>
 
 ---
 
 ## 📄 License
 
-<!-- TODO: Add a LICENSE file (MIT is a common choice) and update this section. -->
-
-Distributed under the **MIT License**. See `LICENSE` for details.
+Add a `LICENSE` file to the repository root (for example the [MIT License](https://choosealicense.com/licenses/mit/)) and reference it here.
 
 ---
 
@@ -348,14 +564,15 @@ Distributed under the **MIT License**. See `LICENSE` for details.
 - [Supabase](https://supabase.com) for the backend platform
 - [Lucide](https://lucide.dev) for the icon set
 - [Oxc](https://oxc.rs) for the Oxlint linter
-- Alva's Institute of Engineering and Technology (AIET), Mijar, Moodbidri
+- [Shields.io](https://shields.io) and [Capsule Render](https://github.com/kyechan99/capsule-render) for badges and banner
+- **Alva's Institute of Engineering and Technology (AIET)**
 
 ---
 
 <div align="center">
 
-Made with ❤️ by the **AIET UniSphere** team
+### ⭐ If this project helps you, give it a star!
 
-⭐ Star this repo if you find it useful!
+<img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=12,14,18&height=100&section=footer" alt="footer" width="100%" />
 
 </div>
