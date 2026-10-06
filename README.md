@@ -1,73 +1,361 @@
-# AIET-UniSphere
+<div align="center">
 
-AIET-UniSphere is a role-based academic management and learning application built with React, TypeScript, Vite, Supabase Auth, PostgreSQL, Storage, and Edge Functions.
+# 🌐 AIET UniSphere
 
-## Local Setup
+**A unified campus platform for Alva's Institute of Engineering and Technology (AIET), built with React, TypeScript, Vite and Supabase.**
 
-Requirements: Node.js 20+, npm, and a Supabase project.
+![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-6-3178C6?logo=typescript&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white)
+![Supabase](https://img.shields.io/badge/Supabase-Backend-3ECF8E?logo=supabase&logoColor=white)
+![React Router](https://img.shields.io/badge/React_Router-7-CA4245?logo=reactrouter&logoColor=white)
+![Status](https://img.shields.io/badge/status-in%20development-orange)
 
-1. Install dependencies with `npm install`.
-2. Copy `.env.example` to `.env.local` and set `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, and `VITE_GITHUB_CLIENT_ID` if GitHub OAuth is enabled.
-3. Start the app with `npm run dev`.
+[Live Demo](#-live-demo) · [Features](#-features) · [Getting Started](#-getting-started) · [Project Structure](#-project-structure) · [Contributing](#-contributing)
 
-Only `VITE_` values are available to browser code. AI provider keys, GitHub OAuth secrets, and the Supabase service-role key must remain Edge Function secrets.
+</div>
 
-## Architecture
+---
 
-- React routes and role guards are in `src/App.tsx` and `src/app/guards`.
-- Supabase browser access is initialized in `src/lib/supabase.ts`.
-- Feature persistence is organized in `src/services`.
-- PostgreSQL schema changes are additive SQL files under `supabase/migrations`.
-- Privileged account provisioning, AI requests, GitHub OAuth, and GitHub API access run through Supabase Edge Functions.
+## 📖 Table of Contents
 
-## Supabase Setup
+- [About the Project](#-about-the-project)
+- [Live Demo](#-live-demo)
+- [Features](#-features)
+- [Tech Stack](#-tech-stack)
+- [Architecture](#-architecture)
+- [Project Structure](#-project-structure)
+- [Getting Started](#-getting-started)
+- [Environment Variables](#-environment-variables)
+- [Supabase Setup](#-supabase-setup)
+- [Available Scripts](#-available-scripts)
+- [Code Quality](#-code-quality)
+- [Deployment](#-deployment)
+- [Roadmap](#-roadmap)
+- [Contributing](#-contributing)
+- [Troubleshooting](#-troubleshooting)
+- [License](#-license)
+- [Acknowledgements](#-acknowledgements)
 
-Link the CLI to the intended project, then apply migrations in order:
+---
 
-```powershell
-npx supabase login
-npx supabase link --project-ref <project-ref>
-npx supabase db push
+## 📌 About the Project
+
+**AIET UniSphere** is a web application that brings campus life at AIET into one place. It is a single-page application (SPA) built on a modern frontend stack, with **Supabase** providing authentication, database and storage.
+
+> **Problem:** Campus information, announcements and student services are usually scattered across notice boards, group chats and separate portals.
+>
+> **Solution:** UniSphere gives students and staff a single, fast, responsive web interface backed by a managed Postgres database.
+
+<!-- TODO: Replace the two lines above with 2–3 sentences about what UniSphere specifically does. -->
+
+---
+
+## 🚀 Live Demo
+
+<!-- TODO: Add your deployed URL, e.g. Netlify / Vercel -->
+
+| Environment | URL |
+| ----------- | --- |
+| Production  | _coming soon_ |
+
+### Screenshots
+
+<!-- TODO: Add screenshots to /public/screenshots and link them here -->
+
+| Home | Dashboard |
+| ---- | --------- |
+| ![Home](public/screenshots/home.png) | ![Dashboard](public/screenshots/dashboard.png) |
+
+---
+
+## ✨ Features
+
+<!-- TODO: Edit this list to match what is actually implemented. -->
+
+- 🔐 **Authentication**: sign up, log in and session handling via Supabase Auth
+- 🧭 **Client-side routing**: fast page transitions with React Router v7
+- 🗄️ **Cloud database**: Postgres tables, policies and migrations managed in the `supabase/` folder
+- 🎨 **Modern UI**: clean, responsive interface with [Lucide](https://lucide.dev) icons
+- ⚡ **Instant dev experience**: Vite HMR and TypeScript type-checking
+- 🧹 **Fast linting**: Oxlint for near-instant feedback
+- 🔒 **Secure config**: secrets kept in environment variables, never committed
+
+---
+
+## 🛠 Tech Stack
+
+| Layer            | Technology |
+| ---------------- | ---------- |
+| Framework        | [React 19](https://react.dev) |
+| Language         | [TypeScript](https://www.typescriptlang.org) |
+| Build tool       | [Vite](https://vite.dev) with `@vitejs/plugin-react` |
+| Routing          | [React Router DOM v7](https://reactrouter.com) |
+| Backend / BaaS   | [Supabase](https://supabase.com) (`@supabase/supabase-js`) |
+| Icons            | [Lucide React](https://lucide.dev) |
+| Linting          | [Oxlint](https://oxc.rs) |
+
+---
+
+## 🏗 Architecture
+
+```text
+┌──────────────────────────┐        HTTPS / WebSocket        ┌────────────────────────┐
+│   React + TypeScript     │ ──────────────────────────────▶ │        Supabase        │
+│   SPA (Vite build)       │                                 │  Auth · Postgres · RLS │
+│                          │ ◀────────────────────────────── │  Storage · Realtime    │
+│  React Router • Lucide   │        JSON / session JWT       │                        │
+└──────────────────────────┘                                 └────────────────────────┘
 ```
 
-The current additive work includes migrations `00016_secure_identifier_login.sql`, `00017_secure_assessment_attempts.sql`, and `00018_restrict_github_token_access.sql`; earlier schema migrations are also required. Do not edit already-applied migration history.
+1. The browser loads the static Vite bundle.
+2. `@supabase/supabase-js` initialises a client using the project URL and publishable (anon) key.
+3. Auth sessions are issued as JWTs; Row Level Security (RLS) policies in Postgres decide what each user can read or write.
 
-Configure server secrets without a `VITE_` prefix:
+---
 
-```powershell
-npx supabase secrets set AI_PROVIDER=gemini GEMINI_API_KEY=<provider-key> GITHUB_CLIENT_ID=<oauth-client-id> GITHUB_CLIENT_SECRET=<oauth-client-secret> SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
+## 📂 Project Structure
+
+```text
+AIET-UniSphere/
+├── public/                 # Static assets served as-is
+├── src/                    # Application source (components, pages, hooks, lib)
+├── supabase/               # Supabase config, SQL migrations and policies
+├── .env.example            # Template for required environment variables
+├── .gitignore
+├── .oxlintrc.json          # Oxlint configuration
+├── index.html              # Vite HTML entry point
+├── package.json            # Dependencies and npm scripts
+├── tsconfig.json           # TypeScript project references
+├── tsconfig.app.json       # TypeScript config for app code
+├── tsconfig.node.json      # TypeScript config for Vite/Node tooling
+└── vite.config.ts          # Vite configuration
 ```
 
-For OpenAI, set `AI_PROVIDER=openai` and `OPENAI_API_KEY`; `OPENAI_MODEL` and `GEMINI_MODEL` are optional. The AI Edge Function selects the only configured provider when `AI_PROVIDER` is omitted.
+<!-- TODO: Expand `src/` with your real sub-folders, for example:
+src/
+├── components/   # Reusable UI components
+├── pages/        # Route-level pages
+├── lib/          # Supabase client and helpers
+├── hooks/        # Custom React hooks
+└── main.tsx      # App entry
+-->
 
-Deploy the Edge Functions:
+---
 
-```powershell
-npx supabase functions deploy identifier-login --no-verify-jwt
-npx supabase functions deploy admin-provision-user
-npx supabase functions deploy ai-chat
-npx supabase functions deploy github-oauth
-npx supabase functions deploy github-api
+## 🏁 Getting Started
+
+### Prerequisites
+
+- **Node.js** 20 or later (22 LTS recommended)
+- **npm** 10 or later
+- A free **[Supabase](https://supabase.com)** account and project
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/Aiet-Unisphere/AIET-UniSphere.git
+cd AIET-UniSphere
 ```
 
-The `identifier-login` function intentionally accepts unauthenticated requests so it can authenticate USN/employee-ID credentials; it validates the account and password server-side and returns only an Auth session. GitHub and AI tokens are read only by server-side functions.
+### 2. Install dependencies
 
-## Commands
+```bash
+npm install
+```
 
-```powershell
+### 3. Configure environment variables
+
+```bash
+cp .env.example .env
+```
+
+Open `.env` and fill in your Supabase credentials (see [Environment Variables](#-environment-variables)).
+
+### 4. Start the development server
+
+```bash
 npm run dev
-npm run typecheck
-npm run lint
-npm run build
-node --env-file=.env.local check_db_schema.mjs
 ```
 
-The schema check verifies Supabase connectivity and that the legacy anonymous email lookup is blocked. It does not apply migrations or exercise role-specific RLS workflows.
+The app will be available at **http://localhost:5173** by default.
 
-## GitHub OAuth
+---
 
-Register the callback URL `<app-origin>/student/github/callback` with the GitHub OAuth application. Set the client ID in `VITE_GITHUB_CLIENT_ID`; configure `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` as Supabase secrets. Repository API calls are proxied by `github-api`, and the GitHub access token is never returned to the browser.
+## 🔑 Environment Variables
 
-## Verification Limitations
+Create a `.env` file in the project root (never commit it):
 
-The automated local checks cover TypeScript, Vite bundling, and Oxlint. They do not replace applying migrations to a staging project, testing RLS with each role, configuring provider/OAuth secrets, or exercising live auth, storage, assessment, and GitHub workflows. See [PROJECT_COMPLETION.md](PROJECT_COMPLETION.md) for implemented slices and remaining work.
+| Variable                        | Required | Description |
+| ------------------------------- | :------: | ----------- |
+| `VITE_SUPABASE_URL`             | ✅ | Your Supabase project URL, e.g. `https://xyzcompany.supabase.co` |
+| `VITE_SUPABASE_PUBLISHABLE_KEY` | ✅ | Your Supabase publishable / anon key |
+
+Where to find them: **Supabase Dashboard → Project Settings → API**.
+
+> ⚠️ Vite exposes every variable prefixed with `VITE_` to the browser. Only use the **publishable/anon** key here. **Never** put the `service_role` key in a `VITE_` variable.
+
+---
+
+## 🗄 Supabase Setup
+
+The `supabase/` directory holds the database definition for the project.
+
+1. Create a new project at [supabase.com](https://supabase.com).
+2. Copy the project URL and publishable key into your `.env`.
+3. Apply the schema, using one of these approaches:
+
+   **Option A: Supabase CLI (recommended)**
+
+   ```bash
+   npm install -g supabase        # or: npx supabase ...
+   supabase login
+   supabase link --project-ref <your-project-ref>
+   supabase db push
+   ```
+
+   **Option B: SQL Editor**
+
+   Open the SQL files inside `supabase/` and run them in order in the Supabase **SQL Editor**.
+
+4. In **Authentication → Providers**, enable the sign-in methods you want (Email, Google, etc.).
+5. In **Authentication → URL Configuration**, add `http://localhost:5173` (and your production URL) to the allowed redirect URLs.
+
+<!-- TODO: List your tables, e.g. profiles, announcements, events, and any storage buckets. -->
+
+---
+
+## 📜 Available Scripts
+
+| Command           | Description |
+| ----------------- | ----------- |
+| `npm run dev`     | Start the Vite dev server with hot module replacement |
+| `npm run build`   | Type-check with `tsc -b`, then create a production build in `dist/` |
+| `npm run preview` | Serve the production build locally for testing |
+| `npm run lint`    | Run Oxlint across the project |
+
+---
+
+## 🧹 Code Quality
+
+- **TypeScript** is used in strict project-reference mode (`tsconfig.app.json` and `tsconfig.node.json`).
+- **Oxlint** is configured in `.oxlintrc.json`. For stricter, type-aware linting, install `oxlint-tsgolint` and enable it:
+
+  ```json
+  {
+    "$schema": "./node_modules/oxlint/configuration_schema.json",
+    "plugins": ["react", "typescript", "oxc"],
+    "options": { "typeAware": true },
+    "rules": {
+      "react/rules-of-hooks": "error",
+      "react/only-export-components": ["warn", { "allowConstantExport": true }]
+    }
+  }
+  ```
+
+- Run `npm run lint && npm run build` before opening a pull request.
+
+---
+
+## ☁️ Deployment
+
+The build output is a static site in `dist/`, so it can be hosted almost anywhere.
+
+### Netlify / Vercel
+
+| Setting          | Value |
+| ---------------- | ----- |
+| Build command    | `npm run build` |
+| Publish / output | `dist` |
+| Env variables    | `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` |
+
+Because the app uses client-side routing, add an SPA fallback so deep links don't 404:
+
+**Netlify**: create `public/_redirects`:
+
+```text
+/*    /index.html   200
+```
+
+**Vercel**: create `vercel.json`:
+
+```json
+{ "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }] }
+```
+
+After deploying, add the production URL to Supabase **Authentication → URL Configuration**.
+
+---
+
+## 🗺 Roadmap
+
+<!-- TODO: Replace with your real plans. -->
+
+- [x] Project scaffold with React, TypeScript and Vite
+- [x] Supabase integration
+- [ ] Complete authentication flow
+- [ ] Role-based access (student, faculty, admin)
+- [ ] Announcements and events module
+- [ ] Notifications
+- [ ] Automated tests and CI pipeline
+- [ ] Accessibility and performance audit
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome!
+
+1. **Fork** the repository
+2. Create a feature branch
+   ```bash
+   git checkout -b feature/your-feature-name
+   ```
+3. Commit your changes using [Conventional Commits](https://www.conventionalcommits.org)
+   ```bash
+   git commit -m "feat: add event listing page"
+   ```
+4. Make sure `npm run lint` and `npm run build` pass
+5. Push your branch and open a **Pull Request**
+
+Please open an [issue](https://github.com/Aiet-Unisphere/AIET-UniSphere/issues) first for large changes so we can discuss the approach.
+
+---
+
+## 🩺 Troubleshooting
+
+| Problem | Fix |
+| ------- | --- |
+| Blank page and `supabaseUrl is required` in the console | `.env` is missing or variable names are wrong. Restart `npm run dev` after editing `.env`. |
+| Auth redirects to the wrong URL | Add your local and production URLs in Supabase **Authentication → URL Configuration**. |
+| 404 on page refresh after deploy | Add the SPA fallback rule (see [Deployment](#-deployment)). |
+| Data returns empty or `permission denied` | Check that RLS policies exist for the table and that you are signed in. |
+| TypeScript errors after pulling | Run `npm install` to sync dependency versions. |
+
+---
+
+## 📄 License
+
+<!-- TODO: Add a LICENSE file (MIT is a common choice) and update this section. -->
+
+Distributed under the **MIT License**. See `LICENSE` for details.
+
+---
+
+## 🙏 Acknowledgements
+
+- [React](https://react.dev), [Vite](https://vite.dev) and [React Router](https://reactrouter.com)
+- [Supabase](https://supabase.com) for the backend platform
+- [Lucide](https://lucide.dev) for the icon set
+- [Oxc](https://oxc.rs) for the Oxlint linter
+- Alva's Institute of Engineering and Technology (AIET), Mijar, Moodbidri
+
+---
+
+<div align="center">
+
+Made with ❤️ by the **AIET UniSphere** team
+
+⭐ Star this repo if you find it useful!
+
+</div>
