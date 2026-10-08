@@ -292,13 +292,6 @@ Open **http://localhost:5173** and you're running. 🎉
 
 ## 🔑 Environment Variables
 
-Create a `.env` file in the project root. It is git-ignored, so never commit it.
-
-```env
-VITE_SUPABASE_URL=https://your-supabase-project.supabase.co
-VITE_SUPABASE_PUBLISHABLE_KEY=your-supabase-anon-key
-```
-
 | Variable | Required | Description |
 |:--|:--:|:--|
 | `VITE_SUPABASE_URL` | ✅ | Your Supabase project URL |
