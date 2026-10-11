@@ -25,6 +25,7 @@ export interface LocalLLMConfig {
   timeoutMs?: number;
   maxTokens?: number;
   temperature?: number;
+  enabled?: boolean;
 }
 
 // -------------------------------------------------------------
@@ -83,6 +84,7 @@ export interface LocalLLMAnalysisResponse {
   insights: string[];
   recommendations: string[];
   visualizations: VisualizationSpec[];
+  model?: string;
   error?: LocalLLMFailureState;
 }
 
@@ -250,6 +252,7 @@ export function validateLocalLLMResponse(res: unknown): LocalLLMAnalysisResponse
     insights,
     recommendations,
     visualizations,
+    model: typeof r.model === 'string' ? r.model : undefined,
   };
 }
 

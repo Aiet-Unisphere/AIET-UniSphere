@@ -28,6 +28,7 @@ import {
 } from './analyticsService';
 import { getStudentProfile } from './studentService';
 import { getFacultyDashboardData } from '../faculty/services/facultyService';
+import { getFacultyCourses } from './courseService';
 import {
   getDepartmentOverview,
   getDepartmentAttendanceMetrics,
@@ -177,7 +178,10 @@ export const getFacultyAnalyticsAIContract = async (): Promise<FacultyAnalyticsA
     throw new Error(`PERMISSION_DENIED: Role '${caller.role}' cannot request Faculty Analytics Contract.`);
   }
 
-  const dashData = await getFacultyDashboardData();
+  const [dashData, facultyCourses] = await Promise.all([
+    getFacultyDashboardData(),
+    getFacultyCourses().catch(() => []),
+  ]);
 
   const rawContract: FacultyAnalyticsAIContract = {
     role: 'FACULTY',
@@ -215,7 +219,13 @@ export const getFacultyAnalyticsAIContract = async (): Promise<FacultyAnalyticsA
       severity: a.severity,
       details: a.details,
     })),
-    assignedCourses: [], // Populated below if available
+    assignedCourses: (facultyCourses || []).map(c => ({
+      courseId: c.id,
+      courseCode: c.code,
+      courseName: c.name,
+      semester: c.semester || 1,
+      studentCount: c.studentCount || 0,
+    })),
   };
 
   const validated = validateFacultyAnalyticsContract(rawContract);

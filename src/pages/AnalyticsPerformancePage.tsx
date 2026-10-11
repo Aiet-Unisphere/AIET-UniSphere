@@ -1,11 +1,14 @@
-import React, { useState, useEffect } from 'react';
-import { Award, BookOpen, CalendarCheck, ClipboardList, TrendingUp, BarChart2, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Award, BookOpen, CalendarCheck, ClipboardList, TrendingUp, BarChart2, AlertCircle, Sparkles, RefreshCw, Info } from 'lucide-react';
 import { AppShell } from '../components/AppShell';
 import { LoadingState } from '../components/LoadingState';
 import { StatCard } from '../components/StatCard';
 import { PerformanceChart } from '../components/PerformanceChart';
 import { SubjectPerformance } from '../components/SubjectPerformance';
 import { InsightCard } from '../components/InsightCard';
+import { localLLMProvider } from '../services/localLLMProvider';
+import { getStudentAnalyticsAIContract } from '../services/analyticsAIDataService';
+import type { LocalLLMAnalysisResponse } from '../types/localLLM';
 import {
   getAcademicOverview,
   getSemesterTrends,
@@ -75,6 +78,39 @@ export const AnalyticsPerformancePage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [aiAnalysis, setAiAnalysis] = useState<LocalLLMAnalysisResponse | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiNotice, setAiNotice] = useState<string | null>(null);
+
+  const handleRequestAIAnalysis = useCallback(async () => {
+    setIsAnalyzing(true);
+    setAiError(null);
+    setAiNotice(null);
+    try {
+      const contract = await getStudentAnalyticsAIContract();
+      const result = await localLLMProvider.analyze({
+        role: 'STUDENT',
+        analyticsContract: contract,
+        analysisType: 'ACADEMIC_OVERVIEW',
+        dashboardContext: 'Student Academic Analytics Page',
+        timestamp: new Date().toISOString(),
+      });
+
+      if (result.success) {
+        setAiAnalysis(result);
+      } else if (result.error?.code === 'LLM_UNAVAILABLE') {
+        setAiNotice(result.summary || 'Local AI analysis is currently unavailable. Deterministic analytics remain active.');
+      } else {
+        setAiError(result.error?.message || result.summary || 'Failed to complete local AI analysis.');
+      }
+    } catch (err: unknown) {
+      setAiError(err instanceof Error ? err.message : 'An unexpected error occurred during AI analysis.');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }, []);
+
   useEffect(() => {
     const loadData = async () => {
       setIsLoading(true);
@@ -108,7 +144,7 @@ export const AnalyticsPerformancePage: React.FC = () => {
   return (
     <AppShell>
       {/* Page Header */}
-      <div className="page-header-container">
+      <div className="page-header-container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
           <div className="breadcrumbs">
             <span>Intelligence</span>
@@ -119,6 +155,32 @@ export const AnalyticsPerformancePage: React.FC = () => {
           <p style={{ fontSize: '0.85rem', color: 'var(--brand-dark-grey)', marginTop: '0.125rem' }}>
             Real-time performance insights across attendance, assessments, assignments, and subject-level analysis.
           </p>
+        </div>
+        <div>
+          <button
+            id="ai-analyze-btn"
+            type="button"
+            onClick={handleRequestAIAnalysis}
+            disabled={isAnalyzing}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              backgroundColor: isAnalyzing ? '#9ca3af' : '#ea580c',
+              color: '#ffffff',
+              padding: '0.625rem 1.125rem',
+              borderRadius: '0.5rem',
+              fontWeight: 600,
+              fontSize: '0.875rem',
+              border: 'none',
+              cursor: isAnalyzing ? 'not-allowed' : 'pointer',
+              boxShadow: '0 1px 2px rgba(0,0,0,0.08)',
+              transition: 'background-color 0.2s ease',
+            }}
+          >
+            <Sparkles size={16} />
+            {isAnalyzing ? 'Analyzing with Local AI...' : 'Analyze with Local AI'}
+          </button>
         </div>
       </div>
 
@@ -158,6 +220,151 @@ export const AnalyticsPerformancePage: React.FC = () => {
               accentColor="blue"
             />
           </div>
+
+          {/* AI Analysis Loading State */}
+          {isAnalyzing && (
+            <div className="card-box" style={{ padding: '1.25rem', display: 'flex', alignItems: 'center', gap: '1rem', background: 'rgba(234, 88, 12, 0.04)', border: '1px solid rgba(234, 88, 12, 0.2)' }}>
+              <RefreshCw size={20} className="text-orange" style={{ animation: 'spin 1.5s linear infinite' }} />
+              <div>
+                <div style={{ fontWeight: 600, fontSize: '0.95rem', color: 'var(--brand-black)' }}>Synthesizing Academic Intelligence...</div>
+                <div style={{ fontSize: '0.825rem', color: 'var(--brand-dark-grey)' }}>
+                  Private local Qwen3 4B is generating qualitative evaluations and study guidance from your authorized metrics.
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* AI Analysis Notice (Offline / Unavailable) */}
+          {aiNotice && (
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', padding: '1rem', backgroundColor: 'rgba(59, 130, 246, 0.08)', borderRadius: '0.5rem', border: '1px solid rgba(59, 130, 246, 0.2)' }}>
+              <Info size={18} color="#2563eb" style={{ flexShrink: 0, marginTop: '2px' }} />
+              <div style={{ fontSize: '0.875rem', color: 'var(--brand-black)' }}>
+                <strong>Local AI Notice: </strong>{aiNotice}
+              </div>
+            </div>
+          )}
+
+          {/* AI Analysis Error State */}
+          {aiError && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '1rem', backgroundColor: 'rgba(239, 68, 68, 0.08)', borderRadius: '0.5rem', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <AlertCircle size={18} color="#ef4444" />
+                <span style={{ fontSize: '0.875rem', color: '#ef4444' }}>{aiError}</span>
+              </div>
+              <button
+                type="button"
+                onClick={handleRequestAIAnalysis}
+                style={{
+                  background: 'none',
+                  border: '1px solid #ef4444',
+                  color: '#ef4444',
+                  padding: '0.25rem 0.75rem',
+                  borderRadius: '0.25rem',
+                  fontSize: '0.75rem',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                }}
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
+          {/* AI Academic Synthesis Card */}
+          {aiAnalysis && aiAnalysis.success && (
+            <div className="card-box" style={{ border: '1px solid var(--brand-border)', borderLeft: '4px solid #ea580c' }}>
+              <div className="card-header-bar mb-3" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <Sparkles size={18} className="text-orange" />
+                  <h3 className="card-title font-display">AI Academic Intelligence Synthesis</h3>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span style={{
+                    fontSize: '0.75rem',
+                    padding: '0.2rem 0.6rem',
+                    borderRadius: '999px',
+                    fontWeight: 600,
+                    background: aiAnalysis.trend === 'IMPROVING' ? 'rgba(34, 197, 94, 0.12)' : aiAnalysis.trend === 'DECLINING' ? 'rgba(239, 68, 68, 0.12)' : 'rgba(59, 130, 246, 0.12)',
+                    color: aiAnalysis.trend === 'IMPROVING' ? '#16a34a' : aiAnalysis.trend === 'DECLINING' ? '#dc2626' : '#2563eb'
+                  }}>
+                    Trend: {aiAnalysis.trend}
+                  </span>
+                  <span style={{
+                    fontSize: '0.75rem',
+                    padding: '0.2rem 0.6rem',
+                    borderRadius: '999px',
+                    fontWeight: 600,
+                    background: aiAnalysis.risk_level === 'LOW' ? 'rgba(34, 197, 94, 0.12)' : aiAnalysis.risk_level === 'HIGH' ? 'rgba(239, 68, 68, 0.12)' : 'rgba(245, 158, 11, 0.12)',
+                    color: aiAnalysis.risk_level === 'LOW' ? '#16a34a' : aiAnalysis.risk_level === 'HIGH' ? '#dc2626' : '#d97706'
+                  }}>
+                    Risk: {aiAnalysis.risk_level}
+                  </span>
+                  {aiAnalysis.model && (
+                    <span className="font-mono text-dark-grey" style={{ fontSize: '0.75rem' }}>
+                      ({aiAnalysis.model})
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Advisory Disclaimer */}
+              <div style={{ fontSize: '0.78rem', color: 'var(--brand-dark-grey)', backgroundColor: 'var(--brand-light-grey, #f9fafb)', padding: '0.5rem 0.75rem', borderRadius: '0.375rem', marginBottom: '1rem' }}>
+                * Advisory note: This synthesis is generated by the local Qwen3 4B analytics engine based on your authorized records. All attendance, grades, and requirements are governed strictly by official university records.
+              </div>
+
+              {/* Summary */}
+              <p style={{ fontSize: '0.925rem', lineHeight: '1.5', color: 'var(--brand-black)', marginBottom: '1.25rem' }}>
+                {aiAnalysis.summary}
+              </p>
+
+              {/* Insights and Recommendations Grid */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
+                {aiAnalysis.insights && aiAnalysis.insights.length > 0 && (
+                  <div style={{ padding: '0.875rem', background: 'var(--brand-light-grey, #f9fafb)', borderRadius: '0.5rem' }}>
+                    <div style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: '0.5rem', color: 'var(--brand-black)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                      <Award size={15} className="text-orange" />
+                      Key Insights
+                    </div>
+                    <ul style={{ margin: 0, paddingLeft: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                      {aiAnalysis.insights.map((ins, i) => (
+                        <li key={i} style={{ fontSize: '0.85rem', color: 'var(--brand-dark-grey)' }}>{ins}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {aiAnalysis.recommendations && aiAnalysis.recommendations.length > 0 && (
+                  <div style={{ padding: '0.875rem', background: 'var(--brand-light-grey, #f9fafb)', borderRadius: '0.5rem' }}>
+                    <div style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: '0.5rem', color: 'var(--brand-black)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                      <TrendingUp size={15} className="text-success" />
+                      Recommended Actions
+                    </div>
+                    <ul style={{ margin: 0, paddingLeft: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                      {aiAnalysis.recommendations.map((rec, i) => (
+                        <li key={i} style={{ fontSize: '0.85rem', color: 'var(--brand-dark-grey)' }}>{rec}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+
+              {/* Visualizations Directives */}
+              {aiAnalysis.visualizations && aiAnalysis.visualizations.length > 0 && (
+                <div style={{ marginTop: '1rem', borderTop: '1px solid var(--brand-border)', paddingTop: '0.75rem' }}>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--brand-dark-grey)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    Model Visualization Directives:
+                  </span>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.35rem' }}>
+                    {aiAnalysis.visualizations.map((v, i) => (
+                      <span key={i} style={{ fontSize: '0.75rem', background: 'var(--brand-light-grey, #f3f4f6)', padding: '0.2rem 0.5rem', borderRadius: '0.25rem', border: '1px solid var(--brand-border)' }}>
+                        <strong>{v.type}</strong>: {v.title} ({v.dataset})
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Performance Insights */}
           {insights && (
