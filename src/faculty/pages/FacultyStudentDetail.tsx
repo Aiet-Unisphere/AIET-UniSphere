@@ -17,7 +17,7 @@ import {
 import { FacultyAppShell } from '../components/FacultyAppShell';
 import { supabase } from '../../lib/supabase';
 import { getStudentFullProfile } from '../../services/studentService';
-import { getUserAvatarSignedUrl } from '../../services/avatarService';
+import { getUserAvatarUrl } from '../../services/avatarService';
 import { getStudentEnrollments, type CourseEnrollment } from '../../services/courseEnrollmentService';
 import { StatCard } from '../../components/StatCard';
 import { useAuth } from '../../app/context/AuthContext';
@@ -108,9 +108,9 @@ export const FacultyStudentDetail: React.FC = () => {
         // 3. Resolve Avatar Photo
         const avatarPath = sp?.avatar_storage_path || prof.avatar_url;
         if (avatarPath) {
-          getUserAvatarSignedUrl(avatarPath).then((url) => {
+          getUserAvatarUrl(avatarPath).then((url: string | null) => {
             if (isMounted && url) setAvatarSignedUrl(url);
-          }).catch((e) => console.warn('Could not load avatar signed URL:', e));
+          }).catch((e: unknown) => console.warn('Could not load avatar signed URL:', e));
         }
 
         // 4. Fetch Overview Analytics from student_analytics_view (RLS enforces faculty department boundary)
