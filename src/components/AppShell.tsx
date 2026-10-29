@@ -130,9 +130,9 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
   ];
 
   const navDevelopment = [
-    { label: 'Projects', path: '/student/projects', icon: <FolderGit2 size={18} /> },
-    { label: 'My Projects', path: '/student/projects/my', icon: <FolderPlus size={18} /> },
-    { label: 'Project Workspace', path: '/student/projects/my', icon: <Terminal size={18} /> },
+    { label: 'Projects', path: '/student/projects', icon: <FolderGit2 size={18} />, exact: true },
+    { label: 'My Projects', path: '/student/projects/my', icon: <FolderPlus size={18} />, exact: true },
+    { label: 'Project Workspace', path: '/student/project-workspace', icon: <Terminal size={18} />, exact: false },
     { label: 'Git / GitHub', path: '/student/github', icon: <GitBranch size={18} /> },
   ];
 
@@ -214,6 +214,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                 <NavLink
                   key={item.path}
                   to={item.path}
+                  end
                   title={item.label}
                   className={({ isActive }) => `app-sidebar-link ${isActive ? 'active' : ''}`}
                   onClick={handleNavClick}
@@ -233,6 +234,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                 <NavLink
                   key={item.path}
                   to={item.path}
+                  end
                   title={item.label}
                   className={({ isActive }) => `app-sidebar-link ${isActive ? 'active' : ''}`}
                   onClick={handleNavClick}
@@ -252,6 +254,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                 <NavLink
                   key={item.path}
                   to={item.path}
+                  end
                   title={item.label}
                   className={({ isActive }) => `app-sidebar-link ${isActive ? 'active' : ''}`}
                   onClick={handleNavClick}
@@ -274,6 +277,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                 <NavLink
                   key={item.path}
                   to={item.path}
+                  end={item.exact ?? true}
                   title={item.label}
                   className={({ isActive }) => `app-sidebar-link ${isActive ? 'active' : ''}`}
                   onClick={handleNavClick}
@@ -293,6 +297,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                 <NavLink
                   key={item.path}
                   to={item.path}
+                  end
                   title={item.label}
                   className={({ isActive }) => `app-sidebar-link ${isActive ? 'active' : ''}`}
                   onClick={handleNavClick}
@@ -312,6 +317,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                 <NavLink
                   key={item.path}
                   to={item.path}
+                  end
                   title={item.label}
                   className={({ isActive }) => `app-sidebar-link ${isActive ? 'active' : ''}`}
                   onClick={handleNavClick}
@@ -331,6 +337,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                 <NavLink
                   key={item.path}
                   to={item.path}
+                  end
                   title={item.label}
                   className={({ isActive }) => `app-sidebar-link ${isActive ? 'active' : ''}`}
                   onClick={handleNavClick}

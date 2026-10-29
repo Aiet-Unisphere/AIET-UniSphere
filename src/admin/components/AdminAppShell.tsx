@@ -139,6 +139,7 @@ export const AdminAppShell: React.FC<AdminAppShellProps> = ({ children }) => {
                 <NavLink
                   key={item.path}
                   to={item.path}
+                  end
                   title={item.label}
                   className={({ isActive }) => `app-sidebar-link ${isActive ? 'active' : ''}`}
                   onClick={handleNavClick}
@@ -157,10 +158,11 @@ export const AdminAppShell: React.FC<AdminAppShellProps> = ({ children }) => {
                 <NavLink
                   key={item.path}
                   to={item.path}
+                  end
                   title={item.label}
                   className={({ isActive }) => 
                     `app-sidebar-link ${
-                      location.pathname === item.path || (item.path !== '/admin/dashboard' && location.pathname.startsWith(`${item.path}`)) ? 'active' : ''
+                      isActive || (item.path !== '/admin/dashboard' && location.pathname.startsWith(`${item.path}/`)) ? 'active' : ''
                     }`
                   }
                   onClick={handleNavClick}
@@ -179,10 +181,11 @@ export const AdminAppShell: React.FC<AdminAppShellProps> = ({ children }) => {
                 <NavLink
                   key={item.path}
                   to={item.path}
+                  end
                   title={item.label}
                   className={({ isActive }) => 
                     `app-sidebar-link ${
-                      location.pathname === item.path || (item.path !== '/admin/dashboard' && location.pathname.startsWith(`${item.path}`)) ? 'active' : ''
+                      isActive || (item.path !== '/admin/dashboard' && location.pathname.startsWith(`${item.path}/`)) ? 'active' : ''
                     }`
                   }
                   onClick={handleNavClick}
@@ -201,10 +204,11 @@ export const AdminAppShell: React.FC<AdminAppShellProps> = ({ children }) => {
                 <NavLink
                   key={item.path}
                   to={item.path}
+                  end
                   title={item.label}
                   className={({ isActive }) => 
                     `app-sidebar-link ${
-                      location.pathname === item.path || (item.path !== '/admin/dashboard' && location.pathname.startsWith(`${item.path}`)) ? 'active' : ''
+                      isActive || (item.path !== '/admin/dashboard' && location.pathname.startsWith(`${item.path}/`)) ? 'active' : ''
                     }`
                   }
                   onClick={handleNavClick}

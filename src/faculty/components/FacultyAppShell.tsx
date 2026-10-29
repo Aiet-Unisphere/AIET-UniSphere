@@ -161,7 +161,7 @@ export const FacultyAppShell: React.FC<FacultyAppShellProps> = ({ children }) =>
     if (path.includes('/faculty/courses/')) return 'Course Details';
     if (path.includes('/faculty/courses')) return 'My Courses';
     if (path.includes('/faculty/students/')) return 'Student Academic Profile';
-    if (path.includes('/faculty/students')) return 'Student Management';
+    if (path.includes('/faculty/students')) return 'Student Directory';
     if (path.includes('/faculty/attendance')) return 'Attendance Management';
     if (path.includes('/faculty/timetable')) return 'Faculty Timetable';
     if (path.includes('/faculty/assignments/')) return 'Assignment Details';
@@ -203,6 +203,7 @@ export const FacultyAppShell: React.FC<FacultyAppShellProps> = ({ children }) =>
                 <NavLink
                   key={item.path}
                   to={item.path}
+                  end
                   title={item.label}
                   className={({ isActive }) => `app-sidebar-link ${isActive ? 'active' : ''}`}
                   onClick={handleNavClick}
@@ -222,10 +223,11 @@ export const FacultyAppShell: React.FC<FacultyAppShellProps> = ({ children }) =>
                 <NavLink
                   key={item.path}
                   to={item.path}
+                  end
                   title={item.label}
                   className={({ isActive }) => 
                     `app-sidebar-link ${
-                      location.pathname === item.path || (item.path !== '/faculty/dashboard' && location.pathname.startsWith(item.path)) ? 'active' : ''
+                      isActive || (item.path !== '/faculty/dashboard' && location.pathname.startsWith(`${item.path}/`)) ? 'active' : ''
                     }`
                   }
                   onClick={handleNavClick}
@@ -245,10 +247,11 @@ export const FacultyAppShell: React.FC<FacultyAppShellProps> = ({ children }) =>
                 <NavLink
                   key={item.path}
                   to={item.path}
+                  end
                   title={item.label}
                   className={({ isActive }) => 
                     `app-sidebar-link ${
-                      location.pathname === item.path || location.pathname.startsWith(item.path) ? 'active' : ''
+                      isActive || location.pathname.startsWith(`${item.path}/`) ? 'active' : ''
                     }`
                   }
                   onClick={handleNavClick}
