@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   CalendarCheck, 
   CheckCircle2, 
+  XCircle,
   Clock, 
   AlertTriangle, 
   Save, 
@@ -9,7 +10,9 @@ import {
   BookOpen, 
   Info, 
   Users,
-  Check
+  RotateCcw,
+  Calendar,
+  Layers
 } from 'lucide-react';
 import { FacultyAppShell } from '../components/FacultyAppShell';
 import { ClockTimePicker } from '../components/ClockTimePicker';
@@ -39,10 +42,12 @@ export const FacultyAttendancePage: React.FC = () => {
   // Students and attendance states
   const [students, setStudents] = useState<DepartmentStudent[]>([]);
   const [attendanceMap, setAttendanceMap] = useState<{ [studentId: string]: 'Present' | 'Absent' | 'Late' }>({});
+  const [initialAttendanceMap, setInitialAttendanceMap] = useState<{ [studentId: string]: 'Present' | 'Absent' | 'Late' }>({});
   const [historyLogs, setHistoryLogs] = useState<AttendanceSessionLog[]>([]);
 
-  // Search filter
+  // Search & filter
   const [studentSearch, setStudentSearch] = useState<string>('');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'Present' | 'Absent' | 'Late'>('ALL');
 
   // UI state
   const [isLoading, setIsLoading] = useState(true);
@@ -84,6 +89,7 @@ export const FacultyAttendancePage: React.FC = () => {
       const initialMap: { [studentId: string]: 'Present' | 'Absent' | 'Late' } = {};
       stds.forEach(s => { initialMap[s.id] = 'Present'; });
       setAttendanceMap(initialMap);
+      setInitialAttendanceMap(initialMap);
     } catch (err: any) {
       console.error('Failed to load attendance initial data:', err);
       if (err?.message?.includes('schema cache') || err?.message?.includes('attendance_sessions')) {
@@ -100,10 +106,21 @@ export const FacultyAttendancePage: React.FC = () => {
     loadData();
   }, [profile?.department_id]);
 
+  // Bulk actions
   const handleMarkAllPresent = () => {
     const updated: typeof attendanceMap = {};
     students.forEach(s => { updated[s.id] = 'Present'; });
     setAttendanceMap(updated);
+  };
+
+  const handleMarkAllAbsent = () => {
+    const updated: typeof attendanceMap = {};
+    students.forEach(s => { updated[s.id] = 'Absent'; });
+    setAttendanceMap(updated);
+  };
+
+  const handleResetAttendance = () => {
+    setAttendanceMap({ ...initialAttendanceMap });
   };
 
   const handleStatusToggle = (studentId: string, status: 'Present' | 'Absent' | 'Late') => {
@@ -113,9 +130,19 @@ export const FacultyAttendancePage: React.FC = () => {
     }));
   };
 
+  // Check for unsaved changes
+  const hasUnsavedChanges = useMemo(() => {
+    for (const s of students) {
+      if (attendanceMap[s.id] !== initialAttendanceMap[s.id]) {
+        return true;
+      }
+    }
+    return false;
+  }, [students, attendanceMap, initialAttendanceMap]);
+
   const handleSaveAttendance = async () => {
     if (!courseInput.trim()) {
-      showToast('error', 'Please enter a course name or code.');
+      showToast('error', 'Please enter or select a course name or code.');
       return;
     }
 
@@ -133,6 +160,7 @@ export const FacultyAttendancePage: React.FC = () => {
     const courseCode = parenMatch && parenMatch[1] ? parenMatch[1].trim() : (trimmedCourse.split(' ')[0] || 'COURSE');
     const courseName = trimmedCourse;
 
+    // IMPORTANT: Include ALL authorized students in submission regardless of search or status filter
     const records = students.map(s => ({
       studentId: s.id,
       studentName: s.name,
@@ -152,6 +180,8 @@ export const FacultyAttendancePage: React.FC = () => {
       );
 
       setIsSaving(false);
+      // Synchronize initial baseline map to current so unsaved flag clears
+      setInitialAttendanceMap({ ...attendanceMap });
       showToast('success', `Attendance recorded successfully for ${courseCode} (${records.length} students marked).`);
 
       // Refresh logs
@@ -169,14 +199,32 @@ export const FacultyAttendancePage: React.FC = () => {
     }
   };
 
-  const filteredStudents = students.filter(s => 
-    s.name.toLowerCase().includes(studentSearch.toLowerCase()) ||
-    s.usn.toLowerCase().includes(studentSearch.toLowerCase())
-  );
+  // Filtering: Search by Name/USN and optionally filter by Status
+  const filteredStudents = useMemo(() => {
+    return students.filter(s => {
+      const matchesSearch = 
+        s.name.toLowerCase().includes(studentSearch.toLowerCase()) ||
+        s.usn.toLowerCase().includes(studentSearch.toLowerCase());
+      
+      const currentStatus = attendanceMap[s.id] || 'Present';
+      const matchesStatus = statusFilter === 'ALL' || currentStatus === statusFilter;
 
-  const presentCount = Object.values(attendanceMap).filter(v => v === 'Present').length;
-  const absentCount = Object.values(attendanceMap).filter(v => v === 'Absent').length;
-  const lateCount = Object.values(attendanceMap).filter(v => v === 'Late').length;
+      return matchesSearch && matchesStatus;
+    });
+  }, [students, studentSearch, statusFilter, attendanceMap]);
+
+  // Aggregate counts
+  const totalStudentsCount = students.length;
+  const presentCount = useMemo(() => Object.values(attendanceMap).filter(v => v === 'Present').length, [attendanceMap]);
+  const absentCount = useMemo(() => Object.values(attendanceMap).filter(v => v === 'Absent').length, [attendanceMap]);
+  const lateCount = useMemo(() => Object.values(attendanceMap).filter(v => v === 'Late').length, [attendanceMap]);
+  const unmarkedCount = totalStudentsCount - (presentCount + absentCount + lateCount);
+
+  // Selected course details preview
+  const parsedCourseCode = useMemo(() => {
+    const paren = courseInput.match(/\(([^)]+)\)/);
+    return paren ? paren[1].trim() : courseInput.trim().split(' ')[0] || 'COURSE';
+  }, [courseInput]);
 
   return (
     <FacultyAppShell>
@@ -184,9 +232,9 @@ export const FacultyAttendancePage: React.FC = () => {
       {toastMessage && (
         <div
           style={{
-            padding: '0.75rem 1.25rem',
-            marginBottom: '1rem',
-            borderRadius: '8px',
+            padding: '0.85rem 1.25rem',
+            marginBottom: '1.25rem',
+            borderRadius: '10px',
             backgroundColor: toastMessage.type === 'success' ? '#ECFDF5' : toastMessage.type === 'warning' ? '#FFFBEB' : '#FEF2F2',
             border: `1px solid ${toastMessage.type === 'success' ? '#6EE7B7' : toastMessage.type === 'warning' ? '#FCD34D' : '#FCA5A5'}`,
             color: toastMessage.type === 'success' ? '#065F46' : toastMessage.type === 'warning' ? '#92400E' : '#991B1B',
@@ -194,30 +242,31 @@ export const FacultyAttendancePage: React.FC = () => {
             alignItems: 'center',
             justifyContent: 'space-between',
             fontSize: '0.875rem',
-            fontWeight: 600
+            fontWeight: 600,
+            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)'
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            {toastMessage.type === 'success' ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+            {toastMessage.type === 'success' ? <CheckCircle2 size={18} /> : <AlertTriangle size={18} />}
             <span>{toastMessage.text}</span>
           </div>
           <button
             type="button"
             onClick={() => setToastMessage(null)}
-            style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontWeight: 700 }}
+            style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontWeight: 700, fontSize: '1rem', padding: '0 0.25rem' }}
           >
             ✕
           </button>
         </div>
       )}
 
-      {/* Schema Cache Alert if tables are pending */}
+      {/* Schema Cache Alert */}
       {schemaWarning && (
         <div
           style={{
             padding: '0.85rem 1.25rem',
             marginBottom: '1.25rem',
-            borderRadius: '8px',
+            borderRadius: '10px',
             backgroundColor: '#EFF6FF',
             border: '1px solid #BFDBFE',
             color: '#1E40AF',
@@ -235,44 +284,105 @@ export const FacultyAttendancePage: React.FC = () => {
         </div>
       )}
 
-      {/* Page Title Header */}
-      <div style={{ marginBottom: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.25rem', textAlign: 'left' }}>
-        <h1 style={{ fontSize: '1.75rem', fontWeight: 700, fontFamily: 'var(--font-display)', color: 'var(--brand-black)' }}>
-          Attendance Management
-        </h1>
-        <p style={{ fontSize: '0.875rem', color: 'var(--brand-dark-grey)', fontWeight: 500 }}>
-          Record class attendance sessions with the interactive clock time selector, inspect recorded session logs, and sync student check-ins.
-        </p>
+      {/* SECTION 1: HEADER & ACTIVE CLASS CONTEXT */}
+      <div style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
+        <div>
+          <div className="breadcrumbs" style={{ marginBottom: '0.25rem' }}>
+            <span>Faculty Portal</span>
+            <span className="breadcrumbs-separator">/</span>
+            <span style={{ fontWeight: 600, color: 'var(--brand-black)' }}>Attendance Management</span>
+          </div>
+          <h1 style={{ fontSize: '1.75rem', fontWeight: 800, fontFamily: 'var(--font-display)', color: 'var(--brand-black)', margin: 0 }}>
+            Attendance Management
+          </h1>
+          <p style={{ fontSize: '0.875rem', color: 'var(--brand-dark-grey)', marginTop: '0.2rem', marginBottom: 0 }}>
+            Quick, intuitive class attendance marking with instant roster summaries, session logs, and bulk actions.
+          </p>
+        </div>
+
+        {/* Unsaved changes indicator */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          {hasUnsavedChanges && (
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.35rem',
+              padding: '0.35rem 0.75rem',
+              borderRadius: '9999px',
+              backgroundColor: '#FFFBEB',
+              border: '1px solid #FCD34D',
+              color: '#B45309',
+              fontSize: '0.75rem',
+              fontWeight: 700
+            }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#D97706' }} />
+              Unsaved Changes
+            </span>
+          )}
+
+          <button 
+            className="btn btn-primary" 
+            onClick={handleSaveAttendance} 
+            disabled={isSaving || students.length === 0} 
+            style={{ 
+              fontSize: '0.875rem', 
+              padding: '0.6rem 1.25rem', 
+              boxShadow: '0 4px 12px rgba(249, 115, 22, 0.25)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.5rem'
+            }}
+          >
+            <Save size={16} />
+            <span>{isSaving ? 'Saving Attendance...' : `Save Attendance (${totalStudentsCount})`}</span>
+          </button>
+        </div>
       </div>
 
-      {/* Course & Session Selector Bar */}
-      <div className="dashboard-panel" style={{ marginBottom: '1.5rem', padding: '1.25rem' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem', alignItems: 'flex-end' }}>
+      {/* SECTION 2: CLASS & SESSION SELECTION PANEL */}
+      <div className="dashboard-panel" style={{ marginBottom: '1.5rem', padding: '1.25rem', border: '1px solid rgba(226, 232, 240, 0.9)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem', borderBottom: '1px solid #F1F5F9', paddingBottom: '0.65rem' }}>
+          <Layers size={18} style={{ color: 'var(--brand-orange)' }} />
+          <h2 style={{ fontSize: '0.95rem', fontWeight: 700, margin: 0, color: 'var(--brand-black)' }}>
+            Class & Session Parameters
+          </h2>
+          {courseInput && (
+            <span style={{ marginLeft: 'auto', fontSize: '0.75rem', color: '#64748B', fontWeight: 600 }}>
+              Active Course: <strong style={{ color: 'var(--brand-blue)' }}>{parsedCourseCode}</strong>
+            </span>
+          )}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '1.15rem', alignItems: 'flex-end' }}>
           
           {/* Course Selector / Searchable Input */}
           <div style={{ position: 'relative' }}>
-            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: 'var(--brand-dark-grey)', textTransform: 'uppercase', marginBottom: '0.35rem' }}>
-              Course Name / Code *
+            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: 'var(--brand-dark-grey)', textTransform: 'uppercase', marginBottom: '0.4rem', letterSpacing: '0.03em' }}>
+              Course / Subject *
             </label>
-            <input
-              type="text"
-              className="form-input font-sans"
-              placeholder="Search or enter course (e.g. CS501)..."
-              value={courseInput}
-              onFocus={() => setShowCourseSuggestions(true)}
-              onChange={(e) => {
-                setCourseInput(e.target.value);
-                setShowCourseSuggestions(true);
-              }}
-              style={{
-                width: '100%',
-                padding: '0.6rem 0.75rem',
-                fontSize: '0.875rem',
-                borderRadius: '6px',
-                border: '1px solid #CBD5E1',
-                backgroundColor: '#FFFFFF'
-              }}
-            />
+            <div style={{ position: 'relative' }}>
+              <input
+                type="text"
+                className="form-input font-sans"
+                placeholder="Search or select course (e.g. CS501)..."
+                value={courseInput}
+                onFocus={() => setShowCourseSuggestions(true)}
+                onChange={(e) => {
+                  setCourseInput(e.target.value);
+                  setShowCourseSuggestions(true);
+                }}
+                style={{
+                  width: '100%',
+                  padding: '0.6rem 0.75rem 0.6rem 2.2rem',
+                  fontSize: '0.875rem',
+                  borderRadius: '8px',
+                  border: '1px solid #CBD5E1',
+                  backgroundColor: '#FFFFFF',
+                  fontWeight: 500
+                }}
+              />
+              <BookOpen size={16} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: '#94A3B8' }} />
+            </div>
 
             {/* Course Suggestions Dropdown */}
             {showCourseSuggestions && availableCourses.length > 0 && (
@@ -285,9 +395,9 @@ export const FacultyAttendancePage: React.FC = () => {
                   zIndex: 200,
                   backgroundColor: '#FFFFFF',
                   borderRadius: '8px',
-                  boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)',
+                  boxShadow: '0 12px 24px -4px rgba(0, 0, 0, 0.15)',
                   border: '1px solid #E2E8F0',
-                  maxHeight: '180px',
+                  maxHeight: '220px',
                   overflowY: 'auto'
                 }}
               >
@@ -299,17 +409,22 @@ export const FacultyAttendancePage: React.FC = () => {
                       setShowCourseSuggestions(false);
                     }}
                     style={{
-                      padding: '0.5rem 0.75rem',
+                      padding: '0.65rem 0.85rem',
                       cursor: 'pointer',
                       borderBottom: '1px solid #F1F5F9',
                       fontSize: '0.825rem',
                       display: 'flex',
                       alignItems: 'center',
-                      justifyContent: 'space-between'
+                      justifyContent: 'space-between',
+                      transition: 'background 0.1s ease'
                     }}
+                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#F8FAFC'}
+                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                   >
                     <span style={{ fontWeight: 600, color: '#0F172A' }}>{c.name}</span>
-                    <span style={{ fontSize: '0.75rem', color: '#64748B', fontFamily: 'monospace' }}>{c.code}</span>
+                    <span style={{ fontSize: '0.75rem', color: '#64748B', fontFamily: 'monospace', padding: '0.15rem 0.4rem', backgroundColor: '#F1F5F9', borderRadius: '4px' }}>
+                      {c.code}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -318,22 +433,25 @@ export const FacultyAttendancePage: React.FC = () => {
 
           {/* Session Date */}
           <div>
-            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: 'var(--brand-dark-grey)', textTransform: 'uppercase', marginBottom: '0.35rem' }}>
-              Date *
+            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: 'var(--brand-dark-grey)', textTransform: 'uppercase', marginBottom: '0.4rem', letterSpacing: '0.03em' }}>
+              Attendance Date *
             </label>
-            <input 
-              type="date" 
-              className="form-input font-sans"
-              style={{ width: '100%', padding: '0.6rem 0.75rem', fontSize: '0.875rem', borderRadius: '6px', border: '1px solid #CBD5E1' }}
-              value={sessionDate}
-              onChange={(e) => setSessionDate(e.target.value)}
-            />
+            <div style={{ position: 'relative' }}>
+              <input 
+                type="date" 
+                className="form-input font-sans"
+                style={{ width: '100%', padding: '0.6rem 0.75rem 0.6rem 2.2rem', fontSize: '0.875rem', borderRadius: '8px', border: '1px solid #CBD5E1', backgroundColor: '#FFFFFF', fontWeight: 500 }}
+                value={sessionDate}
+                onChange={(e) => setSessionDate(e.target.value)}
+              />
+              <Calendar size={16} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: '#94A3B8' }} />
+            </div>
           </div>
 
-          {/* Session Time — Clock / Dial Time Picker */}
+          {/* Session Time Slot */}
           <div>
-            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: 'var(--brand-dark-grey)', textTransform: 'uppercase', marginBottom: '0.35rem' }}>
-              Session Time Slot * (Clock Selector)
+            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: 'var(--brand-dark-grey)', textTransform: 'uppercase', marginBottom: '0.4rem', letterSpacing: '0.03em' }}>
+              Class Time Slot *
             </label>
             <ClockTimePicker 
               value={sessionTime}
@@ -341,32 +459,32 @@ export const FacultyAttendancePage: React.FC = () => {
             />
           </div>
 
-          {/* Section & Semester */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+          {/* Section & Semester Grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.65rem' }}>
             <div>
-              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: 'var(--brand-dark-grey)', textTransform: 'uppercase', marginBottom: '0.35rem' }}>
-                Section (Optional)
+              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: 'var(--brand-dark-grey)', textTransform: 'uppercase', marginBottom: '0.4rem', letterSpacing: '0.03em' }}>
+                Section
               </label>
               <input
                 type="text"
                 className="form-input font-sans"
                 placeholder="e.g. A, B"
-                style={{ width: '100%', padding: '0.6rem 0.5rem', fontSize: '0.85rem', borderRadius: '6px', border: '1px solid #CBD5E1', backgroundColor: '#FFFFFF' }}
+                style={{ width: '100%', padding: '0.6rem 0.6rem', fontSize: '0.85rem', borderRadius: '8px', border: '1px solid #CBD5E1', backgroundColor: '#FFFFFF' }}
                 value={section}
                 onChange={(e) => setSection(e.target.value)}
               />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: 'var(--brand-dark-grey)', textTransform: 'uppercase', marginBottom: '0.35rem' }}>
-                Semester (Optional)
+              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: 'var(--brand-dark-grey)', textTransform: 'uppercase', marginBottom: '0.4rem', letterSpacing: '0.03em' }}>
+                Semester
               </label>
               <select 
                 className="form-input font-sans"
-                style={{ width: '100%', padding: '0.6rem 0.5rem', fontSize: '0.85rem', borderRadius: '6px', border: '1px solid #CBD5E1', backgroundColor: '#FFFFFF' }}
+                style={{ width: '100%', padding: '0.6rem 0.5rem', fontSize: '0.85rem', borderRadius: '8px', border: '1px solid #CBD5E1', backgroundColor: '#FFFFFF' }}
                 value={semester}
                 onChange={(e) => setSemester(e.target.value ? Number(e.target.value) : '')}
               >
-                <option value="">None</option>
+                <option value="">All Semesters</option>
                 {[1, 2, 3, 4, 5, 6, 7, 8].map(s => (
                   <option key={s} value={s}>Sem {s}</option>
                 ))}
@@ -377,169 +495,492 @@ export const FacultyAttendancePage: React.FC = () => {
         </div>
       </div>
 
-      {/* Tabs Bar */}
+      {/* SECTION 3: ATTENDANCE SUMMARY STATS CARDS */}
+      <div style={{ 
+        display: 'grid', 
+        gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', 
+        gap: '0.85rem', 
+        marginBottom: '1.5rem' 
+      }}>
+        {/* Total Students */}
+        <div 
+          onClick={() => setStatusFilter('ALL')}
+          style={{
+            padding: '1rem 1.15rem',
+            backgroundColor: '#FFFFFF',
+            borderRadius: '10px',
+            border: statusFilter === 'ALL' ? '2px solid var(--brand-blue)' : '1px solid #E2E8F0',
+            cursor: 'pointer',
+            transition: 'all 0.15s ease',
+            boxShadow: '0 2px 4px rgba(0,0,0,0.03)'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
+            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Total Students
+            </span>
+            <Users size={18} style={{ color: 'var(--brand-blue)' }} />
+          </div>
+          <div style={{ fontSize: '1.65rem', fontWeight: 800, color: '#0F172A', fontFamily: 'var(--font-display)' }}>
+            {totalStudentsCount}
+          </div>
+          <div style={{ fontSize: '0.75rem', color: '#94A3B8', marginTop: '0.15rem' }}>
+            {statusFilter === 'ALL' ? '● Currently viewing all' : 'Click to show all'}
+          </div>
+        </div>
+
+        {/* Present Card */}
+        <div 
+          onClick={() => setStatusFilter('Present')}
+          style={{
+            padding: '1rem 1.15rem',
+            backgroundColor: '#F0FDF4',
+            borderRadius: '10px',
+            border: statusFilter === 'Present' ? '2px solid #059669' : '1px solid #BBF7D0',
+            cursor: 'pointer',
+            transition: 'all 0.15s ease',
+            boxShadow: '0 2px 4px rgba(0,0,0,0.03)'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
+            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#047857', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Present
+            </span>
+            <CheckCircle2 size={18} style={{ color: '#059669' }} />
+          </div>
+          <div style={{ fontSize: '1.65rem', fontWeight: 800, color: '#065F46', fontFamily: 'var(--font-display)' }}>
+            {presentCount}
+            <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#047857', marginLeft: '0.4rem' }}>
+              ({totalStudentsCount ? Math.round((presentCount / totalStudentsCount) * 100) : 0}%)
+            </span>
+          </div>
+          <div style={{ fontSize: '0.75rem', color: '#059669', marginTop: '0.15rem' }}>
+            {statusFilter === 'Present' ? '● Filtering Present' : 'Click to filter'}
+          </div>
+        </div>
+
+        {/* Absent Card */}
+        <div 
+          onClick={() => setStatusFilter('Absent')}
+          style={{
+            padding: '1rem 1.15rem',
+            backgroundColor: '#FEF2F2',
+            borderRadius: '10px',
+            border: statusFilter === 'Absent' ? '2px solid #DC2626' : '1px solid #FECACA',
+            cursor: 'pointer',
+            transition: 'all 0.15s ease',
+            boxShadow: '0 2px 4px rgba(0,0,0,0.03)'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
+            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#B91C1C', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Absent
+            </span>
+            <XCircle size={18} style={{ color: '#DC2626' }} />
+          </div>
+          <div style={{ fontSize: '1.65rem', fontWeight: 800, color: '#991B1B', fontFamily: 'var(--font-display)' }}>
+            {absentCount}
+            <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#B91C1C', marginLeft: '0.4rem' }}>
+              ({totalStudentsCount ? Math.round((absentCount / totalStudentsCount) * 100) : 0}%)
+            </span>
+          </div>
+          <div style={{ fontSize: '0.75rem', color: '#DC2626', marginTop: '0.15rem' }}>
+            {statusFilter === 'Absent' ? '● Filtering Absent' : 'Click to filter'}
+          </div>
+        </div>
+
+        {/* Late Card */}
+        <div 
+          onClick={() => setStatusFilter('Late')}
+          style={{
+            padding: '1rem 1.15rem',
+            backgroundColor: '#FFFBEB',
+            borderRadius: '10px',
+            border: statusFilter === 'Late' ? '2px solid #D97706' : '1px solid #FDE68A',
+            cursor: 'pointer',
+            transition: 'all 0.15s ease',
+            boxShadow: '0 2px 4px rgba(0,0,0,0.03)'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
+            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#B45309', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Late Arrival
+            </span>
+            <Clock size={18} style={{ color: '#D97706' }} />
+          </div>
+          <div style={{ fontSize: '1.65rem', fontWeight: 800, color: '#92400E', fontFamily: 'var(--font-display)' }}>
+            {lateCount}
+            <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#B45309', marginLeft: '0.4rem' }}>
+              ({totalStudentsCount ? Math.round((lateCount / totalStudentsCount) * 100) : 0}%)
+            </span>
+          </div>
+          <div style={{ fontSize: '0.75rem', color: '#D97706', marginTop: '0.15rem' }}>
+            {statusFilter === 'Late' ? '● Filtering Late' : 'Click to filter'}
+          </div>
+        </div>
+
+        {/* Unmarked Card */}
+        <div style={{
+          padding: '1rem 1.15rem',
+          backgroundColor: '#F8FAFC',
+          borderRadius: '10px',
+          border: '1px solid #E2E8F0',
+          boxShadow: '0 2px 4px rgba(0,0,0,0.03)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
+            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Unmarked
+            </span>
+            <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#64748B' }}>0</span>
+          </div>
+          <div style={{ fontSize: '1.65rem', fontWeight: 800, color: '#475569', fontFamily: 'var(--font-display)' }}>
+            {unmarkedCount}
+          </div>
+          <div style={{ fontSize: '0.75rem', color: '#059669', marginTop: '0.15rem', fontWeight: 600 }}>
+            ✓ Complete roster marked
+          </div>
+        </div>
+      </div>
+
+      {/* TABS NAVIGATION */}
       <div className="dashboard-panel" style={{ padding: '0.5rem 0.75rem', marginBottom: '1.5rem' }}>
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
           <button 
             className={`btn ${activeTab === 'mark' ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => setActiveTab('mark')}
-            style={{ width: 'auto', fontSize: '0.85rem' }}
+            style={{ width: 'auto', fontSize: '0.875rem', padding: '0.5rem 1rem' }}
           >
             <CalendarCheck size={16} />
-            <span>Mark Attendance Grid ({students.length})</span>
+            <span>Mark Attendance ({totalStudentsCount} Students)</span>
           </button>
 
           <button 
             className={`btn ${activeTab === 'history' ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => setActiveTab('history')}
-            style={{ width: 'auto', fontSize: '0.85rem' }}
+            style={{ width: 'auto', fontSize: '0.875rem', padding: '0.5rem 1rem' }}
           >
             <Clock size={16} />
-            <span>Faculty Session Logs ({historyLogs.length})</span>
+            <span>Session History Logs ({historyLogs.length})</span>
           </button>
         </div>
       </div>
 
-      {/* TAB 1: MARK ATTENDANCE GRID */}
+      {/* TAB 1: MARK ATTENDANCE ROSTER */}
       {activeTab === 'mark' && (
-        <div className="dashboard-panel">
-          <div className="panel-header-row" style={{ marginBottom: '1rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+        <div className="dashboard-panel" style={{ padding: '1.25rem' }}>
+          
+          {/* Action Toolbar Header */}
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center', 
+            flexWrap: 'wrap', 
+            gap: '1rem',
+            paddingBottom: '1rem',
+            borderBottom: '1px solid #F1F5F9',
+            marginBottom: '1rem'
+          }}>
             <div>
-              <h3 className="panel-title" style={{ fontSize: '1.1rem' }}>
-                Attendance Roster {courseInput ? `— ${courseInput}` : ''} ({students.length} Department Students)
+              <h3 style={{ fontSize: '1.15rem', fontWeight: 700, margin: 0, color: 'var(--brand-black)' }}>
+                Student Attendance Roster
               </h3>
-              <p style={{ fontSize: '0.825rem', color: 'var(--brand-dark-grey)', marginTop: '0.1rem' }}>
-                Session Date: <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{sessionDate}</span> | Time: <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{sessionTime}</span>{section ? ` | ${section}` : ''}{semester ? ` | Sem ${semester}` : ''}
+              <p style={{ fontSize: '0.825rem', color: 'var(--brand-dark-grey)', marginTop: '0.15rem', marginBottom: 0 }}>
+                {courseInput ? `${courseInput} — ` : ''}Date: <strong style={{ fontFamily: 'monospace' }}>{sessionDate}</strong> ({sessionTime})
+                {statusFilter !== 'ALL' && <span style={{ color: 'var(--brand-orange)', marginLeft: '0.5rem', fontWeight: 700 }}>[Filtered: {statusFilter}]</span>}
               </p>
             </div>
 
-            <div style={{ display: 'flex', gap: '0.65rem', alignItems: 'center', flexWrap: 'wrap' }}>
-              {/* Summary Counter Pill */}
-              <div style={{ display: 'flex', gap: '0.4rem', fontSize: '0.775rem', fontWeight: 700 }}>
-                <span style={{ padding: '0.2rem 0.5rem', backgroundColor: '#ECFDF5', color: '#047857', borderRadius: '4px' }}>
-                  {presentCount} Present
-                </span>
-                <span style={{ padding: '0.2rem 0.5rem', backgroundColor: '#FEF2F2', color: '#DC2626', borderRadius: '4px' }}>
-                  {absentCount} Absent
-                </span>
-                <span style={{ padding: '0.2rem 0.5rem', backgroundColor: '#FFFBEB', color: '#D97706', borderRadius: '4px' }}>
-                  {lateCount} Late
-                </span>
-              </div>
-
-              <button className="btn btn-secondary" onClick={handleMarkAllPresent} style={{ width: 'auto', fontSize: '0.825rem' }}>
-                <CheckCircle2 size={15} />
+            {/* Quick Bulk Actions */}
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+              <button 
+                type="button"
+                className="btn btn-secondary font-sans" 
+                onClick={handleMarkAllPresent}
+                style={{ 
+                  fontSize: '0.8rem', 
+                  padding: '0.45rem 0.85rem',
+                  backgroundColor: '#ECFDF5',
+                  borderColor: '#A7F3D0',
+                  color: '#065F46',
+                  fontWeight: 600
+                }}
+                title="Set all students to Present"
+              >
+                <CheckCircle2 size={15} style={{ color: '#059669' }} />
                 <span>Mark All Present</span>
               </button>
 
               <button 
-                className="btn btn-primary" 
-                onClick={handleSaveAttendance} 
-                disabled={isSaving || students.length === 0} 
-                style={{ width: 'auto', fontSize: '0.825rem', minWidth: '180px', justifyContent: 'center' }}
+                type="button"
+                className="btn btn-secondary font-sans" 
+                onClick={handleMarkAllAbsent}
+                style={{ 
+                  fontSize: '0.8rem', 
+                  padding: '0.45rem 0.85rem',
+                  backgroundColor: '#FEF2F2',
+                  borderColor: '#FECACA',
+                  color: '#991B1B',
+                  fontWeight: 600
+                }}
+                title="Set all students to Absent"
               >
-                <Save size={15} />
-                <span>{isSaving ? 'Saving to Database...' : 'Save Attendance Session'}</span>
+                <XCircle size={15} style={{ color: '#DC2626' }} />
+                <span>Mark All Absent</span>
+              </button>
+
+              <button 
+                type="button"
+                className="btn btn-secondary font-sans" 
+                onClick={handleResetAttendance}
+                style={{ 
+                  fontSize: '0.8rem', 
+                  padding: '0.45rem 0.85rem',
+                  color: '#475569',
+                  fontWeight: 600
+                }}
+                title="Reset to default initial status"
+              >
+                <RotateCcw size={14} />
+                <span>Reset</span>
               </button>
             </div>
           </div>
 
-          {/* Student Filter Search */}
-          {students.length > 0 && (
-            <div style={{ marginBottom: '1rem', position: 'relative', maxWidth: '320px' }}>
+          {/* Search and Filter Row */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '1.25rem' }}>
+            <div style={{ position: 'relative', minWidth: '280px', flex: '1', maxWidth: '400px' }}>
               <input
                 type="text"
                 placeholder="Search by student name or USN..."
                 className="form-input font-sans"
                 value={studentSearch}
                 onChange={(e) => setStudentSearch(e.target.value)}
-                style={{ width: '100%', padding: '0.45rem 0.75rem 0.45rem 2rem', fontSize: '0.825rem', borderRadius: '6px', border: '1px solid #CBD5E1' }}
+                style={{ 
+                  width: '100%', 
+                  padding: '0.55rem 0.75rem 0.55rem 2.2rem', 
+                  fontSize: '0.85rem', 
+                  borderRadius: '8px', 
+                  border: '1px solid #CBD5E1',
+                  backgroundColor: '#FFFFFF'
+                }}
               />
-              <Search size={14} style={{ position: 'absolute', left: '0.65rem', top: '50%', transform: 'translateY(-50%)', color: '#94A3B8' }} />
+              <Search size={16} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: '#94A3B8' }} />
+              {studentSearch && (
+                <button
+                  type="button"
+                  onClick={() => setStudentSearch('')}
+                  style={{
+                    position: 'absolute',
+                    right: '0.75rem',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'none',
+                    border: 'none',
+                    color: '#94A3B8',
+                    cursor: 'pointer',
+                    fontSize: '0.85rem'
+                  }}
+                >
+                  ✕
+                </button>
+              )}
             </div>
-          )}
 
-          {students.length === 0 ? (
+            {/* Quick Filter Status Badges */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem', fontWeight: 600 }}>
+              <span style={{ color: '#64748B', marginRight: '0.25rem' }}>Filter Status:</span>
+              {(['ALL', 'Present', 'Absent', 'Late'] as const).map(tab => (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => setStatusFilter(tab)}
+                  style={{
+                    padding: '0.3rem 0.7rem',
+                    fontSize: '0.775rem',
+                    borderRadius: '6px',
+                    border: statusFilter === tab ? '1px solid var(--brand-blue)' : '1px solid #E2E8F0',
+                    backgroundColor: statusFilter === tab ? '#EFF6FF' : '#FFFFFF',
+                    color: statusFilter === tab ? 'var(--brand-blue)' : '#475569',
+                    fontWeight: statusFilter === tab ? 700 : 500,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  {tab === 'ALL' ? 'All' : tab}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Table / Student Grid */}
+          {isLoading ? (
+            <div style={{ textAlign: 'center', padding: '3.5rem', color: 'var(--brand-dark-grey)' }}>
+              Loading student roster...
+            </div>
+          ) : students.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '3.5rem 1.5rem', color: 'var(--brand-dark-grey)' }}>
-              <Users size={44} style={{ margin: '0 auto 0.75rem', opacity: 0.35, color: 'var(--brand-black)' }} />
+              <Users size={48} style={{ margin: '0 auto 0.75rem', opacity: 0.35, color: 'var(--brand-black)' }} />
               <h4 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--brand-black)' }}>No Department Students Found</h4>
               <p style={{ fontSize: '0.85rem', marginTop: '0.25rem', maxWidth: '420px', marginInline: 'auto' }}>
-                There are currently no students registered under your department in the database.
+                There are currently no active students registered under your assigned department in the database.
               </p>
             </div>
+          ) : filteredStudents.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '2.5rem 1.5rem', backgroundColor: '#F8FAFC', borderRadius: '8px', border: '1px dashed #CBD5E1' }}>
+              <Search size={32} style={{ margin: '0 auto 0.5rem', color: '#94A3B8' }} />
+              <div style={{ fontWeight: 600, color: '#334155', fontSize: '0.95rem' }}>No matching students found</div>
+              <div style={{ fontSize: '0.8rem', color: '#64748B', marginTop: '0.25rem' }}>
+                Try adjusting your search query or reset the status filter.
+              </div>
+              <button 
+                type="button" 
+                onClick={() => { setStudentSearch(''); setStatusFilter('ALL'); }}
+                className="btn btn-secondary font-sans" 
+                style={{ marginTop: '0.75rem', fontSize: '0.8rem', padding: '0.35rem 0.75rem' }}
+              >
+                Clear Filters
+              </button>
+            </div>
           ) : (
-            <div className="table-responsive">
-              <table className="table font-sans">
-                <thead>
+            <div className="table-responsive" style={{ border: '1px solid #E2E8F0', borderRadius: '8px', overflow: 'hidden' }}>
+              <table className="table font-sans" style={{ margin: 0 }}>
+                <thead style={{ backgroundColor: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
                   <tr>
-                    <th>Student Name</th>
-                    <th>USN</th>
-                    <th>Section</th>
-                    <th>Attendance Status</th>
+                    <th style={{ width: '45px', textAlign: 'center', fontSize: '0.75rem', color: '#64748B' }}>#</th>
+                    <th style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#64748B', letterSpacing: '0.04em' }}>Student Name</th>
+                    <th style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#64748B', letterSpacing: '0.04em' }}>USN</th>
+                    <th style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#64748B', letterSpacing: '0.04em' }}>Section / Sem</th>
+                    <th style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#64748B', letterSpacing: '0.04em', textAlign: 'center', minWidth: '320px' }}>
+                      Attendance Status Selection
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredStudents.map((std) => {
+                  {filteredStudents.map((std, idx) => {
                     const currentStatus = attendanceMap[std.id] || 'Present';
                     return (
-                      <tr key={std.id}>
-                        <td>
-                          <div style={{ fontWeight: 600, color: 'var(--brand-black)' }}>{std.name}</div>
+                      <tr 
+                        key={std.id}
+                        style={{ 
+                          borderBottom: '1px solid #F1F5F9',
+                          backgroundColor: currentStatus === 'Absent' ? 'rgba(254, 242, 242, 0.4)' : currentStatus === 'Late' ? 'rgba(255, 251, 235, 0.4)' : '#FFFFFF',
+                          transition: 'background-color 0.15s ease'
+                        }}
+                      >
+                        <td style={{ textAlign: 'center', fontSize: '0.8rem', color: '#94A3B8', fontWeight: 600 }}>
+                          {idx + 1}
                         </td>
-                        <td style={{ fontSize: '0.85rem', fontFamily: 'monospace' }}>{std.usn}</td>
-                        <td style={{ fontSize: '0.825rem', color: '#64748B' }}>{std.section || '-'}</td>
                         <td>
-                          <div style={{ display: 'inline-flex', backgroundColor: '#F1F5F9', padding: '3px', borderRadius: '6px', border: '1px solid #CBD5E1' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                            <div style={{
+                              width: '32px',
+                              height: '32px',
+                              borderRadius: '50%',
+                              backgroundColor: '#E2E8F0',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontWeight: 700,
+                              fontSize: '0.75rem',
+                              color: '#334155'
+                            }}>
+                              {std.name.charAt(0).toUpperCase()}
+                            </div>
+                            <div>
+                              <div style={{ fontWeight: 600, color: 'var(--brand-black)', fontSize: '0.875rem' }}>{std.name}</div>
+                              <div style={{ fontSize: '0.75rem', color: '#64748B' }}>Student</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td style={{ fontSize: '0.85rem', fontFamily: 'monospace', fontWeight: 600, color: '#334155' }}>
+                          {std.usn}
+                        </td>
+                        <td style={{ fontSize: '0.825rem', color: '#64748B' }}>
+                          <span style={{ padding: '0.15rem 0.5rem', backgroundColor: '#F1F5F9', borderRadius: '4px', fontWeight: 600 }}>
+                            {std.section || section || 'Sec A'}
+                          </span>
+                          {std.semester ? ` • Sem ${std.semester}` : semester ? ` • Sem ${semester}` : ''}
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          {/* Prominent, Accessible Status Controls */}
+                          <div style={{ 
+                            display: 'inline-flex', 
+                            gap: '0.4rem', 
+                            padding: '4px', 
+                            backgroundColor: '#F8FAFC', 
+                            borderRadius: '8px', 
+                            border: '1px solid #E2E8F0' 
+                          }}>
+                            {/* Present Button */}
                             <button
                               type="button"
                               onClick={() => handleStatusToggle(std.id, 'Present')}
                               style={{
-                                padding: '4px 14px',
-                                fontSize: '0.775rem',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.4rem',
+                                padding: '6px 16px',
+                                fontSize: '0.825rem',
                                 fontWeight: currentStatus === 'Present' ? 700 : 500,
-                                borderRadius: '4px',
-                                border: 'none',
-                                backgroundColor: currentStatus === 'Present' ? 'var(--brand-blue)' : 'transparent',
+                                borderRadius: '6px',
+                                border: currentStatus === 'Present' ? '1px solid #059669' : '1px solid transparent',
+                                backgroundColor: currentStatus === 'Present' ? '#10B981' : '#FFFFFF',
                                 color: currentStatus === 'Present' ? '#FFFFFF' : '#475569',
                                 cursor: 'pointer',
-                                transition: 'all 0.15s ease'
+                                transition: 'all 0.15s ease',
+                                boxShadow: currentStatus === 'Present' ? '0 2px 4px rgba(16, 185, 129, 0.25)' : 'none'
                               }}
                             >
-                              Present
+                              <CheckCircle2 size={15} style={{ color: currentStatus === 'Present' ? '#FFFFFF' : '#059669' }} />
+                              <span>Present</span>
                             </button>
+
+                            {/* Absent Button */}
                             <button
                               type="button"
                               onClick={() => handleStatusToggle(std.id, 'Absent')}
                               style={{
-                                padding: '4px 14px',
-                                fontSize: '0.775rem',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.4rem',
+                                padding: '6px 16px',
+                                fontSize: '0.825rem',
                                 fontWeight: currentStatus === 'Absent' ? 700 : 500,
-                                borderRadius: '4px',
-                                border: 'none',
-                                backgroundColor: currentStatus === 'Absent' ? '#DC2626' : 'transparent',
+                                borderRadius: '6px',
+                                border: currentStatus === 'Absent' ? '1px solid #DC2626' : '1px solid transparent',
+                                backgroundColor: currentStatus === 'Absent' ? '#EF4444' : '#FFFFFF',
                                 color: currentStatus === 'Absent' ? '#FFFFFF' : '#475569',
                                 cursor: 'pointer',
-                                transition: 'all 0.15s ease'
+                                transition: 'all 0.15s ease',
+                                boxShadow: currentStatus === 'Absent' ? '0 2px 4px rgba(239, 68, 68, 0.25)' : 'none'
                               }}
                             >
-                              Absent
+                              <XCircle size={15} style={{ color: currentStatus === 'Absent' ? '#FFFFFF' : '#DC2626' }} />
+                              <span>Absent</span>
                             </button>
+
+                            {/* Late Button */}
                             <button
                               type="button"
                               onClick={() => handleStatusToggle(std.id, 'Late')}
                               style={{
-                                padding: '4px 14px',
-                                fontSize: '0.775rem',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.4rem',
+                                padding: '6px 16px',
+                                fontSize: '0.825rem',
                                 fontWeight: currentStatus === 'Late' ? 700 : 500,
-                                borderRadius: '4px',
-                                border: 'none',
-                                backgroundColor: currentStatus === 'Late' ? '#D97706' : 'transparent',
+                                borderRadius: '6px',
+                                border: currentStatus === 'Late' ? '1px solid #D97706' : '1px solid transparent',
+                                backgroundColor: currentStatus === 'Late' ? '#F59E0B' : '#FFFFFF',
                                 color: currentStatus === 'Late' ? '#FFFFFF' : '#475569',
                                 cursor: 'pointer',
-                                transition: 'all 0.15s ease'
+                                transition: 'all 0.15s ease',
+                                boxShadow: currentStatus === 'Late' ? '0 2px 4px rgba(245, 158, 11, 0.25)' : 'none'
                               }}
                             >
-                              Late
+                              <Clock size={15} style={{ color: currentStatus === 'Late' ? '#FFFFFF' : '#D97706' }} />
+                              <span>Late</span>
                             </button>
                           </div>
                         </td>
@@ -550,12 +991,51 @@ export const FacultyAttendancePage: React.FC = () => {
               </table>
             </div>
           )}
+
+          {/* Footer Save Summary Bar */}
+          {students.length > 0 && (
+            <div style={{ 
+              marginTop: '1.25rem', 
+              padding: '1rem 1.25rem', 
+              backgroundColor: '#F8FAFC', 
+              borderRadius: '8px', 
+              border: '1px solid #E2E8F0',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: '1rem'
+            }}>
+              <div style={{ fontSize: '0.85rem', color: '#475569' }}>
+                Showing <strong style={{ color: '#0F172A' }}>{filteredStudents.length}</strong> of <strong style={{ color: '#0F172A' }}>{totalStudentsCount}</strong> students registered in department.
+                {hasUnsavedChanges && <span style={{ color: '#B45309', marginLeft: '0.5rem', fontWeight: 600 }}>• Unsaved modifications detected</span>}
+              </div>
+
+              <button 
+                type="button"
+                className="btn btn-primary" 
+                onClick={handleSaveAttendance} 
+                disabled={isSaving || students.length === 0} 
+                style={{ 
+                  fontSize: '0.875rem', 
+                  padding: '0.6rem 1.5rem',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.5rem'
+                }}
+              >
+                <Save size={16} />
+                <span>{isSaving ? 'Saving to Database...' : `Save Attendance (${totalStudentsCount} Students)`}</span>
+              </button>
+            </div>
+          )}
+
         </div>
       )}
 
       {/* TAB 2: FACULTY SESSION HISTORY LOGS */}
       {activeTab === 'history' && (
-        <div className="dashboard-panel">
+        <div className="dashboard-panel" style={{ padding: '1.25rem' }}>
           <div className="panel-header-row" style={{ marginBottom: '1rem' }}>
             <h3 className="panel-title" style={{ fontSize: '1.1rem' }}>Recorded Attendance Sessions</h3>
             <span style={{ fontSize: '0.8rem', color: 'var(--brand-dark-grey)', fontWeight: 600 }}>

@@ -1,5 +1,5 @@
 import { supabase } from '../lib/supabase';
-import { STORAGE_BUCKETS, uploadFile, getSignedUrl } from './storageService';
+import { STORAGE_BUCKETS, uploadFile, getSignedUrl, deleteStorageFile } from './storageService';
 
 // Memory cache for signed avatar URLs: avatarPath -> { signedUrl, fetchedAt }
 const avatarCache = new Map<string, { signedUrl: string; fetchedAt: number }>();
@@ -63,29 +63,40 @@ export const uploadAvatar = async (file: File): Promise<{ storagePath: string; s
 
   const nowIso = new Date().toISOString();
 
-  // 1. Update profiles table (authoritative identity table)
-  const { error: profErr } = await (supabase as any)
-    .from('profiles')
-    .update({ 
-      avatar_path: storagePath, 
-      avatar_url: storagePath,
-      updated_at: nowIso 
-    })
-    .eq('id', user.id);
+  try {
+    // 1. Update profiles table (authoritative identity table)
+    const { error: profErr } = await (supabase as any)
+      .from('profiles')
+      .update({ 
+        avatar_path: storagePath, 
+        avatar_url: storagePath,
+        updated_at: nowIso 
+      })
+      .eq('id', user.id);
 
-  if (profErr) {
-    console.warn('[avatarService] Profile table update warning:', profErr.message);
+    if (profErr) {
+      throw new Error(profErr.message || 'Failed to update user profile with photo path.');
+    }
+
+    // 2. Also sync to student_profiles if the user is a student
+    const { error: studentProfErr } = await (supabase as any)
+      .from('student_profiles')
+      .update({ 
+        avatar_storage_path: storagePath,
+        updated_at: nowIso 
+      })
+      .eq('profile_id', user.id);
+
+    if (studentProfErr) {
+      // Non-fatal if student_profiles row doesn't exist yet or user is staff
+      console.warn('[avatarService] student_profiles sync note:', studentProfErr.message);
+    }
+  } catch (dbErr) {
+    console.error('[avatarService] Database update failed after photo upload. Cleaning up orphaned file:', dbErr);
+    // Cleanup newly uploaded file so we don't leave orphaned storage objects
+    await deleteStorageFile(STORAGE_BUCKETS.AVATARS, storagePath).catch(() => {});
+    throw dbErr;
   }
-
-  // 2. Also sync to student_profiles if student
-  await (supabase as any)
-    .from('student_profiles')
-    .update({ 
-      avatar_storage_path: storagePath,
-      updated_at: nowIso 
-    })
-    .eq('profile_id', user.id)
-    .catch(() => {/* ignore if not student */});
 
   // Generate signed URL
   const signedUrl = await getSignedUrl(STORAGE_BUCKETS.AVATARS, storagePath, 86400);

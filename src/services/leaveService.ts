@@ -128,22 +128,27 @@ export const getStudentLeaveRequests = async (): Promise<LeaveRequest[]> => {
 // HOD: Get department leave requests
 // ============================================================
 export const getDepartmentLeaveRequests = async (): Promise<LeaveRequest[]> => {
-  const { data: { user } } = await (supabase as any).auth.getUser();
-  if (!user) {
-    console.warn('[leaveService] No authenticated user for getDepartmentLeaveRequests');
-    return [];
+  const { data: { user }, error: userError } = await (supabase as any).auth.getUser();
+  if (userError || !user) {
+    console.warn('[leaveService] No authenticated user for getDepartmentLeaveRequests:', userError?.message);
+    throw new Error('Authentication session required. Please sign in to view department leave requests.');
   }
 
   // Get HOD's profile to find their department
   const { data: profile, error: profErr } = await (supabase as any)
     .from('profiles')
-    .select('department_id, role')
+    .select('department_id, role, account_status')
     .eq('id', user.id)
     .single();
 
-  if (profErr || !profile?.department_id) {
-    console.warn('[leaveService] HOD profile/department not found:', profErr?.message);
-    return [];
+  if (profErr) {
+    console.error('[leaveService] HOD profile query failed:', profErr.message);
+    throw new Error(`Unable to load HOD profile: ${profErr.message}`);
+  }
+
+  if (!profile?.department_id) {
+    console.warn('[leaveService] HOD profile has no department_id assigned');
+    throw new Error('DEPARTMENT_NOT_ASSIGNED: Your HOD account is not assigned to an academic department. Please contact an Administrator to configure your department profile.');
   }
 
   // Try with joins first
@@ -164,9 +169,9 @@ export const getDepartmentLeaveRequests = async (): Promise<LeaveRequest[]> => {
   data = joinResult.data;
   error = joinResult.error;
 
-  // If join fails, try simple query
+  // If join fails (e.g. schema cache or missing reviewer FK constraint), fallback to simple query
   if (error) {
-    console.warn('[leaveService] HOD join query failed, trying simple:', error.message);
+    console.warn('[leaveService] HOD join query failed, attempting standard query with independent profile resolution:', error.message);
 
     const simpleResult = await (supabase as any)
       .from('leave_requests')
@@ -179,7 +184,7 @@ export const getDepartmentLeaveRequests = async (): Promise<LeaveRequest[]> => {
   }
 
   if (error) {
-    console.error('[leaveService] getDepartmentLeaveRequests FINAL ERROR:', error);
+    console.error('[leaveService] getDepartmentLeaveRequests query error:', error);
     throw new Error(`Unable to load department leave requests: ${error.message}`);
   }
 
@@ -187,29 +192,35 @@ export const getDepartmentLeaveRequests = async (): Promise<LeaveRequest[]> => {
     return [];
   }
 
-  // Enrich rows if needed
-  const needsEnrichment = data.length > 0 && !data[0].student_profile;
+  // Independent profile enrichment for student and reviewer details
+  const needsEnrichment = data.length > 0 && (!data[0].student_profile || data.some((r: any) => r.reviewed_by && !r.reviewer_profile));
   if (needsEnrichment) {
     const studentIds = [...new Set(data.map((r: any) => r.student_id).filter(Boolean))];
     const reviewerIds = [...new Set(data.map((r: any) => r.reviewed_by).filter(Boolean))];
     const allIds = [...new Set([...studentIds, ...reviewerIds])];
 
     if (allIds.length > 0) {
-      const { data: profiles } = await (supabase as any)
-        .from('profiles')
-        .select('id, full_name, usn_or_employee_id, email, department:departments(name)')
-        .in('id', allIds);
+      try {
+        const { data: profiles, error: pError } = await (supabase as any)
+          .from('profiles')
+          .select('id, full_name, usn_or_employee_id, email, department:departments(name)')
+          .in('id', allIds);
 
-      const profileMap = new Map((profiles || []).map((p: any) => [p.id, p]));
+        if (!pError && profiles) {
+          const profileMap = new Map((profiles || []).map((p: any) => [p.id, p]));
 
-      data = data.map((row: any) => ({
-        ...row,
-        student_profile: profileMap.get(row.student_id) || null,
-        reviewer_profile: profileMap.get(row.reviewed_by) || null,
-        student_name: (profileMap.get(row.student_id) as any)?.full_name || 'Student',
-        student_usn: (profileMap.get(row.student_id) as any)?.usn_or_employee_id || 'N/A',
-        department_name: (profileMap.get(row.student_id) as any)?.department?.name || 'Department'
-      }));
+          data = data.map((row: any) => ({
+            ...row,
+            student_profile: row.student_profile || profileMap.get(row.student_id) || null,
+            reviewer_profile: row.reviewer_profile || profileMap.get(row.reviewed_by) || null,
+            student_name: row.student_profile?.full_name || (profileMap.get(row.student_id) as any)?.full_name || 'Student',
+            student_usn: row.student_profile?.usn_or_employee_id || (profileMap.get(row.student_id) as any)?.usn_or_employee_id || 'N/A',
+            department_name: row.student_profile?.department?.name || (profileMap.get(row.student_id) as any)?.department?.name || 'Department'
+          }));
+        }
+      } catch (enrichErr) {
+        console.warn('[leaveService] Non-fatal profile enrichment note:', enrichErr);
+      }
     }
   }
 

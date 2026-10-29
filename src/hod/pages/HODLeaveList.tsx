@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Filter, FileCheck, CheckCircle2, Clock, XCircle, Eye, User, GraduationCap, RefreshCw, AlertCircle } from 'lucide-react';
+import { Search, Filter, FileCheck, CheckCircle2, Clock, XCircle, Eye, GraduationCap, RefreshCw, AlertCircle } from 'lucide-react';
 import { HODAppShell } from '../components/HODAppShell';
 import { StatCard } from '../../components/StatCard';
 import { getDepartmentLeaveRequests } from '../../services/leaveService';
@@ -141,8 +141,15 @@ export const HODLeaveList: React.FC = () => {
         ) : loadError ? (
           <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--brand-dark-grey)' }}>
             <AlertCircle size={36} style={{ margin: '0 auto 0.75rem', color: '#EF4444' }} />
-            <p style={{ fontWeight: 600, fontSize: '1rem', color: '#991B1B' }}>{loadError}</p>
-            <button className="btn btn-secondary" style={{ marginTop: '0.75rem' }} onClick={loadLeaves}>Try Again</button>
+            <p style={{ fontWeight: 700, fontSize: '1.05rem', color: '#991B1B', marginBottom: '0.5rem' }}>
+              {loadError.startsWith('DEPARTMENT_NOT_ASSIGNED') ? 'Department Configuration Required' : 'Unable to Load Leave Requests'}
+            </p>
+            <p style={{ fontSize: '0.875rem', color: 'var(--brand-dark-grey)', maxWidth: '500px', margin: '0 auto 1rem' }}>
+              {loadError.replace(/^DEPARTMENT_NOT_ASSIGNED:\s*/, '')}
+            </p>
+            {!loadError.startsWith('DEPARTMENT_NOT_ASSIGNED') && (
+              <button className="btn btn-secondary" style={{ marginTop: '0.25rem' }} onClick={loadLeaves}>Try Again</button>
+            )}
           </div>
         ) : filteredLeaves.length === 0 ? (
           <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--brand-dark-grey)' }}>

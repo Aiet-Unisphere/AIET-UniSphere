@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Clock, CalendarCheck, MapPin, AlertTriangle, Filter, Plus, Pencil, Trash2, X, Check, BookOpen, User } from 'lucide-react';
+import { AlertTriangle, Filter, Plus, X, Check, BookOpen, User } from 'lucide-react';
 import { HODAppShell } from '../components/HODAppShell';
 import {
   getDepartmentTimetable,
@@ -14,6 +14,7 @@ import {
 import { ClockTimePicker } from '../../faculty/components/ClockTimePicker';
 import { useAuth } from '../../app/context/AuthContext';
 import { supabase } from '../../lib/supabase';
+import { TimetableCalendar } from '../../components/TimetableCalendar';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as const;
 
@@ -21,12 +22,10 @@ export const HODTimetablePage: React.FC = () => {
   const { profile } = useAuth();
   const [entries, setEntries] = useState<TimetableEntry[]>([]);
   const [activeTab, setActiveTab] = useState<'student' | 'my'>('student');
-  const [selectedDay, setSelectedDay] = useState<typeof DAYS[number]>('Monday');
   const [semFilter, setSemFilter] = useState('All');
   const [sectionFilter, setSectionFilter] = useState('All');
   const [facultyFilter, setFacultyFilter] = useState('All');
   const [roomFilter, setRoomFilter] = useState('All');
-  const [viewMode, setViewMode] = useState<'Daily' | 'Weekly'>('Daily');
   const [loading, setLoading] = useState(true);
 
   // Modal State
@@ -106,7 +105,7 @@ export const HODTimetablePage: React.FC = () => {
     setFormCourseName('Distributed Systems');
     setFormFacultyId(profile?.id || '');
     setFormFacultyName(profile?.full_name || '');
-    setFormDay(selectedDay);
+    setFormDay('Monday');
     setFormTimeSlot('09:00 AM - 10:00 AM');
     setFormRoom('LH-101');
     setFormIsLab(false);
@@ -242,12 +241,11 @@ export const HODTimetablePage: React.FC = () => {
     : entries;
 
   const filteredEntries = displayEntries.filter((e) => {
-    const matchesDay = viewMode === 'Weekly' || e.day_of_week === selectedDay;
     const matchesSem = semFilter === 'All' || e.semester === Number(semFilter);
     const matchesSection = sectionFilter === 'All' || (e.section || '').toLowerCase() === sectionFilter.toLowerCase();
     const matchesFaculty = facultyFilter === 'All' || (e.faculty_name || '').toLowerCase().includes(facultyFilter.toLowerCase());
     const matchesRoom = roomFilter === 'All' || (e.room || '').toLowerCase() === roomFilter.toLowerCase();
-    return matchesDay && matchesSem && matchesSection && matchesFaculty && matchesRoom;
+    return matchesSem && matchesSection && matchesFaculty && matchesRoom;
   });
 
   const conflicts: TimetableConflict[] = detectTimetableConflicts(entries);
@@ -280,24 +278,6 @@ export const HODTimetablePage: React.FC = () => {
             <Plus size={16} />
             <span>Add Class Slot</span>
           </button>
-
-          {/* Daily / Weekly View Toggle */}
-          <div style={{ display: 'flex', gap: '0.25rem', backgroundColor: 'var(--brand-light-grey)', padding: '0.25rem', borderRadius: 'var(--border-radius)', border: '1px solid rgba(156, 163, 175, 0.2)' }}>
-            <button 
-              onClick={() => setViewMode('Daily')}
-              className={`btn ${viewMode === 'Daily' ? 'btn-primary' : 'btn-secondary'}`}
-              style={{ fontSize: '0.8rem', padding: '0.35rem 0.75rem' }}
-            >
-              Daily View
-            </button>
-            <button 
-              onClick={() => setViewMode('Weekly')}
-              className={`btn ${viewMode === 'Weekly' ? 'btn-primary' : 'btn-secondary'}`}
-              style={{ fontSize: '0.8rem', padding: '0.35rem 0.75rem' }}
-            >
-              Weekly Overview
-            </button>
-          </div>
         </div>
       </div>
 
@@ -340,25 +320,9 @@ export const HODTimetablePage: React.FC = () => {
         </div>
       )}
 
-      {/* Filter Bar & Day Selector */}
+      {/* Filter Bar */}
       <div className="dashboard-panel" style={{ marginBottom: '1.25rem', padding: '0.85rem 1.1rem' }}>
         <div style={{ display: 'flex', gap: '0.85rem', flexWrap: 'wrap', alignItems: 'center' }}>
-          {viewMode === 'Daily' && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', marginRight: '0.5rem' }}>
-              <label style={{ fontSize: '0.825rem', color: 'var(--brand-dark-grey)', fontWeight: 700 }}>Day:</label>
-              <select
-                className="form-select font-sans"
-                style={{ width: '135px', padding: '0.45rem 0.65rem', fontSize: '0.825rem', fontWeight: 600 }}
-                value={selectedDay}
-                onChange={(e) => setSelectedDay(e.target.value as typeof DAYS[number])}
-              >
-                {DAYS.map(day => (
-                  <option key={day} value={day}>{day}</option>
-                ))}
-              </select>
-            </div>
-          )}
-
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.825rem', color: 'var(--brand-dark-grey)', fontWeight: 600 }}>
             <Filter size={14} />
             <span>Filters:</span>
@@ -408,99 +372,26 @@ export const HODTimetablePage: React.FC = () => {
         </div>
       </div>
 
-      {/* Timetable Rows View */}
-      <div className="dashboard-panel">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-          <h2 className="panel-title font-display" style={{ margin: 0 }}>
-            {activeTab === 'my'
-              ? 'My Teaching Classes'
-              : viewMode === 'Daily' ? `${selectedDay}'s Class Schedule` : 'Weekly Master Timetable'}
-          </h2>
-          <span style={{ fontSize: '0.8rem', color: 'var(--brand-dark-grey)', fontWeight: 600 }}>
-            {filteredEntries.length} Slots
-          </span>
+      {/* Main Interactive Calendar Schedule */}
+      {loading ? (
+        <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--brand-dark-grey)' }}>
+          Loading Timetable...
         </div>
-
-        {loading ? (
-          <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--brand-dark-grey)' }}>
-            Loading Timetable...
-          </div>
-        ) : filteredEntries.length === 0 ? (
-          <div style={{ padding: '2.5rem', textAlign: 'center', color: 'var(--brand-dark-grey)' }}>
-            <CalendarCheck size={36} style={{ margin: '0 auto 0.5rem', color: '#94A3B8' }} />
-            <p style={{ fontWeight: 700, color: 'var(--brand-black)', fontSize: '0.95rem' }}>
-              {activeTab === 'my' ? 'No classes assigned to you.' : 'No timetable slots found for selected filters.'}
-            </p>
-            <p style={{ fontSize: '0.825rem', marginTop: '0.25rem' }}>
-              {activeTab === 'my' ? 'Timetable entries assigned to your profile will appear here.' : 'Use "+ Add Class Slot" button above to configure timetable entries.'}
-            </p>
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-            {filteredEntries.map((item) => (
-              <div
-                key={item.id}
-                className="timetable-row-card"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '1.25rem',
-                  padding: '0.9rem 1.1rem',
-                  backgroundColor: 'var(--brand-light-grey)',
-                  border: '1px solid rgba(156, 163, 175, 0.2)',
-                  borderRadius: 'var(--border-radius)',
-                  flexWrap: 'wrap'
-                }}
-              >
-                <div className="time-badge font-mono" style={{ backgroundColor: 'var(--brand-black)', color: '#FFF', padding: '0.4rem 0.75rem', borderRadius: 'var(--border-radius)', fontSize: '0.825rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                  <Clock size={14} />
-                  {item.start_time} – {item.end_time}
-                </div>
-
-                <div style={{ flexGrow: 1 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.2rem', flexWrap: 'wrap' }}>
-                    <span className="badge badge-active font-mono text-blue">{item.course_code || item.course_id}</span>
-                    <span className="badge badge-graded font-mono">SEM {item.semester}{item.section ? ` (${item.section})` : ''}</span>
-                    {viewMode === 'Weekly' && <span className="badge font-mono" style={{ backgroundColor: '#E2E8F0', color: '#1E293B' }}>{item.day_of_week}</span>}
-                    {item.is_lab && <span className="badge font-mono" style={{ backgroundColor: '#EDE9FE', color: '#7C3AED' }}>Lab</span>}
-                  </div>
-                  <h4 style={{ fontSize: '0.975rem', fontWeight: 700, color: 'var(--brand-black)', margin: 0 }}>{item.course_name}</h4>
-                  <p style={{ fontSize: '0.825rem', color: 'var(--brand-dark-grey)', marginTop: '0.15rem', margin: 0 }}>
-                    Instructor: <strong>{item.faculty_name || 'TBD'}</strong>
-                  </p>
-                </div>
-
-                {item.room && (
-                  <div className="room-badge" style={{ backgroundColor: 'var(--brand-white)', padding: '0.4rem 0.75rem', borderRadius: 'var(--border-radius)', border: '1px solid rgba(156, 163, 175, 0.3)', fontSize: '0.85rem', fontWeight: 700, color: 'var(--brand-black)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                    <MapPin size={14} style={{ color: 'var(--brand-orange)' }} />
-                    {item.room}
-                  </div>
-                )}
-
-                {/* HOD Edit / Delete Actions */}
-                <div style={{ display: 'flex', gap: '0.35rem' }}>
-                  <button
-                    onClick={() => openEditModal(item)}
-                    className="btn btn-secondary"
-                    style={{ padding: '0.3rem 0.55rem', fontSize: '0.75rem' }}
-                    title="Edit Class Slot"
-                  >
-                    <Pencil size={13} />
-                  </button>
-                  <button
-                    onClick={(e) => handleDelete(item.id, e)}
-                    className="btn btn-secondary"
-                    style={{ padding: '0.3rem 0.55rem', fontSize: '0.75rem', color: 'var(--brand-danger)' }}
-                    title="Delete Class Slot"
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      ) : (
+        <TimetableCalendar
+          entries={filteredEntries}
+          role="HOD"
+          currentUserId={profile?.id}
+          canManage={true}
+          onEditEntry={openEditModal}
+          onDeleteEntry={handleDelete}
+          emptyMessage={
+            activeTab === 'my'
+              ? 'No classes assigned to you in the timetable.'
+              : 'No timetable slots match the current filters. Click "+ Add Class Slot" to add a new slot.'
+          }
+        />
+      )}
 
       {/* Add / Edit Timetable Slot Modal */}
       {isModalOpen && (

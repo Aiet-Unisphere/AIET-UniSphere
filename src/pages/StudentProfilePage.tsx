@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { AppShell } from '../components/AppShell';
-import { User, Phone, Calendar, MapPin, Save, AlertCircle, CheckCircle2, ShieldCheck, BookOpen, UserCheck, Camera, Upload } from 'lucide-react';
+import { User, Save, AlertCircle, CheckCircle2, ShieldCheck, BookOpen, UserCheck, Camera, Upload } from 'lucide-react';
 import { useAuth } from '../app/context/AuthContext';
 import { getStudentFullProfile, updateStudentProfile, uploadUserAvatar, getUserAvatarSignedUrl } from '../services/studentService';
+import { validateFile, STORAGE_BUCKETS } from '../services/storageService';
 
 export const StudentProfilePage: React.FC = () => {
   const { profile: authProfile, user, refreshProfile } = useAuth();
@@ -31,6 +32,7 @@ export const StudentProfilePage: React.FC = () => {
   const [avatarPreviewUrl, setAvatarPreviewUrl] = useState<string | null>(null);
   const [avatarSignedUrl, setAvatarSignedUrl] = useState<string | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
 
   const loadData = async () => {
     setLoading(true);
@@ -52,7 +54,7 @@ export const StudentProfilePage: React.FC = () => {
         setCgpa(sp.cgpa != null ? String(sp.cgpa) : '');
       }
 
-      const currentAvatarPath = authProfile?.avatar_path || authProfile?.avatar_url;
+      const currentAvatarPath = authProfile?.avatar_path || authProfile?.avatar_url || data?.studentProfile?.avatar_storage_path;
       if (currentAvatarPath) {
         const signed = await getUserAvatarSignedUrl(currentAvatarPath);
         setAvatarSignedUrl(signed);
@@ -69,8 +71,18 @@ export const StudentProfilePage: React.FC = () => {
   }, [authProfile?.avatar_path, authProfile?.avatar_url]);
 
   const handleAvatarFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setErrorMsg(null);
+    setSuccessMsg(null);
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
+      const validation = validateFile(file, STORAGE_BUCKETS.AVATARS);
+      if (!validation.valid) {
+        setErrorMsg(validation.error || 'Invalid photo file. Please choose a JPG, PNG, or WEBP under 5MB.');
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        setAvatarFile(null);
+        setAvatarPreviewUrl(null);
+        return;
+      }
       setAvatarFile(file);
       setAvatarPreviewUrl(URL.createObjectURL(file));
     }
@@ -80,11 +92,15 @@ export const StudentProfilePage: React.FC = () => {
     if (!avatarFile || !user?.id) return;
     setUploadingAvatar(true);
     setErrorMsg(null);
+    setSuccessMsg(null);
     try {
       const result = await uploadUserAvatar(avatarFile);
       setSuccessMsg("Profile photo uploaded and updated successfully.");
       setAvatarFile(null);
       setAvatarPreviewUrl(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
       if (refreshProfile) {
         await refreshProfile();
       }
@@ -222,6 +238,7 @@ export const StudentProfilePage: React.FC = () => {
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
                   <input 
+                    ref={fileInputRef}
                     type="file" 
                     accept="image/png,image/jpeg,image/webp" 
                     onChange={handleAvatarFileChange} 
