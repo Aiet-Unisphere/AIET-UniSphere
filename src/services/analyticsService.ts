@@ -240,3 +240,113 @@ export const getSemesterTrends = async (studentId?: string): Promise<SemesterTre
     averagePercent: vals.max > 0 ? Math.round((vals.total / vals.max) * 100) : 0,
   }));
 };
+
+export interface StudentDashboardInsight {
+  insight: string;
+  suggestedFocus: string;
+  isInsufficientData: boolean;
+}
+
+/**
+ * Derives a deterministic academic insight and suggested focus for a student
+ * using real database records: assessment topic gaps, attendance metrics,
+ * pending assignments, and course enrollments.
+ */
+export function deriveStudentInsight(
+  learningGaps: LearningGapItem[] = [],
+  attendance: any = null,
+  assignments: Array<{ title: string; courseName?: string; status: string; deadline?: string }> = [],
+  courses: Array<{ name?: string; course_name?: string }> = []
+): StudentDashboardInsight {
+  // Normalize attendance fields (supports both getAttendanceSummary structure and direct stats)
+  const attPercentage = typeof attendance?.percentage === 'number'
+    ? attendance.percentage
+    : typeof attendance?.overallPercentage === 'number'
+      ? attendance.overallPercentage
+      : null;
+
+  const totalSessions = typeof attendance?.total === 'number'
+    ? attendance.total
+    : typeof attendance?.counts?.totalConducted === 'number'
+      ? attendance.counts.totalConducted
+      : 0;
+
+  const presentSessions = typeof attendance?.present === 'number'
+    ? attendance.present
+    : typeof attendance?.counts?.present === 'number'
+      ? (attendance.counts.present + (attendance.counts?.late || 0))
+      : 0;
+
+  // 1. Weak topic from assessment attempts (requires reinforcement)
+  if (learningGaps && learningGaps.length > 0) {
+    const weakTopic = [...learningGaps].sort((a, b) => a.scorePercent - b.scorePercent)[0];
+    if (weakTopic && weakTopic.scorePercent < 60) {
+      return {
+        insight: `Assessment analysis identifies ${weakTopic.topic} in ${weakTopic.courseName} as an area needing reinforcement (current accuracy: ${weakTopic.scorePercent}% across ${weakTopic.totalQuestions} questions).`,
+        suggestedFocus: `${weakTopic.topic} (${weakTopic.courseName})`,
+        isInsufficientData: false,
+      };
+    }
+
+    const strongTopic = [...learningGaps].sort((a, b) => b.scorePercent - a.scorePercent)[0];
+    return {
+      insight: `Strong concept comprehension demonstrated in ${strongTopic.courseName} with ${strongTopic.scorePercent}% accuracy in ${strongTopic.topic}.`,
+      suggestedFocus: `Review advanced modules in ${strongTopic.courseName}`,
+      isInsufficientData: false,
+    };
+  }
+
+  // 2. Attendance alert (VTU / AIET mandatory threshold is 75%)
+  if (attPercentage !== null && totalSessions > 0) {
+    if (attPercentage < 75) {
+      return {
+        insight: `Your overall attendance is currently ${attPercentage}% (${presentSessions}/${totalSessions} sessions). Institutional regulations require a minimum of 75% for exam eligibility.`,
+        suggestedFocus: 'Attend upcoming scheduled lectures to recover attendance percentage',
+        isInsufficientData: false,
+      };
+    }
+  }
+
+  // 3. Pending assignments (sorted by earliest deadline first)
+  const pendingAssignments = (assignments || [])
+    .filter((a) => a.status === 'Pending' || a.status === 'Overdue')
+    .sort((a, b) => {
+      if (!a.deadline) return 1;
+      if (!b.deadline) return -1;
+      return new Date(a.deadline).getTime() - new Date(b.deadline).getTime();
+    });
+
+  if (pendingAssignments.length > 0) {
+    const first = pendingAssignments[0];
+    return {
+      insight: `You have ${pendingAssignments.length} pending assignment(s) requiring submission. Timely submission ensures full continuous internal evaluation (CIE) marks.`,
+      suggestedFocus: `${first.title} (${first.courseName || 'Coursework'})`,
+      isInsufficientData: false,
+    };
+  }
+
+  // 4. Good attendance and coursework on track
+  if (attPercentage !== null && totalSessions > 0 && attPercentage >= 75) {
+    return {
+      insight: `Attendance is in good standing at ${attPercentage}% (${presentSessions}/${totalSessions} sessions) and all assigned coursework is submitted. Keep up consistent participation.`,
+      suggestedFocus: 'Explore practice quizzes and upcoming course topics',
+      isInsufficientData: false,
+    };
+  }
+
+  // 5. Active courses but no records yet
+  if (courses && courses.length > 0) {
+    return {
+      insight: `Enrolled in ${courses.length} active course(s). Complete practice assessments and submit assignments to generate personalized learning insights.`,
+      suggestedFocus: 'Review course syllabus and introductory materials',
+      isInsufficientData: false,
+    };
+  }
+
+  // 6. Insufficient data fallback
+  return {
+    insight: 'Insufficient academic activity recorded yet. Attend classes, complete quizzes, and submit assignments to unlock personalized academic insights.',
+    suggestedFocus: 'Course enrollment and initial study materials',
+    isInsufficientData: true,
+  };
+}

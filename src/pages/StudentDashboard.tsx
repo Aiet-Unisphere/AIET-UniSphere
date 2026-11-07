@@ -12,6 +12,7 @@ import { getCourses } from '../services/courseService';
 import { getAssignments } from '../services/assignmentService';
 import { getAssessments } from '../services/assessmentService';
 import { getAttendanceSummary } from '../services/attendanceService';
+import { getLearningGaps, deriveStudentInsight } from '../services/analyticsService';
 import { AppShell } from '../components/AppShell';
 import { StatCard } from '../components/StatCard';
 import { ProgressBar } from '../components/ProgressBar';
@@ -34,23 +35,26 @@ export const StudentDashboard: React.FC = () => {
   const [assignments, setAssignments] = useState<any[]>([]);
   const [assessments, setAssessments] = useState<any[]>([]);
   const [attendance, setAttendance] = useState<any>(null);
+  const [learningGaps, setLearningGaps] = useState<any[]>([]);
 
   const fetchDashboardData = async () => {
     setIsLoading(true);
     setError(null);
     try {
-      const [profData, coursesData, assignData, assessData, attData] = await Promise.all([
+      const [profData, coursesData, assignData, assessData, attData, gapsData] = await Promise.all([
         getStudentProfile(),
         getCourses(),
         getAssignments(),
         getAssessments(),
-        getAttendanceSummary()
+        getAttendanceSummary(),
+        getLearningGaps().catch(() => [])
       ]);
       setProfile(profData);
       setCourses(coursesData);
       setAssignments(assignData);
       setAssessments(assessData);
       setAttendance(attData);
+      setLearningGaps(gapsData || []);
     } catch (err) {
       setError("Unable to load student dashboard information. Please try again.");
     } finally {
@@ -82,6 +86,7 @@ export const StudentDashboard: React.FC = () => {
   // Derived dashboard metrics
   const pendingAssignments = assignments.filter(a => a.status === 'Pending').length;
   const upcomingAssessments = assessments.filter(a => a.status === 'Upcoming').length;
+  const aiInsight = deriveStudentInsight(learningGaps, attendance, assignments, courses);
 
   // Custom greeting based on time of day
   const getGreeting = () => {
@@ -224,8 +229,9 @@ export const StudentDashboard: React.FC = () => {
 
           {/* AI Insights Card */}
           <AIInsightCard 
-            insight="Your recent assessment performance in Database Systems has improved, indicating strong comprehension of relational schemas." 
-            suggestedFocus="Normalization (BCNF) and Transaction Concurrency Control" 
+            insight={aiInsight.insight} 
+            suggestedFocus={aiInsight.suggestedFocus}
+            isInsufficientData={aiInsight.isInsufficientData}
           />
 
           {/* Course Progress Breakdown */}

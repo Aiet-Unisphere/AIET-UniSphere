@@ -216,6 +216,200 @@ export const getFacultyDashboardData = async (): Promise<FacultyDashboardData> =
     };
   });
 
+  // Fetch real recent activities for the authenticated faculty member
+  const [
+    recentAssignmentsRes,
+    recentAttendanceRes,
+    recentAssessmentsRes,
+    recentGradedRes,
+    recentAnnouncementsRes
+  ] = await Promise.all([
+    (async () => {
+      try {
+        const res = await (supabase as any)
+          .from('assignments')
+          .select('id, title, course_name, created_at')
+          .eq('created_by', user.id)
+          .order('created_at', { ascending: false })
+          .limit(5);
+        if (res.error) {
+          console.warn('[facultyService] Error querying assignments activities:', res.error.message);
+          return { data: [] };
+        }
+        return res;
+      } catch (err: any) {
+        console.warn('[facultyService] Unexpected error querying assignments activities:', err?.message);
+        return { data: [] };
+      }
+    })(),
+    (async () => {
+      try {
+        const res = await (supabase as any)
+          .from('attendance_sessions')
+          .select('id, course_name, present_count, total_students, created_at')
+          .eq('faculty_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(5);
+        if (res.error) {
+          console.warn('[facultyService] Error querying attendance activities:', res.error.message);
+          return { data: [] };
+        }
+        return res;
+      } catch (err: any) {
+        console.warn('[facultyService] Unexpected error querying attendance activities:', err?.message);
+        return { data: [] };
+      }
+    })(),
+    (async () => {
+      try {
+        const res = await (supabase as any)
+          .from('assessments')
+          .select('id, title, course_name, created_at')
+          .eq('created_by', user.id)
+          .order('created_at', { ascending: false })
+          .limit(5);
+        if (res.error) {
+          console.warn('[facultyService] Error querying assessments activities:', res.error.message);
+          return { data: [] };
+        }
+        return res;
+      } catch (err: any) {
+        console.warn('[facultyService] Unexpected error querying assessments activities:', err?.message);
+        return { data: [] };
+      }
+    })(),
+    (async () => {
+      if (!assignmentIds.length) return { data: [] };
+      try {
+        const res = await (supabase as any)
+          .from('assignment_submissions')
+          .select('id, marks, graded_at, status, submitted_at, assignments(title, course_name)')
+          .in('assignment_id', assignmentIds)
+          .order('submitted_at', { ascending: false })
+          .limit(5);
+        if (res.error) {
+          console.warn('[facultyService] Error querying submissions activities:', res.error.message);
+          return { data: [] };
+        }
+        return res;
+      } catch (err: any) {
+        console.warn('[facultyService] Unexpected error querying submissions activities:', err?.message);
+        return { data: [] };
+      }
+    })(),
+    (async () => {
+      try {
+        const res = await (supabase as any)
+          .from('announcements')
+          .select('id, title, created_at')
+          .eq('created_by', user.id)
+          .order('created_at', { ascending: false })
+          .limit(5);
+        if (res.error) {
+          console.warn('[facultyService] Error querying announcements activities:', res.error.message);
+          return { data: [] };
+        }
+        return res;
+      } catch (err: any) {
+        console.warn('[facultyService] Unexpected error querying announcements activities:', err?.message);
+        return { data: [] };
+      }
+    })()
+  ]);
+
+  const rawActivities: Array<{
+    id: string;
+    isoDate: string;
+    description: string;
+    category: 'Assignment' | 'Attendance' | 'Evaluation' | 'System';
+  }> = [];
+
+  const seenIds = new Set<string>();
+
+  for (const asgn of recentAssignmentsRes.data || []) {
+    if (asgn.created_at && !seenIds.has(`asgn-${asgn.id}`)) {
+      seenIds.add(`asgn-${asgn.id}`);
+      rawActivities.push({
+        id: `asgn-${asgn.id}`,
+        isoDate: asgn.created_at,
+        description: `Created assignment "${asgn.title}" for ${asgn.course_name || 'assigned course'}`,
+        category: 'Assignment',
+      });
+    }
+  }
+
+  for (const att of recentAttendanceRes.data || []) {
+    if (att.created_at && !seenIds.has(`att-${att.id}`)) {
+      seenIds.add(`att-${att.id}`);
+      rawActivities.push({
+        id: `att-${att.id}`,
+        isoDate: att.created_at,
+        description: `Recorded attendance for ${att.course_name} (${att.present_count || 0}/${att.total_students || 0} present)`,
+        category: 'Attendance',
+      });
+    }
+  }
+
+  for (const asmt of recentAssessmentsRes.data || []) {
+    if (asmt.created_at && !seenIds.has(`asmt-${asmt.id}`)) {
+      seenIds.add(`asmt-${asmt.id}`);
+      rawActivities.push({
+        id: `asmt-${asmt.id}`,
+        isoDate: asmt.created_at,
+        description: `Scheduled assessment "${asmt.title}" for ${asmt.course_name || 'assigned course'}`,
+        category: 'Evaluation',
+      });
+    }
+  }
+
+  for (const sub of recentGradedRes.data || []) {
+    const asgnObj = Array.isArray(sub.assignments) ? sub.assignments[0] : sub.assignments;
+    const asgnTitle = asgnObj?.title || 'coursework';
+    if (sub.status === 'Graded' && sub.graded_at && !seenIds.has(`sub-graded-${sub.id}`)) {
+      seenIds.add(`sub-graded-${sub.id}`);
+      rawActivities.push({
+        id: `sub-graded-${sub.id}`,
+        isoDate: sub.graded_at,
+        description: `Evaluated submission for "${asgnTitle}" (${sub.marks ?? 0} marks awarded)`,
+        category: 'Evaluation',
+      });
+    } else if (sub.submitted_at && !seenIds.has(`sub-received-${sub.id}`)) {
+      seenIds.add(`sub-received-${sub.id}`);
+      rawActivities.push({
+        id: `sub-received-${sub.id}`,
+        isoDate: sub.submitted_at,
+        description: `Received student submission for "${asgnTitle}"`,
+        category: 'Assignment',
+      });
+    }
+  }
+
+  for (const ann of recentAnnouncementsRes.data || []) {
+    if (ann.created_at && !seenIds.has(`ann-${ann.id}`)) {
+      seenIds.add(`ann-${ann.id}`);
+      rawActivities.push({
+        id: `ann-${ann.id}`,
+        isoDate: ann.created_at,
+        description: `Published announcement: "${ann.title}"`,
+        category: 'System',
+      });
+    }
+  }
+
+  const recentActivities: FacultyActivityItem[] = rawActivities
+    .sort((a, b) => new Date(b.isoDate).getTime() - new Date(a.isoDate).getTime())
+    .slice(0, 8)
+    .map((item) => {
+      const { day, timestamp } = formatFacultyActivityDay(item.isoDate);
+      return {
+        id: item.id,
+        timestamp,
+        day,
+        description: item.description,
+        category: item.category,
+      };
+    });
+
   return {
     profile,
     stats: {
@@ -229,6 +423,31 @@ export const getFacultyDashboardData = async (): Promise<FacultyDashboardData> =
     todaysClasses: todayClasses,
     pendingWork,
     studentAlerts,
-    recentActivities: [],
+    recentActivities,
   };
 };
+
+/**
+ * Helper to calculate relative calendar day and formatted time for faculty activity log
+ */
+export function formatFacultyActivityDay(isoDateStr: string, now: Date = new Date()): {
+  day: 'Today' | 'Yesterday' | 'Earlier';
+  timestamp: string;
+} {
+  const date = new Date(isoDateStr);
+  const timestamp = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  
+  const nowDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const targetDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const diffTime = nowDate.getTime() - targetDate.getTime();
+  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+
+  let day: 'Today' | 'Yesterday' | 'Earlier' = 'Earlier';
+  if (diffDays <= 0) {
+    day = 'Today';
+  } else if (diffDays === 1) {
+    day = 'Yesterday';
+  }
+
+  return { day, timestamp };
+}

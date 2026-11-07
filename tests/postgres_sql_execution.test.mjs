@@ -219,3 +219,25 @@ test('PostgreSQL Engine: 4. Migration 00035 timetable conflict query executes ag
 
   assert.strictEqual(noConflict.length, 0, 'Different academic year should return 0 conflicts');
 });
+
+test('PostgreSQL Engine: 5. GREATEST and LEAST special language forms execute unqualified', () => {
+  const db = newDb();
+  
+  db.public.registerFunction({
+    name: 'greatest',
+    args: [db.public.getType('integer'), db.public.getType('integer')],
+    returns: db.public.getType('integer'),
+    implementation: (a, b) => Math.max(a, b)
+  });
+
+  db.public.registerFunction({
+    name: 'least',
+    args: [db.public.getType('integer'), db.public.getType('integer')],
+    returns: db.public.getType('integer'),
+    implementation: (a, b) => Math.min(a, b)
+  });
+
+  const res = db.public.many("SELECT GREATEST(1, 10) as g, LEAST(1, 10) as l");
+  assert.strictEqual(res[0].g, 10);
+  assert.strictEqual(res[0].l, 1);
+});

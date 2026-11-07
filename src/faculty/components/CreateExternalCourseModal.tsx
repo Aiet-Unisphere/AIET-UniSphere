@@ -13,8 +13,6 @@ export const CreateExternalCourseModal: React.FC<CreateExternalCourseModalProps>
   onClose,
   onSuccess
 }) => {
-  if (!isOpen) return null;
-
   const [title, setTitle] = useState('');
   const [platform, setPlatform] = useState('Coursera');
   const [providerName, setProviderName] = useState('');
@@ -68,6 +66,8 @@ export const CreateExternalCourseModal: React.FC<CreateExternalCourseModalProps>
       setIsSubmitting(false);
     }
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="modal-overlay" style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
