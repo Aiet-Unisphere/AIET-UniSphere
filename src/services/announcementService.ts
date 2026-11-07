@@ -68,7 +68,7 @@ const sendAnnouncementNotifications = async (announcement: any) => {
       source: 'Announcement',
       category: 'Academic',
       type: 'ANNOUNCEMENT',
-      related_link: `/announcements`,
+      related_link: `/student/announcements/${announcement.id}`,
       is_read: false
     }));
 
@@ -113,27 +113,34 @@ export const getDepartmentAnnouncements = async (departmentId?: string): Promise
 };
 
 export const getAnnouncementById = async (id: string): Promise<Announcement | null> => {
-  const { data, error } = await supabase
-    .from('announcements')
-    .select(`
-      *,
-      profiles:created_by (
-        full_name,
-        role
-      ),
-      departments:department_id (
-        name
-      )
-    `)
-    .eq('id', id)
-    .single();
+  if (!id || typeof id !== 'string') return null;
 
-  if (error) {
-    console.error('Error fetching announcement by id:', error);
+  try {
+    const { data, error } = await supabase
+      .from('announcements')
+      .select(`
+        *,
+        profiles:created_by (
+          full_name,
+          role
+        ),
+        departments:department_id (
+          name
+        )
+      `)
+      .eq('id', id)
+      .maybeSingle();
+
+    if (error) {
+      console.error('Error fetching announcement by id:', error);
+      return null;
+    }
+
+    return data ? mapDBRowToAnnouncement(data) : null;
+  } catch (err) {
+    console.error('Exception fetching announcement by id:', err);
     return null;
   }
-
-  return data ? mapDBRowToAnnouncement(data) : null;
 };
 
 export const createDepartmentAnnouncement = async (data: {

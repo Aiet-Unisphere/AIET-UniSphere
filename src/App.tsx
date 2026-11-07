@@ -31,6 +31,7 @@ const TimetablePage = React.lazy(() => import('./pages/TimetablePage').then(m =>
 const AcademicCalendarPage = React.lazy(() => import('./pages/AcademicCalendarPage').then(m => ({ default: m.AcademicCalendarPage })));
 const ResultsPage = React.lazy(() => import('./pages/ResultsPage').then(m => ({ default: m.ResultsPage })));
 const AnnouncementsPage = React.lazy(() => import('./pages/AnnouncementsPage').then(m => ({ default: m.AnnouncementsPage })));
+const AnnouncementDetail = React.lazy(() => import('./pages/AnnouncementDetail').then(m => ({ default: m.AnnouncementDetail })));
 
 // Phase 4 Project & GitHub Feature Pages
 const NotificationsPage = React.lazy(() => import('./pages/NotificationsPage').then(m => ({ default: m.NotificationsPage })));
@@ -134,6 +135,8 @@ const App: React.FC = () => {
             <Route path="/student/calendar" element={<RoleGuard allowedRoles={['STUDENT', 'ADMIN']}><AcademicCalendarPage /></RoleGuard>} />
             <Route path="/student/results" element={<RoleGuard allowedRoles={['STUDENT', 'ADMIN']}><ResultsPage /></RoleGuard>} />
             <Route path="/student/announcements" element={<RoleGuard allowedRoles={['STUDENT', 'ADMIN']}><AnnouncementsPage /></RoleGuard>} />
+            <Route path="/student/announcements/:id" element={<RoleGuard allowedRoles={['STUDENT', 'ADMIN']}><AnnouncementDetail /></RoleGuard>} />
+            <Route path="/announcements" element={<Navigate to="/student/announcements" replace />} />
 
             {/* Phase 4 Project & GitHub Feature Routes */}
             <Route path="/student/notifications" element={<RoleGuard allowedRoles={['STUDENT', 'ADMIN']}><NotificationsPage /></RoleGuard>} />
