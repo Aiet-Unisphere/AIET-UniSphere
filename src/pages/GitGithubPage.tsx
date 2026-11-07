@@ -11,7 +11,11 @@ import {
   FolderSync,
   CheckCircle2,
   X,
-  Gauge
+  Gauge,
+  ExternalLink,
+  Globe,
+  Lock,
+  Code
 } from 'lucide-react';
 import { AppShell } from '../components/AppShell';
 import { LoadingState } from '../components/LoadingState';
@@ -44,6 +48,7 @@ import {
   syncRepository,
   clearWorkspaceChanges,
   getRateLimitDiagnostics,
+  generateGitHubOAuthState,
   type RateLimitDiagnostics
 } from '../services/githubService';
 import { useAuth } from '../app/context/AuthContext';
@@ -139,15 +144,16 @@ export const GitGithubPage: React.FC = () => {
     fetchGitData();
   }, [fetchGitData]);
 
-  // Connect GitHub Handler
+  // Connect GitHub Handler with CSRF State Protection
   const handleConnectGitHub = async () => {
     const clientId = import.meta.env.VITE_GITHUB_CLIENT_ID;
     if (clientId) {
+      const state = generateGitHubOAuthState();
       const redirectUri = `${window.location.origin}/student/github/callback`;
-      const authUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=repo%20user%20read:user&state=${user?.id || ''}`;
+      const authUrl = `https://github.com/login/oauth/authorize?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=read:user%20repo&state=${encodeURIComponent(state)}`;
       window.location.href = authUrl;
     } else {
-      setError('GitHub OAuth is not configured. Set VITE_GITHUB_CLIENT_ID and deploy the github-oauth Edge Function.');
+      setError('GitHub OAuth is not configured. Set VITE_GITHUB_CLIENT_ID and configure the github-oauth Edge Function.');
     }
   };
 
@@ -300,8 +306,19 @@ export const GitGithubPage: React.FC = () => {
       )}
 
       {error && (
-        <div style={{ padding: '0.75rem 1rem', backgroundColor: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: '8px', color: '#991B1B', marginBottom: '1rem', fontSize: '0.85rem' }}>
-          {error}
+        <div style={{ padding: '0.75rem 1rem', backgroundColor: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: '8px', color: '#991B1B', marginBottom: '1rem', fontSize: '0.85rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <div>
+            <strong>Error:</strong> {error}
+          </div>
+          {(error.includes('401') || error.toLowerCase().includes('expired') || error.toLowerCase().includes('reconnect')) && (
+            <button
+              className="btn btn-primary"
+              style={{ width: 'auto', fontSize: '0.75rem', padding: '0.3rem 0.75rem' }}
+              onClick={handleConnectGitHub}
+            >
+              Reconnect GitHub
+            </button>
+          )}
         </div>
       )}
 
@@ -435,25 +452,76 @@ export const GitGithubPage: React.FC = () => {
             </div>
 
             {userRepos.length === 0 ? (
-              <p style={{ fontSize: '0.9rem', color: 'var(--brand-dark-grey)' }}>
-                No accessible repositories found for your GitHub account.
-              </p>
+              <div style={{ textAlign: 'center', padding: '2rem 1rem' }}>
+                <FolderGit2 size={36} style={{ color: 'var(--brand-dark-grey)', margin: '0 auto 0.75rem auto' }} />
+                <p style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--brand-black)', margin: '0 0 0.25rem 0' }}>
+                  No repositories found
+                </p>
+                <p style={{ fontSize: '0.85rem', color: 'var(--brand-dark-grey)', margin: 0 }}>
+                  No accessible repositories were found for your connected GitHub account. Create a repository on GitHub or grant repository permissions to UniSphere.
+                </p>
+              </div>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                 {userRepos.map((r) => (
                   <div
                     key={r.id}
-                    style={{ padding: '0.75rem 1rem', border: '1px solid var(--border-color)', borderRadius: '8px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: r.name === repo?.name ? 'var(--bg-subtle)' : '#FFF' }}
+                    style={{
+                      padding: '0.85rem 1rem',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'flex-start',
+                      gap: '0.75rem',
+                      backgroundColor: r.name === repo?.name ? 'var(--bg-subtle)' : '#FFF'
+                    }}
                     onClick={() => handleSelectRepository(r)}
                   >
-                    <div>
-                      <h4 style={{ fontSize: '0.95rem', fontWeight: 700, margin: 0, color: 'var(--brand-black)' }}>{r.fullName}</h4>
-                      <span style={{ fontSize: '0.75rem', color: 'var(--brand-dark-grey)' }}>
-                        Default branch: {r.defaultBranch} • {r.visibility}
-                      </span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                        <h4 style={{ fontSize: '0.95rem', fontWeight: 700, margin: 0, color: 'var(--brand-black)' }}>
+                          {r.fullName}
+                        </h4>
+                        <span className="badge badge-secondary" style={{ fontSize: '0.65rem', display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
+                          {r.visibility === 'Public' ? <Globe size={10} /> : <Lock size={10} />}
+                          {r.visibility}
+                        </span>
+                        {r.language && (
+                          <span className="badge badge-secondary" style={{ fontSize: '0.65rem', display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
+                            <Code size={10} />
+                            {r.language}
+                          </span>
+                        )}
+                        <a
+                          href={r.htmlUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          title="Open repository on GitHub"
+                          style={{ color: 'var(--brand-orange)', display: 'inline-flex', alignItems: 'center', marginLeft: '0.25rem' }}
+                        >
+                          <ExternalLink size={13} />
+                        </a>
+                      </div>
+
+                      {r.description && (
+                        <p style={{ fontSize: '0.8rem', color: 'var(--brand-dark-grey)', margin: '0.35rem 0 0.25rem 0' }}>
+                          {r.description}
+                        </p>
+                      )}
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '0.75rem', color: 'var(--brand-dark-grey)', marginTop: '0.35rem', flexWrap: 'wrap' }}>
+                        <span>Branch: <strong>{r.defaultBranch}</strong></span>
+                        {r.updatedAt && (
+                          <span>Updated: {new Date(r.updatedAt).toLocaleDateString()}</span>
+                        )}
+                      </div>
                     </div>
-                    <button className="btn btn-secondary font-mono" style={{ width: 'auto', fontSize: '0.75rem' }}>
-                      Select
+
+                    <button className="btn btn-secondary font-mono" style={{ width: 'auto', fontSize: '0.75rem', alignSelf: 'center', whiteSpace: 'nowrap' }}>
+                      {r.name === repo?.name ? 'Active' : 'Select'}
                     </button>
                   </div>
                 ))}

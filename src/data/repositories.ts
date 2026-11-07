@@ -22,6 +22,8 @@ export interface GitHubRepositoryItem {
   starsCount: number;
   forksCount: number;
   description?: string;
+  language?: string | null;
+  updatedAt?: string | null;
   isSelected?: boolean;
 }
 

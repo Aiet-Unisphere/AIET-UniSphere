@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { LoadingState } from '../components/LoadingState';
 import { ErrorState } from '../components/ErrorState';
-import { connectGitHubOAuth } from '../services/githubService';
+import { connectGitHubOAuth, validateGitHubOAuthState } from '../services/githubService';
 
 export const GitHubCallbackPage: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -13,15 +13,29 @@ export const GitHubCallbackPage: React.FC = () => {
   useEffect(() => {
     const processCallback = async () => {
       const code = searchParams.get('code');
-      const err = searchParams.get('error_description') || searchParams.get('error');
+      const incomingState = searchParams.get('state');
+      const oauthError = searchParams.get('error');
+      const errorDescription = searchParams.get('error_description');
 
-      if (err) {
-        setError(`GitHub authorization rejected: ${err}`);
+      // 1. Handle user cancellation or GitHub OAuth rejection
+      if (oauthError) {
+        if (oauthError === 'access_denied') {
+          setError('GitHub authorization was cancelled by the user.');
+        } else {
+          setError(`GitHub authorization rejected: ${errorDescription || oauthError}`);
+        }
         return;
       }
 
+      // 2. Validate cryptographic OAuth state (CSRF mitigation)
+      if (!validateGitHubOAuthState(incomingState)) {
+        setError('OAuth security validation failed: State parameter mismatch or expired session. Please return to the Git / GitHub page and initiate the connection again.');
+        return;
+      }
+
+      // 3. Ensure authorization code is present
       if (!code) {
-        setError("Missing authorization code from GitHub callback URL.");
+        setError('Missing authorization code from GitHub callback URL.');
         return;
       }
 
@@ -30,7 +44,7 @@ export const GitHubCallbackPage: React.FC = () => {
         await connectGitHubOAuth(code, redirectUri);
         navigate('/student/github', { replace: true });
       } catch (e: any) {
-        setError(e.message || "Failed to complete GitHub authorization.");
+        setError(e.message || 'Failed to complete GitHub authorization.');
       }
     };
 

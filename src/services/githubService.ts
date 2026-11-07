@@ -33,12 +33,47 @@ async function githubApiFetch(input: string | URL, init?: RequestInit): Promise<
 
 // 0. HELPER FOR STANDARDIZED GITHUB ERROR MESSAGES (TEST 9)
 export const handleGitHubApiError = (res: Response, errJson?: any): string => {
-  if (res.status === 401) return "401 Unauthorized: Invalid or expired GitHub access token.";
+  if (res.status === 401) return "401 Unauthorized: Invalid, expired, or revoked GitHub access token. Please reconnect your GitHub account.";
   if (res.status === 403) return "403 Forbidden: Insufficient permissions or GitHub API rate limit exceeded.";
   if (res.status === 404) return "404 Not Found: Repository or file unavailable or permission denied.";
   if (res.status === 429) return "429 Too Many Requests: GitHub API rate limit reached. Please wait before retrying.";
   if (res.status >= 500) return `GitHub Server Error (${res.status}): ${res.statusText}. Please check GitHub status.`;
   return errJson?.message || `GitHub API Error (${res.status}): ${res.statusText}`;
+};
+
+// 0.1 SECURE OAUTH CSRF STATE GENERATION & VALIDATION
+export const generateGitHubOAuthState = (): string => {
+  if (typeof window !== 'undefined' && window.crypto && window.crypto.getRandomValues) {
+    const array = new Uint8Array(16);
+    window.crypto.getRandomValues(array);
+    const state = Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
+    try {
+      sessionStorage.setItem('github_oauth_state', state);
+    } catch {
+      // Fallback if sessionStorage is restricted
+    }
+    return state;
+  }
+  // Fallback for non-browser environments / tests
+  const state = Math.random().toString(36).substring(2) + Date.now().toString(36);
+  if (typeof sessionStorage !== 'undefined') {
+    try { sessionStorage.setItem('github_oauth_state', state); } catch {}
+  }
+  return state;
+};
+
+export const validateGitHubOAuthState = (incomingState: string | null): boolean => {
+  if (!incomingState || typeof incomingState !== 'string') return false;
+  if (typeof sessionStorage === 'undefined') return false;
+  try {
+    const savedState = sessionStorage.getItem('github_oauth_state');
+    if (!savedState) return false;
+    const isValid = incomingState === savedState;
+    sessionStorage.removeItem('github_oauth_state');
+    return isValid;
+  } catch {
+    return false;
+  }
 };
 
 // Helper to get stored access token
@@ -120,15 +155,17 @@ export const getUserRepositories = async (): Promise<GitHubRepositoryItem[]> => 
   return repos.map((r: any) => ({
     id: r.id,
     name: r.name,
-    owner: r.owner.login,
-    fullName: r.full_name,
+    owner: r.owner?.login || '',
+    fullName: r.full_name || `${r.owner?.login || ''}/${r.name}`,
     visibility: r.private ? 'Private' : 'Public',
     defaultBranch: r.default_branch || 'main',
     selectedBranch: r.default_branch || 'main',
-    htmlUrl: r.html_url,
+    htmlUrl: r.html_url || `https://github.com/${r.owner?.login || ''}/${r.name}`,
     starsCount: r.stargazers_count || 0,
     forksCount: r.forks_count || 0,
-    description: r.description || ''
+    description: r.description || '',
+    language: r.language || null,
+    updatedAt: r.updated_at || r.pushed_at || null,
   }));
 };
 
