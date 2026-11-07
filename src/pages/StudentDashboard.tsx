@@ -8,7 +8,7 @@ import {
   BookOpen
 } from 'lucide-react';
 import { getStudentProfile } from '../services/studentService';
-import { getCourses } from '../services/courseService';
+import { getCourses, calculateStudentCourseProgress } from '../services/courseService';
 import { getAssignments } from '../services/assignmentService';
 import { getAssessments } from '../services/assessmentService';
 import { getAttendanceSummary } from '../services/attendanceService';
@@ -252,15 +252,36 @@ export const StudentDashboard: React.FC = () => {
               </p>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1.15rem' }}>
-                {courses.slice(0, 3).map((course) => (
-                  <div key={course.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-                    <div style={{ display: 'flex', justifyItems: 'center', justifyContent: 'space-between' }}>
-                      <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>{course.name}</span>
-                      <span style={{ fontSize: '0.75rem', color: 'var(--brand-dark-grey)', fontWeight: 600 }}>{course.code}</span>
+                {courses.slice(0, 3).map((course) => {
+                  const progress = calculateStudentCourseProgress(course, assignments, assessments);
+                  return (
+                    <div 
+                      key={course.id} 
+                      style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', cursor: 'pointer' }}
+                      onClick={() => navigate(`/student/courses/${course.id}`)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => { if (e.key === 'Enter') navigate(`/student/courses/${course.id}`); }}
+                    >
+                      <div style={{ display: 'flex', justifyItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>{course.name}</span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--brand-dark-grey)', fontWeight: 600 }}>{course.code}</span>
+                      </div>
+                      {progress.hasCoursework ? (
+                        <ProgressBar 
+                          progress={progress.percentage!} 
+                          showPercentage={true} 
+                          label={`${progress.completedCoursework}/${progress.totalCoursework} items completed`}
+                        />
+                      ) : (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.25rem 0', fontSize: '0.8rem', color: 'var(--brand-dark-grey)' }}>
+                          <span>No coursework assigned yet</span>
+                          <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748B' }}>N/A</span>
+                        </div>
+                      )}
                     </div>
-                    <ProgressBar progress={course.progress || 0} showPercentage={true} />
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

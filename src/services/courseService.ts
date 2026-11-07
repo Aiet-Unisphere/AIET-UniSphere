@@ -34,6 +34,76 @@ export interface CourseModuleItem {
   materials?: CourseMaterialItem[];
 }
 
+export interface CourseProgressMetrics {
+  percentage: number | null;
+  display: string;
+  totalCoursework: number;
+  completedCoursework: number;
+  hasCoursework: boolean;
+}
+
+export const calculateStudentCourseProgress = (
+  course: { id: string; code?: string; name?: string },
+  assignments: any[] = [],
+  assessments: any[] = []
+): CourseProgressMetrics => {
+  if (!course || !course.id) {
+    return {
+      percentage: null,
+      display: 'N/A',
+      totalCoursework: 0,
+      completedCoursework: 0,
+      hasCoursework: false
+    };
+  }
+
+  const safeAssignments = Array.isArray(assignments) ? assignments : [];
+  const safeAssessments = Array.isArray(assessments) ? assessments : [];
+
+  const courseAssignments = safeAssignments.filter(a => 
+    a && (
+      a.courseId === course.id || 
+      (course.code && a.courseId === course.code) ||
+      (a.courseName && course.name && a.courseName.toLowerCase() === course.name.toLowerCase())
+    )
+  );
+
+  const courseAssessments = safeAssessments.filter(a => 
+    a && (
+      a.courseId === course.id || 
+      (course.code && (a.courseCode === course.code || a.courseId === course.code)) ||
+      (a.courseName && course.name && a.courseName.toLowerCase() === course.name.toLowerCase())
+    )
+  );
+
+  const completedAssignments = courseAssignments.filter(a => a.status === 'Submitted' || a.status === 'Graded').length;
+  const completedAssessments = courseAssessments.filter(a => 
+    a.studentAttempt && (a.studentAttempt.status === 'Submitted' || a.studentAttempt.status === 'Graded')
+  ).length;
+
+  const totalCoursework = courseAssignments.length + courseAssessments.length;
+  const completedCoursework = completedAssignments + completedAssessments;
+
+  if (totalCoursework === 0) {
+    return {
+      percentage: null,
+      display: 'N/A',
+      totalCoursework: 0,
+      completedCoursework: 0,
+      hasCoursework: false
+    };
+  }
+
+  const percentage = Math.round((completedCoursework / totalCoursework) * 100);
+  return {
+    percentage,
+    display: `${percentage}%`,
+    totalCoursework,
+    completedCoursework,
+    hasCoursework: true
+  };
+};
+
 export interface CourseMaterialItem {
   id: string;
   title: string;

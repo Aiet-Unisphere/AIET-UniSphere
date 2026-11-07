@@ -11,7 +11,8 @@ import {
   getCourseById, 
   getCourseMaterials, 
   downloadCourseMaterial,
-  deriveCourseModules
+  deriveCourseModules,
+  calculateStudentCourseProgress
 } from '../services/courseService';
 import type { Course, CourseMaterialItem, CourseModuleItem } from '../services/courseService';
 import { getAssignments } from '../services/assignmentService';
@@ -127,27 +128,13 @@ export const CourseDetail: React.FC = () => {
       });
 
       // 2. Calculate Course Progress (from genuine coursework completion)
-      const completedAssignments = filteredAssignments.filter(a => a.status === 'Submitted' || a.status === 'Graded').length;
-      const completedAssessments = filteredAssessments.filter(a => 
-        a.studentAttempt && (a.studentAttempt.status === 'Submitted' || a.studentAttempt.status === 'Graded')
-      ).length;
-
-      const totalItems = filteredAssignments.length + filteredAssessments.length;
-      const completedItems = completedAssignments + completedAssessments;
-
-      let progressPct: number | null = null;
-      let progressDisp = "N/A";
-
-      if (totalItems > 0) {
-        progressPct = Math.round((completedItems / totalItems) * 100);
-        progressDisp = `${progressPct}%`;
-      }
+      const progressMetrics = calculateStudentCourseProgress(courseData, allAssignments, allAssessments);
 
       setCourseProgress({
-        percentage: progressPct,
-        display: progressDisp,
-        total: totalItems,
-        completed: completedItems
+        percentage: progressMetrics.percentage,
+        display: progressMetrics.display,
+        total: progressMetrics.totalCoursework,
+        completed: progressMetrics.completedCoursework
       });
 
       // 3. Compute Next Class / Activity
