@@ -15,6 +15,23 @@ export interface Course {
   semester?: number;
   section?: string;
   facultyName?: string;
+  faculty?: string;
+  description?: string | null;
+  attendance?: number | null;
+  attendanceDisplay?: string;
+  progress?: number | null;
+  progressDisplay?: string;
+  nextActivity?: string;
+  modules?: CourseModuleItem[];
+}
+
+export interface CourseModuleItem {
+  id: string;
+  title: string;
+  materialsCount: number;
+  assignmentsCount: number;
+  completion?: number;
+  materials?: CourseMaterialItem[];
 }
 
 export interface CourseMaterialItem {
@@ -194,13 +211,77 @@ export const getFacultyCourseById = async (id: string): Promise<FacultyCourseIte
   return courses.find(c => c.id === id || c.code.toLowerCase() === id.toLowerCase());
 };
 
-export const getCourseMaterials = async (courseId: string): Promise<CourseMaterialItem[]> => {
+export const deriveCourseModules = (
+  materials: CourseMaterialItem[], 
+  courseAssignments: any[] = []
+): CourseModuleItem[] => {
+  if (!materials || materials.length === 0) {
+    return [];
+  }
+
+  const moduleMap = new Map<string, {
+    id: string;
+    title: string;
+    materials: CourseMaterialItem[];
+  }>();
+
+  materials.forEach((m) => {
+    const modKey = (m.moduleId && m.moduleId.trim()) || 'General';
+    if (!moduleMap.has(modKey)) {
+      let title = modKey;
+      if (/^\d+$/.test(modKey)) {
+        title = `Module ${modKey}`;
+      } else if (modKey.toLowerCase() === 'general') {
+        title = 'General Resources';
+      } else if (!modKey.toLowerCase().startsWith('module')) {
+        title = `Module: ${modKey}`;
+      }
+      moduleMap.set(modKey, {
+        id: modKey,
+        title,
+        materials: []
+      });
+    }
+    moduleMap.get(modKey)!.materials.push(m);
+  });
+
+  return Array.from(moduleMap.values()).map(mod => {
+    // Correlate assignments mentioning this module if present
+    const matchingAssignments = courseAssignments.filter(a => 
+      (a.title && a.title.toLowerCase().includes(`module ${mod.id}`.toLowerCase())) ||
+      (a.instructions && a.instructions.toLowerCase().includes(`module ${mod.id}`.toLowerCase()))
+    );
+
+    const assignmentsCount = matchingAssignments.length;
+    const completedAssignments = matchingAssignments.filter(a => a.status === 'Submitted' || a.status === 'Graded').length;
+    const completion = assignmentsCount > 0 
+      ? Math.round((completedAssignments / assignmentsCount) * 100) 
+      : 0;
+
+    return {
+      id: mod.id,
+      title: mod.title,
+      materialsCount: mod.materials.length,
+      assignmentsCount,
+      completion,
+      materials: mod.materials
+    };
+  });
+};
+
+export const getCourseMaterials = async (courseId: string, courseCode?: string): Promise<CourseMaterialItem[]> => {
   try {
-    const { data, error } = await (supabase as any)
+    let query = (supabase as any)
       .from('academic_materials')
-      .select('*')
-      .eq('course_id', courseId)
-      .order('created_at', { ascending: false });
+      .select('*');
+
+    if (courseCode && courseCode !== courseId) {
+      query = query.or(`course_id.eq.${courseId},course_id.eq.${courseCode}`);
+    } else {
+      query = query.eq('course_id', courseId);
+    }
+
+    const { data, error } = await query.order('created_at', { ascending: false });
 
     if (!error && data) {
       return data.map((m: any) => ({
