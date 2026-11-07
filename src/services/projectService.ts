@@ -3,6 +3,7 @@
  * Uses `sb = supabase as any` for new tables not yet in generated types.
  */
 import { supabase } from '../lib/supabase';
+import { STORAGE_BUCKETS } from './storageService';
 
 const sb = supabase as any;
 
@@ -59,6 +60,18 @@ export interface ProjectMilestone {
   milestone_order: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface ProjectResource {
+  id: string;
+  name: string;
+  type: string;
+  path: string;
+  sizeBytes?: number;
+  updatedAt: string;
+  content?: string | null;
+  storagePath?: string;
+  source: 'workspace' | 'storage';
 }
 
 export interface CreateProjectPayload {
@@ -346,6 +359,76 @@ export const updateMilestoneStatus = async (
 
   if (error) throw new Error(`Failed to update milestone: ${error.message}`);
   return data as ProjectMilestone;
+};
+
+// ---------------------------------------------------------------------------
+// PROJECT RESOURCES & DOCUMENTATION
+// ---------------------------------------------------------------------------
+
+export const getProjectResources = async (projectId: string): Promise<ProjectResource[]> => {
+  if (!projectId || typeof projectId !== 'string' || projectId.trim() === '') {
+    return [];
+  }
+
+  const { data: { user }, error: authErr } = await supabase.auth.getUser();
+  if (authErr || !user) return [];
+
+  // Query workspace files for this project
+  const { data: dbFiles, error: dbErr } = await sb
+    .from('project_files')
+    .select('id, name, type, path, content, language, created_at, updated_at')
+    .eq('project_id', projectId)
+    .eq('type', 'file')
+    .order('updated_at', { ascending: false });
+
+  if (dbErr) {
+    console.error('[projectService] getProjectResources DB error:', dbErr.message);
+    throw new Error(`Unable to load project resources: ${dbErr.message}`);
+  }
+
+  const items: ProjectResource[] = (dbFiles || []).map((f: any) => {
+    const ext = f.name.split('.').pop()?.toUpperCase() || 'FILE';
+    return {
+      id: f.id,
+      name: f.name,
+      type: f.language ? f.language.toUpperCase() : ext,
+      path: f.path,
+      sizeBytes: f.content ? new Blob([f.content]).size : 0,
+      updatedAt: f.updated_at || f.created_at,
+      content: f.content,
+      source: 'workspace' as const
+    };
+  });
+
+  // Query uploaded files from project-files storage bucket under project directory if available
+  try {
+    const { data: storageList, error: stErr } = await supabase.storage
+      .from(STORAGE_BUCKETS.PROJECT_FILES)
+      .list(projectId);
+
+    if (!stErr && storageList) {
+      storageList.forEach((obj: any) => {
+        if (obj.name && !obj.name.startsWith('.')) {
+          const ext = obj.name.split('.').pop()?.toUpperCase() || 'FILE';
+          items.push({
+            id: `storage-${projectId}-${obj.name}`,
+            name: obj.name,
+            type: obj.metadata?.mimetype || ext,
+            path: `${projectId}/${obj.name}`,
+            sizeBytes: obj.metadata?.size || 0,
+            updatedAt: obj.updated_at || obj.created_at || new Date().toISOString(),
+            storagePath: `${projectId}/${obj.name}`,
+            source: 'storage' as const
+          });
+        }
+      });
+    }
+  } catch (err) {
+    // Storage listing is supplementary
+    console.warn('[projectService] Storage listing note:', err);
+  }
+
+  return items;
 };
 
 // ---------------------------------------------------------------------------
