@@ -145,8 +145,9 @@ export const getFacultyDashboardData = async (): Promise<FacultyDashboardData> =
       try {
         const res = await (supabase as any)
           .from('student_analytics_view')
-          .select('student_id, attendance_percentage')
+          .select('student_id, attendance_percentage, total_sessions, present_count')
           .in('student_id', studentIds)
+          .gt('total_sessions', 0)
           .lt('attendance_percentage', 75);
         return res.error ? { data: [] } : res;
       } catch {
@@ -187,7 +188,12 @@ export const getFacultyDashboardData = async (): Promise<FacultyDashboardData> =
     };
   });
 
-  const lowAttendanceRows = attendanceRes.data || [];
+  // Strictly filter for genuine attendance alerts: student must have conducted sessions (> 0) and attendance < 75%
+  const lowAttendanceRows = (attendanceRes.data || []).filter((row: any) => {
+    const totalSessions = Number(row.total_sessions || 0);
+    const percentage = Number(row.attendance_percentage ?? 0);
+    return totalSessions > 0 && percentage < 75;
+  });
   const lowAttendanceIds = lowAttendanceRows.map((row: any) => row.student_id);
   let lowAttendanceProfiles: any[] = [];
   if (lowAttendanceIds.length) {
@@ -202,15 +208,29 @@ export const getFacultyDashboardData = async (): Promise<FacultyDashboardData> =
     }
   }
 
-  const attendanceByStudent = new Map<string, number>(lowAttendanceRows.map((row: any) => [row.student_id, Number(row.attendance_percentage)]));
+  const attendanceByStudent = new Map<string, { percentage: number; totalSessions: number; presentCount: number }>(
+    lowAttendanceRows.map((row: any) => [
+      row.student_id, 
+      {
+        percentage: Number(row.attendance_percentage),
+        totalSessions: Number(row.total_sessions || 0),
+        presentCount: Number(row.present_count || 0),
+      }
+    ])
+  );
   const studentAlerts: StudentAlertItem[] = (lowAttendanceProfiles || []).map((student: any) => {
-    const percentage = attendanceByStudent.get(student.id) || 0;
+    const attInfo = attendanceByStudent.get(student.id);
+    const percentage = attInfo ? attInfo.percentage : 0;
+    const totalSessions = attInfo ? attInfo.totalSessions : 0;
+    const presentCount = attInfo ? attInfo.presentCount : 0;
     return {
       id: student.id,
       studentName: student.full_name || student.email,
       usn: student.usn_or_employee_id || 'Not recorded',
       type: 'Low Attendance',
-      details: 'Attendance is below the institutional 75% threshold.',
+      details: totalSessions > 0
+        ? `Attendance at ${percentage}% (${presentCount}/${totalSessions} sessions conducted). Below the institutional 75% threshold.`
+        : 'Attendance is below the institutional 75% threshold.',
       value: `${percentage}%`,
       severity: percentage < 60 ? 'high' : 'medium',
     };

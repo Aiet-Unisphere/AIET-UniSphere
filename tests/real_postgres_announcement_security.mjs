@@ -248,6 +248,12 @@ async function run() {
   console.log('\n[3/6] Seeding departments, profiles, announcements, and storage objects...');
   const seedSql = `
     DO $$ BEGIN
+      IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'attendance_records') THEN
+        DELETE FROM public.attendance_records;
+      END IF;
+      IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'attendance_sessions') THEN
+        DELETE FROM public.attendance_sessions;
+      END IF;
       IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'course_enrollments') THEN
         DELETE FROM public.course_enrollments;
       END IF;
