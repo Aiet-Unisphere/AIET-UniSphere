@@ -204,7 +204,7 @@ describe('Mission 09.2 — Approved Leave Note PDF Generation & Security Audit',
     const pdfOutput = doc.output();
 
     assert.ok(pdfOutput.includes("ALVA'S INSTITUTE OF ENGINEERING & TECHNOLOGY"), 'Header institution title must be present');
-    assert.ok(pdfOutput.includes('Shobhavana Campus, Mijar, Moodbidri, D.K. - 574225'), 'Campus address must be present');
+    assert.ok(pdfOutput.includes('Shobavana Campus, Mijar, Moodbidri, DK-574225'), 'Campus address must be present');
     assert.ok(pdfOutput.includes('Phone: 08258-262725'), 'Phone contact must be present');
     assert.ok(pdfOutput.includes('Fax: 08258-262726'), 'Fax contact must be present');
     assert.ok(!pdfOutput.includes('NAAC'), 'Unverified NAAC accreditation should not be in the physical header');

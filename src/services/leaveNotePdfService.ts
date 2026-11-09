@@ -87,7 +87,7 @@ export const generateLeaveNotePdf = (leave: LeaveRequest): jsPDF => {
   doc.text('Affiliated to VTU Belagavi & Approved by AICTE, New Delhi', 105, currentY, { align: 'center' });
 
   currentY += 3.8;
-  doc.text('Shobhavana Campus, Mijar, Moodbidri, D.K. - 574225', 105, currentY, { align: 'center' });
+  doc.text('Shobavana Campus, Mijar, Moodbidri, DK-574225', 105, currentY, { align: 'center' });
 
   currentY += 3.6;
   doc.setFontSize(7);
@@ -132,16 +132,16 @@ export const generateLeaveNotePdf = (leave: LeaveRequest): jsPDF => {
   const gridWidth = contentWidth - 6;
   const rowHeight = 7.2;
 
-  // Resolve snapshot values first with existing fallbacks
-  const studentName = leave.studentNameSnapshot || leave.requesterName || 'Student Name';
-  const studentUsn = leave.studentUsnSnapshot || leave.requesterUsnOrEmpId || 'USN Not Provided';
-  const branchName = leave.branchSnapshot || leave.departmentName || 'Engineering Department';
+  // Resolve snapshot values first with existing fallbacks (without inventing student details)
+  const studentName = leave.studentNameSnapshot || leave.requesterName || 'N/A';
+  const studentUsn = leave.studentUsnSnapshot || leave.requesterUsnOrEmpId || 'N/A';
+  const branchName = leave.branchSnapshot || leave.departmentName || 'N/A';
   const semesterStr = leave.semesterSnapshot ? String(leave.semesterSnapshot) : (leave.semester ? String(leave.semester) : '-');
   const sectionStr = leave.sectionSnapshot ? String(leave.sectionSnapshot) : '-';
-  const academicYear = leave.academicYearSnapshot || '2024-2025';
+  const academicYear = leave.academicYearSnapshot || '-';
   const studentPhone = leave.studentPhoneSnapshot || '-';
   const parentPhone = leave.parentPhoneSnapshot || '-';
-  const leaveCategory = leave.leaveType || 'General Leave';
+  const leaveCategory = leave.leaveType || 'Leave / OD';
   const datesSpan = `${leave.startDate} to ${leave.endDate} (${leave.days || 1} Day${(leave.days || 1) > 1 ? 's' : ''})`;
 
   // Helper to draw grid rows
