@@ -1,7 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { AppShell } from '../components/AppShell';
 import { Plus, CheckCircle2, Clock, AlertCircle, Loader2, Upload, FileText, Download, X } from 'lucide-react';
-import { getStudentLeaveRequests, submitLeaveRequest, downloadLeaveDocument } from '../services/leaveService';
+import { 
+  getStudentLeaveRequests, 
+  submitLeaveRequest, 
+  downloadLeaveDocument, 
+  downloadApprovedLeaveNote,
+  getStudentLeaveProfileDefaults 
+} from '../services/leaveService';
 import type { LeaveRequest } from '../data/leaveRequests';
 
 export const LeaveRequestsPage: React.FC = () => {
@@ -16,6 +22,9 @@ export const LeaveRequestsPage: React.FC = () => {
   const [reason, setReason] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [section, setSection] = useState('');
+  const [studentPhone, setStudentPhone] = useState('');
+  const [parentPhone, setParentPhone] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -38,14 +47,25 @@ export const LeaveRequestsPage: React.FC = () => {
     loadLeaves();
   }, []);
 
-  const handleOpenModal = () => {
+  const handleOpenModal = async () => {
     setLeaveType('');
     setReason('');
     setStartDate('');
     setEndDate('');
+    setSection('');
     setSelectedFile(null);
     setErrorMsg('');
     setIsModalOpen(true);
+
+    try {
+      const defaults = await getStudentLeaveProfileDefaults();
+      if (defaults) {
+        if (defaults.studentPhone) setStudentPhone(defaults.studentPhone);
+        if (defaults.parentPhone) setParentPhone(defaults.parentPhone);
+      }
+    } catch (e) {
+      console.warn('Failed to fetch profile defaults:', e);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -76,10 +96,13 @@ export const LeaveRequestsPage: React.FC = () => {
         reason: reason.trim(),
         startDate,
         endDate,
+        section: section.trim() || undefined,
+        studentPhone: studentPhone.trim() || undefined,
+        parentPhone: parentPhone.trim() || undefined,
         file: selectedFile || undefined
       });
       setIsModalOpen(false);
-      setSuccessMsg('Leave request submitted successfully with attachments to Supabase Storage. Pending HOD review.');
+      setSuccessMsg('Leave request submitted successfully. Academic identity snapshotted. Pending HOD review.');
       setTimeout(() => setSuccessMsg(''), 6000);
       await loadLeaves();
     } catch (err: any) {
@@ -99,6 +122,15 @@ export const LeaveRequestsPage: React.FC = () => {
       await downloadLeaveDocument(leave.supportingDocPath, leave.supportingDocName || 'supporting-document.pdf');
     } catch (err: any) {
       alert(`Download failed: ${err.message}`);
+    }
+  };
+
+  const handleDownloadLeaveNote = (leave: LeaveRequest) => {
+    try {
+      downloadApprovedLeaveNote(leave);
+    } catch (err: any) {
+      console.error('Failed to download leave note:', err);
+      alert(err.message || 'Unable to generate leave note PDF.');
     }
   };
 
@@ -159,6 +191,7 @@ export const LeaveRequestsPage: React.FC = () => {
                   <th style={{ padding: '1rem' }}>Document</th>
                   <th style={{ padding: '1rem' }}>Status</th>
                   <th style={{ padding: '1rem' }}>Reviewed By</th>
+                  <th style={{ padding: '1rem' }}>Leave Note</th>
                 </tr>
               </thead>
               <tbody>
@@ -195,6 +228,36 @@ export const LeaveRequestsPage: React.FC = () => {
                     </td>
                     <td style={{ padding: '1rem', color: 'var(--brand-dark-grey)', fontSize: '0.85rem' }}>
                       {l.reviewedBy || 'Pending Review'}
+                    </td>
+                    <td style={{ padding: '1rem' }}>
+                      {l.status === 'Approved' ? (
+                        <button
+                          onClick={() => handleDownloadLeaveNote(l)}
+                          className="btn font-sans"
+                          style={{
+                            width: 'auto',
+                            padding: '0.35rem 0.75rem',
+                            fontSize: '0.75rem',
+                            fontWeight: 700,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.35rem',
+                            backgroundColor: '#16A34A',
+                            borderColor: '#16A34A',
+                            color: '#FFFFFF',
+                            borderRadius: 'var(--border-radius)',
+                            cursor: 'pointer'
+                          }}
+                          title="Download official single-page approved leave note PDF"
+                        >
+                          <Download size={13} />
+                          <span>Download Note</span>
+                        </button>
+                      ) : (
+                        <span style={{ fontSize: '0.8rem', color: 'var(--brand-dark-grey)', fontStyle: 'italic' }}>
+                          {l.status === 'Pending' ? 'Pending Approval' : 'Not Available'}
+                        </span>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -266,6 +329,44 @@ export const LeaveRequestsPage: React.FC = () => {
                       onChange={(e) => setEndDate(e.target.value)}
                       disabled={submitting}
                       required
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem' }}>
+                  <div className="form-group">
+                    <label className="form-label">Section</label>
+                    <input 
+                      type="text"
+                      className="form-input font-sans"
+                      placeholder="e.g. A / B / CSE-1"
+                      value={section}
+                      onChange={(e) => setSection(e.target.value)}
+                      disabled={submitting}
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">Student Phone</label>
+                    <input 
+                      type="tel"
+                      className="form-input font-sans"
+                      placeholder="10-digit number"
+                      value={studentPhone}
+                      onChange={(e) => setStudentPhone(e.target.value)}
+                      disabled={submitting}
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">Parent / Guardian Phone</label>
+                    <input 
+                      type="tel"
+                      className="form-input font-sans"
+                      placeholder="10-digit number"
+                      value={parentPhone}
+                      onChange={(e) => setParentPhone(e.target.value)}
+                      disabled={submitting}
                     />
                   </div>
                 </div>

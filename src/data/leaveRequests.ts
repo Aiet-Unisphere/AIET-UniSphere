@@ -17,7 +17,9 @@ export interface LeaveRequest {
   submittedAt: string;
   reviewedBy?: string;
   reviewerName?: string;
+  reviewedAt?: string | null;
   remark?: string;
+  approvalRemarks?: string | null;
   supportingDocument?: string;
   supportingDocPath?: string;
   supportingDocName?: string;
@@ -26,6 +28,15 @@ export interface LeaveRequest {
   semester?: string | number | null;
   cgpa?: string | number | null;
   attendancePercent?: string | number | null;
+  // Snapshot properties
+  studentNameSnapshot?: string;
+  studentUsnSnapshot?: string;
+  branchSnapshot?: string;
+  sectionSnapshot?: string;
+  semesterSnapshot?: number | string | null;
+  academicYearSnapshot?: string | null;
+  studentPhoneSnapshot?: string | null;
+  parentPhoneSnapshot?: string | null;
 }
 
 export const mockLeaveRequests: LeaveRequest[] = [];

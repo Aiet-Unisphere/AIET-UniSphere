@@ -44,12 +44,12 @@ const mapLeaveRow = (l: any): LeaveRequest => {
     id: l.reference_id || l.id,
     dbId: l.id,
     requesterId: l.student_id,
-    requesterName: studentName,
-    requesterUsnOrEmpId: studentUsn,
+    requesterName: l.student_name_snapshot || studentName,
+    requesterUsnOrEmpId: l.student_usn_snapshot || studentUsn,
     requesterRole: 'STUDENT',
     requesterEmail: studentEmail,
     departmentId: l.department_id,
-    departmentName: deptName,
+    departmentName: l.branch_snapshot || deptName,
     leaveType: l.leave_type || 'General',
     startDate: l.start_date,
     endDate: l.end_date,
@@ -59,14 +59,24 @@ const mapLeaveRow = (l: any): LeaveRequest => {
     submittedAt: new Date(l.created_at).toLocaleDateString(),
     reviewedBy: l.reviewed_by ? (reviewerName || 'HOD') : undefined,
     reviewerName: reviewerName || undefined,
+    reviewedAt: l.reviewed_at ? new Date(l.reviewed_at).toLocaleDateString() : undefined,
     remark: l.rejection_reason || undefined,
+    approvalRemarks: l.approval_remarks || undefined,
     supportingDocument: docName,
     supportingDocName: docName,
     supportingDocPath: docPath,
     supportingDocSize: docSize ? Number(docSize) : undefined,
     supportingDocType: docType,
-    semester: l.student_academic?.semester ?? null,
-    cgpa: l.student_academic?.cgpa ?? null
+    semester: l.semester_snapshot ?? l.student_academic?.semester ?? null,
+    cgpa: l.student_academic?.cgpa ?? null,
+    studentNameSnapshot: l.student_name_snapshot || undefined,
+    studentUsnSnapshot: l.student_usn_snapshot || undefined,
+    branchSnapshot: l.branch_snapshot || undefined,
+    sectionSnapshot: l.section_snapshot || undefined,
+    semesterSnapshot: l.semester_snapshot ?? undefined,
+    academicYearSnapshot: l.academic_year_snapshot || undefined,
+    studentPhoneSnapshot: l.student_phone_snapshot || undefined,
+    parentPhoneSnapshot: l.parent_phone_snapshot || undefined
   };
 };
 
@@ -304,6 +314,36 @@ export const getLeaveRequestById = async (idOrUuid: string): Promise<LeaveReques
 };
 
 // ============================================================
+// Student Profile Defaults for Leave Application
+// ============================================================
+export const getStudentLeaveProfileDefaults = async () => {
+  const { data: { user } } = await (supabase as any).auth.getUser();
+  if (!user) return null;
+
+  const { data: profile } = await (supabase as any)
+    .from('profiles')
+    .select('id, full_name, usn_or_employee_id, email, department:departments(name)')
+    .eq('id', user.id)
+    .maybeSingle();
+
+  const { data: studentAcademic } = await (supabase as any)
+    .from('student_profiles')
+    .select('semester, academic_year, phone, parent_phone')
+    .eq('profile_id', user.id)
+    .maybeSingle();
+
+  return {
+    fullName: profile?.full_name || '',
+    usn: profile?.usn_or_employee_id || '',
+    departmentName: profile?.department?.name || '',
+    semester: studentAcademic?.semester || '',
+    academicYear: studentAcademic?.academic_year || '2024-2025',
+    studentPhone: studentAcademic?.phone || '',
+    parentPhone: studentAcademic?.parent_phone || ''
+  };
+};
+
+// ============================================================
 // Submit a new leave request
 // ============================================================
 export const submitLeaveRequest = async (payload: {
@@ -311,6 +351,9 @@ export const submitLeaveRequest = async (payload: {
   reason: string;
   startDate: string;
   endDate: string;
+  section?: string;
+  studentPhone?: string;
+  parentPhone?: string;
   file?: File;
 }): Promise<LeaveRequest> => {
   const { data: { user } } = await (supabase as any).auth.getUser();
@@ -322,10 +365,10 @@ export const submitLeaveRequest = async (payload: {
   if (!payload.startDate || !payload.endDate) throw new Error("Start date and end date are required.");
   if (new Date(payload.endDate) < new Date(payload.startDate)) throw new Error("End date cannot be before start date.");
 
-  // Resolve student profile
+  // Resolve student profile and department
   const { data: studentProfile, error: profErr } = await (supabase as any)
     .from('profiles')
-    .select('id, full_name, department_id')
+    .select('id, full_name, usn_or_employee_id, department_id, department:departments(name)')
     .eq('id', user.id)
     .single();
 
@@ -333,6 +376,13 @@ export const submitLeaveRequest = async (payload: {
     console.error('[leaveService] Student profile/department error:', profErr);
     throw new Error("No department is assigned to your profile. Please contact administration.");
   }
+
+  // Fetch academic profile for immutable snapshots
+  const { data: studentAcademic } = await (supabase as any)
+    .from('student_profiles')
+    .select('semester, academic_year, phone, parent_phone')
+    .eq('profile_id', user.id)
+    .maybeSingle();
 
   // Find HOD for the department
   let hodProfile: { id: string; full_name: string } | null = null;
@@ -391,7 +441,7 @@ export const submitLeaveRequest = async (payload: {
     });
   }
 
-  // INSERT leave request
+  // INSERT leave request with full snapshot attributes
   const { data, error } = await (supabase as any)
     .from('leave_requests')
     .insert({
@@ -407,7 +457,15 @@ export const submitLeaveRequest = async (payload: {
       supporting_doc_path: storagePath,
       supporting_doc_name: fileName,
       supporting_doc_size: fileSize,
-      supporting_doc_type: mimeType
+      supporting_doc_type: mimeType,
+      student_name_snapshot: studentProfile.full_name || 'Student',
+      student_usn_snapshot: studentProfile.usn_or_employee_id || 'N/A',
+      branch_snapshot: studentProfile.department?.name || 'Department',
+      section_snapshot: payload.section?.trim() || null,
+      semester_snapshot: studentAcademic?.semester || null,
+      academic_year_snapshot: studentAcademic?.academic_year || null,
+      student_phone_snapshot: payload.studentPhone?.trim() || studentAcademic?.phone || null,
+      parent_phone_snapshot: payload.parentPhone?.trim() || studentAcademic?.parent_phone || null
     })
     .select('*')
     .single();
@@ -467,7 +525,7 @@ export const submitLeaveRequest = async (payload: {
 // ============================================================
 // Approve leave request
 // ============================================================
-export const approveLeaveRequest = async (referenceOrId: string): Promise<boolean> => {
+export const approveLeaveRequest = async (referenceOrId: string, remarks?: string): Promise<boolean> => {
   const { data: { user } } = await (supabase as any).auth.getUser();
   if (!user) throw new Error("Authenticated session required.");
 
@@ -501,12 +559,14 @@ export const approveLeaveRequest = async (referenceOrId: string): Promise<boolea
     throw new Error(`This leave request is already ${leaveReq.status.toLowerCase()} and cannot be modified.`);
   }
 
+  const cleanRemarks = remarks?.trim() || null;
   let updated = false;
   try {
     const { error: rpcErr } = await (supabase.rpc as any)('review_leave_request', {
       p_leave_id: leaveReq.id,
       p_status: 'APPROVED',
-      p_rejection_reason: null
+      p_rejection_reason: null,
+      p_approval_remarks: cleanRemarks
     });
     if (!rpcErr) updated = true;
     else console.warn('[leaveService] RPC approve failed:', rpcErr.message);
@@ -520,7 +580,8 @@ export const approveLeaveRequest = async (referenceOrId: string): Promise<boolea
       .update({
         status: 'APPROVED',
         reviewed_by: user.id,
-        reviewed_at: new Date().toISOString()
+        reviewed_at: new Date().toISOString(),
+        approval_remarks: cleanRemarks
       })
       .eq('id', leaveReq.id);
 
@@ -645,3 +706,6 @@ export const downloadLeaveDocument = async (storagePath: string, fileName?: stri
 export const getLeaveDocumentUrl = async (storagePath: string): Promise<string | null> => {
   return await getSignedUrl(STORAGE_BUCKETS.STUDENT_DOCUMENTS, storagePath, 3600);
 };
+
+// Re-export PDF generation functions
+export { generateLeaveNotePdf, downloadApprovedLeaveNote, isLeaveApproved } from './leaveNotePdfService';

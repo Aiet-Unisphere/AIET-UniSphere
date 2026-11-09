@@ -19,7 +19,13 @@ import {
   Download
 } from 'lucide-react';
 import { HODAppShell } from '../components/HODAppShell';
-import { getLeaveRequestById, approveLeaveRequest, rejectLeaveRequest, downloadLeaveDocument } from '../../services/leaveService';
+import { 
+  getLeaveRequestById, 
+  approveLeaveRequest, 
+  rejectLeaveRequest, 
+  downloadLeaveDocument,
+  downloadApprovedLeaveNote 
+} from '../../services/leaveService';
 import type { LeaveRequest } from '../../data/leaveRequests';
 
 export const HODLeaveDetail: React.FC = () => {
@@ -33,6 +39,7 @@ export const HODLeaveDetail: React.FC = () => {
   // Modals state
   const [showApproveModal, setShowApproveModal] = useState(false);
   const [showRejectModal, setShowRejectModal] = useState(false);
+  const [approvalRemarksInput, setApprovalRemarksInput] = useState('');
   const [rejectionReasonInput, setRejectionReasonInput] = useState('');
   const [rejectionError, setRejectionError] = useState<string | null>(null);
 
@@ -64,15 +71,25 @@ export const HODLeaveDetail: React.FC = () => {
     setActionLoading(true);
     setErrorMessage(null);
     try {
-      await approveLeaveRequest(leave.dbId || id);
+      await approveLeaveRequest(leave.dbId || id, approvalRemarksInput.trim() || undefined);
       setActionSuccess('Leave Request Approved successfully. Database updated.');
       setShowApproveModal(false);
+      setApprovalRemarksInput('');
       await loadLeaveDetail();
     } catch (err: any) {
       console.error("Approval error:", err);
       setErrorMessage(err.message || "Failed to approve leave request.");
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  const handleDownloadLeaveNote = (item: LeaveRequest) => {
+    try {
+      downloadApprovedLeaveNote(item);
+    } catch (err: any) {
+      console.error("Leave note download error:", err);
+      alert(err.message || "Failed to generate approved leave note PDF.");
     }
   };
 
@@ -424,14 +441,44 @@ export const HODLeaveDetail: React.FC = () => {
           </div>
         )}
 
-        {/* If Approved, display Approver Info */}
-        {isApproved && leave.reviewedBy && (
-          <div style={{ marginTop: '1.25rem', padding: '1rem 1.25rem', backgroundColor: '#F0FDF4', border: '1px solid #86EFAC', borderRadius: 'var(--border-radius)' }}>
-            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#15803D', textTransform: 'uppercase', display: 'block', marginBottom: '0.35rem' }}>
-              APPROVAL DETAILS
-            </span>
-            <div style={{ fontSize: '0.95rem', color: '#14532D', fontWeight: 600 }}>
-              Approved by: {leave.reviewedBy}
+        {/* If Approved, display Approver Info and Download Action */}
+        {isApproved && (
+          <div style={{ marginTop: '1.25rem', padding: '1.25rem', backgroundColor: '#F0FDF4', border: '1px solid #86EFAC', borderRadius: 'var(--border-radius)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+              <div>
+                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#15803D', textTransform: 'uppercase', display: 'block', marginBottom: '0.35rem' }}>
+                  OFFICIAL APPROVAL DETAILS
+                </span>
+                <div style={{ fontSize: '0.95rem', color: '#14532D', fontWeight: 600 }}>
+                  Approved by: {leave.reviewedBy || 'HOD'}
+                </div>
+                {leave.approvalRemarks && (
+                  <div style={{ fontSize: '0.85rem', color: '#166534', marginTop: '0.35rem', fontStyle: 'italic' }}>
+                    Remarks: "{leave.approvalRemarks}"
+                  </div>
+                )}
+              </div>
+              <button
+                onClick={() => handleDownloadLeaveNote(leave)}
+                className="btn font-sans"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.45rem',
+                  backgroundColor: '#16A34A',
+                  color: '#FFFFFF',
+                  border: '1px solid #16A34A',
+                  fontWeight: 700,
+                  padding: '0.55rem 1.15rem',
+                  borderRadius: 'var(--border-radius)',
+                  cursor: 'pointer',
+                  fontSize: '0.875rem'
+                }}
+                title="Download official single-page approved leave note PDF"
+              >
+                <Download size={16} />
+                <span>Download Approved Leave Note PDF</span>
+              </button>
             </div>
           </div>
         )}
@@ -515,8 +562,28 @@ export const HODLeaveDetail: React.FC = () => {
               <div><strong>Dates:</strong> {leave.startDate} → {leave.endDate} ({leave.days} Days)</div>
             </div>
 
+            <div style={{ marginBottom: '1.25rem' }}>
+              <label style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--brand-black)', display: 'block', marginBottom: '0.4rem' }}>
+                Approval Remarks (Optional — printed on student's Leave Note)
+              </label>
+              <textarea 
+                className="form-input font-sans"
+                style={{ 
+                  width: '100%', 
+                  height: '75px', 
+                  padding: '0.65rem', 
+                  fontSize: '0.9rem', 
+                  resize: 'vertical'
+                }}
+                placeholder="e.g. Approved for academic duty / Sanctioned for official record..."
+                value={approvalRemarksInput}
+                onChange={(e) => setApprovalRemarksInput(e.target.value)}
+                disabled={actionLoading}
+              />
+            </div>
+
             <p style={{ fontSize: '0.875rem', color: 'var(--brand-dark-grey)', marginBottom: '1.5rem' }}>
-              Are you sure you want to approve this leave request? This action will update the student's leave record in the database.
+              Are you sure you want to approve this leave request? This action will record your endorsement and remarks in the database.
             </p>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
