@@ -259,7 +259,7 @@ export const HODAnnouncementPage: React.FC = () => {
                       type="button"
                       onClick={async () => {
                         try {
-                          await downloadAnnouncementAttachment(anc.attachmentPath!, anc.attachmentName || 'Announcement_Attachment.pdf');
+                          await downloadAnnouncementAttachment(anc.attachmentPath!, anc.attachmentName || 'Announcement_Attachment.pdf', anc.id);
                         } catch (err: any) {
                           alert('Failed to download: ' + (err.message || 'Unknown error'));
                         }

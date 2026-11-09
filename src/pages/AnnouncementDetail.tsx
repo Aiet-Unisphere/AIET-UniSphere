@@ -98,7 +98,8 @@ export const AnnouncementDetail: React.FC = () => {
     try {
       await downloadAnnouncementAttachment(
         announcement.attachmentPath,
-        announcement.attachmentName || 'Announcement_Document.pdf'
+        announcement.attachmentName || 'Announcement_Document.pdf',
+        announcement.id
       );
     } catch (err: any) {
       console.error("Error downloading attachment:", err);

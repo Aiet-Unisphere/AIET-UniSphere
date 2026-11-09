@@ -277,13 +277,23 @@ export const getReadAnnouncements = async (userId: string): Promise<string[]> =>
 };
 
 export const markAnnouncementAsRead = async (announcementId: string, userId: string): Promise<boolean> => {
+  if (!announcementId || typeof announcementId !== 'string' || !userId || typeof userId !== 'string') {
+    return false;
+  }
+
+  const cleanAnnounceId = announcementId.trim();
+  const cleanUserId = userId.trim();
+  if (!cleanAnnounceId || !cleanUserId) {
+    return false;
+  }
+
   const { error } = await (supabase as any)
     .from('announcement_reads')
     .upsert({
-      announcement_id: announcementId,
-      user_id: userId,
+      announcement_id: cleanAnnounceId,
+      user_id: cleanUserId,
       read_at: new Date().toISOString()
-    }, { onConflict: 'announcement_id,user_id' });
+    }, { onConflict: 'announcement_id,user_id', ignoreDuplicates: true });
 
   if (error) {
     console.error('Error marking announcement as read:', error);
@@ -294,8 +304,26 @@ export const markAnnouncementAsRead = async (announcementId: string, userId: str
 
 /**
  * Helper to download an announcement attachment from Supabase Storage.
+ * Performs application-level preflight verification of announcement accessibility
+ * before downloading the file binary.
  */
-export const downloadAnnouncementAttachment = async (storagePath: string, fileName?: string): Promise<void> => {
+export const downloadAnnouncementAttachment = async (
+  storagePath: string, 
+  fileName?: string,
+  announcementId?: string
+): Promise<void> => {
+  if (!storagePath) {
+    throw new Error('Attachment path is required.');
+  }
+
+  // Preflight check: If announcementId is supplied, verify parent announcement visibility
+  if (announcementId) {
+    const parentAnnouncement = await getAnnouncementById(announcementId);
+    if (!parentAnnouncement || !parentAnnouncement.attachmentPath || parentAnnouncement.attachmentPath !== storagePath) {
+      throw new Error('You are not authorized to download this attachment or the announcement is no longer available.');
+    }
+  }
+
   await downloadStorageFile(STORAGE_BUCKETS.ANNOUNCEMENTS, storagePath, fileName);
 };
 

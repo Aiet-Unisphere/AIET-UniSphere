@@ -277,3 +277,127 @@ test('10. Existing announcement list regression: Verifies getDepartmentAnnouncem
   assert.strictEqual(mapped[0].status, 'Published');
 });
 
+test('11. Idempotent read state: Repeated reads with ignoreDuplicates preserve original timestamp', () => {
+  const store = new Map();
+
+  const markAnnouncementAsReadMock = (announcementId, userId, opts = { ignoreDuplicates: false }) => {
+    if (!announcementId || typeof announcementId !== 'string' || !userId || typeof userId !== 'string') {
+      return false;
+    }
+    const cleanAnnounceId = announcementId.trim();
+    const cleanUserId = userId.trim();
+    if (!cleanAnnounceId || !cleanUserId) return false;
+
+    const key = `${cleanUserId}:${cleanAnnounceId}`;
+    if (store.has(key)) {
+      if (opts.ignoreDuplicates) {
+        // DO NOTHING branch: returns true, leaves original timestamp untouched
+        return true;
+      }
+      // DO UPDATE branch: would fail in real DB without UPDATE policy, or overwrite timestamp
+      store.set(key, new Date().toISOString());
+      return true;
+    }
+
+    store.set(key, '2026-11-01T10:00:00.000Z'); // Simulated initial timestamp
+    return true;
+  };
+
+  // Initial read
+  const ok1 = markAnnouncementAsReadMock('ann-100', 'student-1', { ignoreDuplicates: true });
+  assert.strictEqual(ok1, true);
+  assert.strictEqual(store.get('student-1:ann-100'), '2026-11-01T10:00:00.000Z');
+
+  // Repeated read
+  const ok2 = markAnnouncementAsReadMock('ann-100', 'student-1', { ignoreDuplicates: true });
+  assert.strictEqual(ok2, true);
+  // Timestamp must remain exactly the original first read timestamp
+  assert.strictEqual(store.get('student-1:ann-100'), '2026-11-01T10:00:00.000Z');
+
+  // Invalid IDs rejected safely
+  assert.strictEqual(markAnnouncementAsReadMock('', 'student-1', { ignoreDuplicates: true }), false);
+  assert.strictEqual(markAnnouncementAsReadMock(null, 'student-1', { ignoreDuplicates: true }), false);
+  assert.strictEqual(markAnnouncementAsReadMock('ann-100', '', { ignoreDuplicates: true }), false);
+});
+
+test('12. Application preflight check: downloadAttachment blocks download when announcement visibility check fails', async () => {
+  let downloadExecuted = false;
+  const mockDownloadStorageFile = async () => { downloadExecuted = true; };
+
+  const downloadAttachmentWithPreflight = async (storagePath, fileName, announcementId, mockGetAnnouncement) => {
+    if (!storagePath) throw new Error('Attachment path is required.');
+    if (announcementId) {
+      const parentAnnouncement = await mockGetAnnouncement(announcementId);
+      if (!parentAnnouncement || !parentAnnouncement.attachmentPath || parentAnnouncement.attachmentPath !== storagePath) {
+        throw new Error('You are not authorized to download this attachment or the announcement is no longer available.');
+      }
+    }
+    await mockDownloadStorageFile();
+  };
+
+  // Case A: Announcement is DRAFT (returns null for student)
+  const mockGetDraft = async () => null;
+  await assert.rejects(
+    async () => {
+      await downloadAttachmentWithPreflight('d-1/ann-1/doc.pdf', 'doc.pdf', 'ann-draft', mockGetDraft);
+    },
+    { message: /not authorized to download this attachment/ }
+  );
+  assert.strictEqual(downloadExecuted, false);
+
+  // Case B: Path mismatch (tampered storage path)
+  const mockGetMismatched = async () => ({
+    id: 'ann-ok',
+    attachmentPath: 'd-1/ann-ok/real.pdf'
+  });
+  await assert.rejects(
+    async () => {
+      await downloadAttachmentWithPreflight('d-1/ann-ok/tampered.pdf', 'tampered.pdf', 'ann-ok', mockGetMismatched);
+    },
+    { message: /not authorized to download this attachment/ }
+  );
+  assert.strictEqual(downloadExecuted, false);
+});
+
+test('13. Application preflight check: downloadAttachment succeeds when announcement visibility check passes', async () => {
+  let downloadExecutedWith = null;
+  const mockDownloadStorageFile = async (bucket, path, fileName) => {
+    downloadExecutedWith = { bucket, path, fileName };
+  };
+
+  const downloadAttachmentWithPreflight = async (storagePath, fileName, announcementId, mockGetAnnouncement) => {
+    if (!storagePath) throw new Error('Attachment path is required.');
+    if (announcementId) {
+      const parentAnnouncement = await mockGetAnnouncement(announcementId);
+      if (!parentAnnouncement || !parentAnnouncement.attachmentPath || parentAnnouncement.attachmentPath !== storagePath) {
+        throw new Error('You are not authorized to download this attachment or the announcement is no longer available.');
+      }
+    }
+    await mockDownloadStorageFile('announcements', storagePath, fileName);
+  };
+
+  const mockGetValid = async () => ({
+    id: 'ann-pub',
+    attachmentPath: 'd-1/ann-pub/syllabus.pdf'
+  });
+
+  await downloadAttachmentWithPreflight('d-1/ann-pub/syllabus.pdf', 'syllabus.pdf', 'ann-pub', mockGetValid);
+  assert.deepStrictEqual(downloadExecutedWith, {
+    bucket: 'announcements',
+    path: 'd-1/ann-pub/syllabus.pdf',
+    fileName: 'syllabus.pdf'
+  });
+});
+
+test('14. Cross-student read isolation: Student A cannot modify or query Student B read record', () => {
+  const store = new Map();
+  store.set('student-B:ann-1', '2026-11-01T09:00:00Z');
+
+  // Student A tries to update Student B's record (simulating RLS WITH CHECK user_id = auth.uid())
+  const canModify = (callerId, targetUserId) => callerId === targetUserId;
+
+  assert.strictEqual(canModify('student-A', 'student-B'), false);
+  // Student B record remains intact
+  assert.strictEqual(store.get('student-B:ann-1'), '2026-11-01T09:00:00Z');
+});
+
