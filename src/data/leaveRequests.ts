@@ -37,6 +37,7 @@ export interface LeaveRequest {
   academicYearSnapshot?: string | null;
   studentPhoneSnapshot?: string | null;
   parentPhoneSnapshot?: string | null;
+  snapshotProvenance?: 'SUBMISSION' | 'RETROACTIVE_BACKFILL' | 'UNVERIFIED';
 }
 
 export const mockLeaveRequests: LeaveRequest[] = [];

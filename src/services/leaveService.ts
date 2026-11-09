@@ -76,7 +76,8 @@ const mapLeaveRow = (l: any): LeaveRequest => {
     semesterSnapshot: l.semester_snapshot ?? undefined,
     academicYearSnapshot: l.academic_year_snapshot || undefined,
     studentPhoneSnapshot: l.student_phone_snapshot || undefined,
-    parentPhoneSnapshot: l.parent_phone_snapshot || undefined
+    parentPhoneSnapshot: l.parent_phone_snapshot || undefined,
+    snapshotProvenance: l.snapshot_provenance || undefined
   };
 };
 
@@ -465,7 +466,8 @@ export const submitLeaveRequest = async (payload: {
       semester_snapshot: studentAcademic?.semester || null,
       academic_year_snapshot: studentAcademic?.academic_year || null,
       student_phone_snapshot: payload.studentPhone?.trim() || studentAcademic?.phone || null,
-      parent_phone_snapshot: payload.parentPhone?.trim() || studentAcademic?.parent_phone || null
+      parent_phone_snapshot: payload.parentPhone?.trim() || studentAcademic?.parent_phone || null,
+      snapshot_provenance: 'SUBMISSION'
     })
     .select('*')
     .single();

@@ -84,14 +84,14 @@ export const generateLeaveNotePdf = (leave: LeaveRequest): jsPDF => {
   doc.setFontSize(7.5);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(71, 85, 105); // Slate-600
-  doc.text('Recognized by Govt. of Karnataka, Affiliated to VTU Belagavi & Approved by AICTE, New Delhi', 105, currentY, { align: 'center' });
+  doc.text('Affiliated to VTU Belagavi & Approved by AICTE, New Delhi', 105, currentY, { align: 'center' });
 
   currentY += 3.8;
-  doc.text('Shobhavana Campus, Mijar, Moodbidri, D.K. - 574225, Karnataka, India', 105, currentY, { align: 'center' });
+  doc.text('Shobhavana Campus, Mijar, Moodbidri, D.K. - 574225', 105, currentY, { align: 'center' });
 
   currentY += 3.6;
   doc.setFontSize(7);
-  doc.text('Phone: 08258-262725 / 262724 | Email: principalaiet08@gmail.com | Website: www.aiet.org.in', 105, currentY, { align: 'center' });
+  doc.text('Phone: 08258-262725, Fax: 08258-262726', 105, currentY, { align: 'center' });
 
   // Divider line
   currentY += 4;
@@ -331,10 +331,10 @@ export const generateLeaveNotePdf = (leave: LeaveRequest): jsPDF => {
   doc.text('DEPARTMENT HEAD (HOD) APPROVAL & ENDORSEMENT', gridStartX + 3, currentY + 5);
 
   doc.setFillColor(220, 252, 231);
-  doc.roundedRect(gridStartX + gridWidth - 48, currentY + 1.5, 45, 5, 0.8, 0.8, 'F');
-  doc.setFontSize(7);
+  doc.roundedRect(gridStartX + gridWidth - 62, currentY + 1.5, 59, 5, 0.8, 0.8, 'F');
+  doc.setFontSize(6.5);
   doc.setTextColor(22, 101, 52);
-  doc.text('STATUS: APPROVED [OFFICIAL]', gridStartX + gridWidth - 25.5, currentY + 5, { align: 'center' });
+  doc.text('HOD APPROVED — DEMONSTRATION COPY', gridStartX + gridWidth - 32.5, currentY + 5, { align: 'center' });
 
   // Approval details text on left
   const hodTextStartY = currentY + 10;
@@ -362,11 +362,11 @@ export const generateLeaveNotePdf = (leave: LeaveRequest): jsPDF => {
   const remarkLines = doc.splitTextToSize(cleanRemarks, 78);
   doc.text(remarkLines.slice(0, 2), gridStartX + 33, hodTextStartY + 11);
 
-  // Digital verification note
-  doc.setFont('helvetica', 'normal');
+  // Digital verification note and prominent fictional disclaimer
+  doc.setFont('helvetica', 'bold');
   doc.setFontSize(6.5);
-  doc.setTextColor(100, 116, 139);
-  doc.text('Verified through AIET-UniSphere Academic Governance Portal.', gridStartX + 3, currentY + hodSectionH - 2.5);
+  doc.setTextColor(185, 28, 28);
+  doc.text('SAMPLE / DEMO — NOT AN OFFICIAL SIGNATURE OR SEAL', gridStartX + 3, currentY + hodSectionH - 2.5);
 
   // --- FICTIONAL SAMPLE HOD SIGNATURE GRAPHIC ---
   const sigX = gridStartX + gridWidth - 85;
@@ -485,9 +485,13 @@ export const generateLeaveNotePdf = (leave: LeaveRequest): jsPDF => {
   doc.setFontSize(6);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(148, 163, 184);
-  const nowStr = new Date().toLocaleString();
+  const provenanceLabel = leave.snapshotProvenance === 'RETROACTIVE_BACKFILL'
+    ? 'Provenance: Retroactive Backfill (Current Profile)'
+    : leave.snapshotProvenance === 'UNVERIFIED'
+    ? 'Provenance: Unverified Historical Record'
+    : 'Provenance: Verified Submission Snapshot';
   doc.text(
-    `AIET-UniSphere Document Id: ${leave.id || 'N/A'} | Generated on: ${nowStr} | Single Page Official Record`,
+    `AIET-UniSphere Document Id: ${leave.id || 'N/A'} | ${provenanceLabel} | Single Page Demonstration Copy`,
     marginX + 4,
     currentY
   );

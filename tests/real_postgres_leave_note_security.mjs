@@ -53,13 +53,47 @@ async function runSqlAsUser(userId, sql) {
   return await runSql(fullSql);
 }
 
+async function runSqlAsAnon(sql) {
+  const fullSql = `
+    BEGIN;
+    SET ROLE anon;
+    SET LOCAL "request.jwt.claim.role" = 'anon';
+    SET LOCAL "request.jwt.claims" = '{"role": "anon"}';
+    ${sql}
+    COMMIT;
+  `;
+  return await runSql(fullSql);
+}
+
 async function run() {
   console.log('=== AIET-UniSphere MISSION 09.2: Real PostgreSQL 16 Leave Note Security ===\n');
 
   // 0. Connection probe
   const probe = await runSql('SELECT version();');
   assert.equal(probe.success, true, `PostgreSQL connection failed: ${probe.stderr}`);
-  console.log('✔ [0/8] Connection verified to PostgreSQL 16 on port 54333.');
+  console.log('✔ [0/14] Connection verified to PostgreSQL 16 on port 54333.');
+
+  // Apply migrations 00041 and 00042 to ensure schema and privileges are active
+  await execFileAsync(PSQL_PATH, [
+    '-h', DB_HOST,
+    '-p', DB_PORT,
+    '-U', DB_USER,
+    '-d', DB_NAME,
+    '-q',
+    '-v', 'ON_ERROR_STOP=1',
+    '-f', 'supabase/migrations/00041_leave_note_snapshots_and_remarks.sql'
+  ], { encoding: 'utf8' });
+
+  await execFileAsync(PSQL_PATH, [
+    '-h', DB_HOST,
+    '-p', DB_PORT,
+    '-U', DB_USER,
+    '-d', DB_NAME,
+    '-q',
+    '-v', 'ON_ERROR_STOP=1',
+    '-f', 'supabase/migrations/00042_leave_note_security_and_provenance.sql'
+  ], { encoding: 'utf8' });
+  console.log('✔ Migrations 00041 and 00042 applied cleanly.');
 
   // 1. Schema check: Verify all 9 snapshot & remarks columns exist
   const colCheck = await runSql(`
@@ -261,8 +295,99 @@ async function run() {
   );
   console.log('✔ [8/8] Mandatory rejection reason requirement verified.');
 
+  // 9. Privilege Hardening: Anonymous (anon) caller cannot execute review_leave_request
+  const anonReview = await runSqlAsAnon(`
+    SELECT public.review_leave_request('${leaveId1}'::uuid, 'APPROVED', NULL, 'Anon Exploit');
+  `);
+  assert.equal(anonReview.success, false, 'Anon user must not be permitted to execute review_leave_request');
+  assert.ok(
+    anonReview.stderr.includes('permission denied') || anonReview.stderr.includes('ACL'),
+    `Expected permission denied for anon role, got: ${anonReview.stderr}`
+  );
+  console.log('✔ [9/14] Anonymous execution privilege strictly revoked at PostgreSQL catalog level.');
+
+  // 10. Student INSERT Hardening: Student cannot forge status = 'APPROVED' via direct REST INSERT
+  const forgeStatusId = 'c0000000-0000-0000-0000-000000000091';
+  await runSql(`DELETE FROM public.leave_requests WHERE id = '${forgeStatusId}';`);
+  const forgeStatusAttempt = await runSqlAsUser(student1Id, `
+    INSERT INTO public.leave_requests (
+      id, reference_id, student_id, department_id, leave_type, reason, start_date, end_date, status
+    ) VALUES (
+      '${forgeStatusId}', 'LV-FORGE-1', '${student1Id}', '${deptCseId}', 'Personal', 'Trip', '2026-11-20', '2026-11-21', 'APPROVED'
+    );
+  `);
+  assert.equal(forgeStatusAttempt.success, false, 'Student must not be able to insert leave with status = APPROVED');
+  assert.ok(
+    forgeStatusAttempt.stderr.includes('violates row-level security policy'),
+    `Expected RLS policy violation for forged status, got: ${forgeStatusAttempt.stderr}`
+  );
+  console.log('✔ [10/14] Direct REST INSERT forging status = APPROVED blocked by RLS.');
+
+  // 11. Student INSERT Hardening: Student cannot supply reviewed_by or approval_remarks
+  const forgeReviewerId = 'c0000000-0000-0000-0000-000000000092';
+  await runSql(`DELETE FROM public.leave_requests WHERE id = '${forgeReviewerId}';`);
+  const forgeReviewerAttempt = await runSqlAsUser(student1Id, `
+    INSERT INTO public.leave_requests (
+      id, reference_id, student_id, department_id, leave_type, reason, start_date, end_date, status, reviewed_by, approval_remarks
+    ) VALUES (
+      '${forgeReviewerId}', 'LV-FORGE-2', '${student1Id}', '${deptCseId}', 'Personal', 'Trip', '2026-11-20', '2026-11-21', 'PENDING', '${hodCseId}', 'Self-Approved'
+    );
+  `);
+  assert.equal(forgeReviewerAttempt.success, false, 'Student must not be able to set reviewed_by or approval_remarks on INSERT');
+  assert.ok(
+    forgeReviewerAttempt.stderr.includes('violates row-level security policy'),
+    `Expected RLS policy violation for forged review fields, got: ${forgeReviewerAttempt.stderr}`
+  );
+  console.log('✔ [11/14] Direct REST INSERT forging reviewed_by / approval_remarks blocked by RLS.');
+
+  // 12. Student INSERT Hardening: Student cannot forge snapshot_provenance = 'RETROACTIVE_BACKFILL'
+  const forgeProvId = 'c0000000-0000-0000-0000-000000000093';
+  await runSql(`DELETE FROM public.leave_requests WHERE id = '${forgeProvId}';`);
+  const forgeProvAttempt = await runSqlAsUser(student1Id, `
+    INSERT INTO public.leave_requests (
+      id, reference_id, student_id, department_id, leave_type, reason, start_date, end_date, status, snapshot_provenance
+    ) VALUES (
+      '${forgeProvId}', 'LV-FORGE-3', '${student1Id}', '${deptCseId}', 'Personal', 'Trip', '2026-11-20', '2026-11-21', 'PENDING', 'RETROACTIVE_BACKFILL'
+    );
+  `);
+  assert.equal(forgeProvAttempt.success, false, 'Student must not be able to set snapshot_provenance = RETROACTIVE_BACKFILL');
+  assert.ok(
+    forgeProvAttempt.stderr.includes('violates row-level security policy'),
+    `Expected RLS policy violation for forged snapshot provenance, got: ${forgeProvAttempt.stderr}`
+  );
+  console.log('✔ [12/14] Direct REST INSERT forging snapshot_provenance blocked by RLS.');
+
+  // 13. Legitimate Student INSERT: status = 'PENDING', snapshot_provenance = 'SUBMISSION'
+  const legitLeaveId = 'c0000000-0000-0000-0000-000000000094';
+  await runSql(`DELETE FROM public.leave_requests WHERE id = '${legitLeaveId}';`);
+  const legitInsert = await runSqlAsUser(student1Id, `
+    INSERT INTO public.leave_requests (
+      id, reference_id, student_id, department_id, leave_type, reason, start_date, end_date, status, snapshot_provenance
+    ) VALUES (
+      '${legitLeaveId}', 'LV-LEGIT-1', '${student1Id}', '${deptCseId}', 'Personal', 'Legitimate family function', '2026-11-20', '2026-11-21', 'PENDING', 'SUBMISSION'
+    );
+  `);
+  assert.equal(legitInsert.success, true, `Legitimate insert should succeed, got error: ${legitInsert.stderr}`);
+  console.log('✔ [13/14] Legitimate student leave submission via RLS succeeds with status = PENDING.');
+
+  // 14. snapshot_provenance CHECK constraint validation
+  const invalidProvId = 'c0000000-0000-0000-0000-000000000095';
+  const invalidProv = await runSql(`
+    INSERT INTO public.leave_requests (
+      id, reference_id, student_id, department_id, leave_type, reason, start_date, end_date, status, snapshot_provenance
+    ) VALUES (
+      '${invalidProvId}', 'LV-INVALID-PROV', '${student1Id}', '${deptCseId}', 'Personal', 'Test', '2026-11-20', '2026-11-21', 'PENDING', 'INVALID_PROVENANCE_VALUE'
+    );
+  `);
+  assert.equal(invalidProv.success, false, 'Invalid snapshot provenance value must violate check constraint');
+  assert.ok(
+    invalidProv.stderr.includes('check constraint') || invalidProv.stderr.includes('violates'),
+    `Expected check constraint violation, got: ${invalidProv.stderr}`
+  );
+  console.log('✔ [14/14] snapshot_provenance domain CHECK constraint verified.');
+
   console.log('\n================================================================');
-  console.log('All 8 Real PostgreSQL 16 Leave Note & RPC Security tests PASSED!');
+  console.log('All 14 Real PostgreSQL 16 Leave Note & RPC Security tests PASSED!');
   console.log('================================================================\n');
 }
 

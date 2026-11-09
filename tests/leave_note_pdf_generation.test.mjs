@@ -141,7 +141,14 @@ describe('Mission 09.2 — Approved Leave Note PDF Generation & Security Audit',
     const doc = generateLeaveNotePdf(baseApprovedLeave);
     const pdfOutput = doc.output();
 
-    assert.ok(pdfOutput.includes('STATUS: APPROVED [OFFICIAL]'), 'Approval status badge must be present');
+    assert.ok(
+      pdfOutput.includes('HOD APPROVED') && pdfOutput.includes('DEMONSTRATION COPY'),
+      'Approval status demonstration badge must be present'
+    );
+    assert.ok(
+      pdfOutput.includes('SAMPLE / DEMO') && pdfOutput.includes('NOT AN OFFICIAL SIGNATURE OR SEAL'),
+      'HOD endorsement area disclaimer must be present'
+    );
     assert.ok(pdfOutput.includes('Dr. Ramesh HOD'), 'Reviewer name must be present');
     assert.ok(
       pdfOutput.includes('Academic duty sanctioned') || pdfOutput.includes('VTU Hackathon'),
@@ -197,7 +204,11 @@ describe('Mission 09.2 — Approved Leave Note PDF Generation & Security Audit',
     const pdfOutput = doc.output();
 
     assert.ok(pdfOutput.includes("ALVA'S INSTITUTE OF ENGINEERING & TECHNOLOGY"), 'Header institution title must be present');
-    assert.ok(pdfOutput.includes('Shobhavana Campus, Mijar, Moodbidri'), 'Campus address must be present');
+    assert.ok(pdfOutput.includes('Shobhavana Campus, Mijar, Moodbidri, D.K. - 574225'), 'Campus address must be present');
+    assert.ok(pdfOutput.includes('Phone: 08258-262725'), 'Phone contact must be present');
+    assert.ok(pdfOutput.includes('Fax: 08258-262726'), 'Fax contact must be present');
+    assert.ok(!pdfOutput.includes('NAAC'), 'Unverified NAAC accreditation should not be in the physical header');
+    assert.ok(!pdfOutput.includes('info@aiet.org.in'), 'Modern email not present on physical form header');
     assert.ok(pdfOutput.includes('75% attendance'), 'VTU 75% attendance regulation must be present');
   });
 
@@ -250,6 +261,7 @@ describe('Mission 09.2 — Approved Leave Note PDF Generation & Security Audit',
     assert.ok(serviceContent.includes('studentPhone?: string'), 'submitLeaveRequest must accept studentPhone');
     assert.ok(serviceContent.includes('parentPhone?: string'), 'submitLeaveRequest must accept parentPhone');
     assert.ok(serviceContent.includes('student_name_snapshot:'), 'submitLeaveRequest must insert student_name_snapshot');
+    assert.ok(serviceContent.includes('snapshot_provenance: \'SUBMISSION\''), 'submitLeaveRequest must insert snapshot_provenance SUBMISSION');
     assert.ok(serviceContent.includes('p_approval_remarks: cleanRemarks'), 'approveLeaveRequest must pass p_approval_remarks');
   });
 
@@ -267,6 +279,78 @@ describe('Mission 09.2 — Approved Leave Note PDF Generation & Security Audit',
     assert.ok(hodContent.includes('downloadApprovedLeaveNote'), 'HODLeaveDetail must import downloadApprovedLeaveNote');
     assert.ok(hodContent.includes('Download Approved Leave Note PDF'), 'HODLeaveDetail must have Download button');
     assert.ok(hodContent.includes('Approval Remarks'), 'HODLeaveDetail modal must have Approval Remarks input');
+  });
+
+  it('15. Provenance tracking: PDF distinguishes SUBMISSION, RETROACTIVE_BACKFILL, and UNVERIFIED', () => {
+    // 1. Default / SUBMISSION
+    const submissionLeave = { ...baseApprovedLeave, snapshotProvenance: 'SUBMISSION' };
+    const docSubmission = generateLeaveNotePdf(submissionLeave);
+    assert.ok(
+      docSubmission.output().includes('Provenance: Verified Submission Snapshot'),
+      'SUBMISSION must render Verified Submission Snapshot'
+    );
+
+    // 2. RETROACTIVE_BACKFILL
+    const backfillLeave = { ...baseApprovedLeave, snapshotProvenance: 'RETROACTIVE_BACKFILL' };
+    const docBackfill = generateLeaveNotePdf(backfillLeave);
+    assert.ok(
+      docBackfill.output().includes('Provenance: Retroactive Backfill') && docBackfill.output().includes('Current Profile'),
+      'RETROACTIVE_BACKFILL must render Retroactive Backfill (Current Profile)'
+    );
+
+    // 3. UNVERIFIED
+    const unverifiedLeave = { ...baseApprovedLeave, snapshotProvenance: 'UNVERIFIED' };
+    const docUnverified = generateLeaveNotePdf(unverifiedLeave);
+    assert.ok(
+      docUnverified.output().includes('Provenance: Unverified Historical Record'),
+      'UNVERIFIED must render Unverified Historical Record'
+    );
+  });
+
+  it('16. Migration 00042 security hardening and provenance schema check', () => {
+    const migrationPath = path.join(rootDir, 'supabase', 'migrations', '00042_leave_note_security_and_provenance.sql');
+    assert.ok(fs.existsSync(migrationPath), 'Migration 00042 file must exist');
+
+    const sqlContent = fs.readFileSync(migrationPath, 'utf-8');
+
+    // Privilege hardening
+    assert.ok(
+      sqlContent.includes('REVOKE ALL ON FUNCTION public.review_leave_request(UUID, TEXT, TEXT, TEXT) FROM PUBLIC;') &&
+      sqlContent.includes('REVOKE ALL ON FUNCTION public.review_leave_request(UUID, TEXT, TEXT, TEXT) FROM anon;'),
+      'Must revoke EXECUTE from PUBLIC and anon'
+    );
+    assert.ok(
+      sqlContent.includes('GRANT EXECUTE ON FUNCTION public.review_leave_request(UUID, TEXT, TEXT, TEXT) TO authenticated;'),
+      'Must grant EXECUTE to authenticated'
+    );
+
+    // Column and check constraint
+    assert.ok(
+      sqlContent.includes('ADD COLUMN IF NOT EXISTS snapshot_provenance TEXT DEFAULT \'SUBMISSION\''),
+      'Must add snapshot_provenance column'
+    );
+    assert.ok(
+      sqlContent.includes('RETROACTIVE_BACKFILL') && sqlContent.includes('UNVERIFIED'),
+      'Must define snapshot_provenance check constraint values'
+    );
+
+    // Student INSERT policy hardening
+    assert.ok(
+      sqlContent.includes('status = \'PENDING\''),
+      'Must enforce status = PENDING on student insert'
+    );
+    assert.ok(
+      sqlContent.includes('reviewed_by IS NULL'),
+      'Must enforce reviewed_by IS NULL on student insert'
+    );
+    assert.ok(
+      sqlContent.includes('reviewed_at IS NULL'),
+      'Must enforce reviewed_at IS NULL on student insert'
+    );
+    assert.ok(
+      sqlContent.includes('approval_remarks IS NULL'),
+      'Must enforce approval_remarks IS NULL on student insert'
+    );
   });
 
 });
