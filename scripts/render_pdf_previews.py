@@ -1,6 +1,8 @@
 import os
 import fitz  # PyMuPDF
 from PIL import Image
+import numpy as np
+from rapidocr_onnxruntime import RapidOCR
 
 samples_dir = os.path.join(os.path.dirname(__file__), '..', 'docs', 'audit', 'samples')
 pdf_files = [
@@ -9,7 +11,9 @@ pdf_files = [
     'scenario_c_retroactive_backfill.pdf'
 ]
 
-print("Rendering PDF samples to PNG images...")
+ocr = RapidOCR()
+
+print("Rendering PDF samples to PNG images and verifying template fidelity...")
 for pdf_name in pdf_files:
     pdf_path = os.path.join(samples_dir, pdf_name)
     base_name = os.path.splitext(pdf_name)[0]
@@ -21,7 +25,7 @@ for pdf_name in pdf_files:
     
     page = doc[0]
     rect = page.rect
-    print(f"Page dimensions: {rect.width} x {rect.height} pt (A4 standard: 595.28 x 841.89 pt)")
+    print(f"Page dimensions: {rect.width} x {rect.height} pt (A4 standard: 595.0 x 842.0 pt)")
     
     # Render at 2x resolution (144 dpi) for crisp viewing
     mat = fitz.Matrix(2.0, 2.0)
@@ -38,26 +42,35 @@ for pdf_name in pdf_files:
     gray_img.save(gray_path)
     print(f"Saved Grayscale preview: {gray_path}")
     
-    # Text inspection
-    text = page.get_text()
-    print("Key text check:")
-    checks = [
-        "ALVA'S INSTITUTE OF ENGINEERING & TECHNOLOGY",
-        "Shobavana Campus, Mijar, Moodbidri, DK-574225",
-        "Phone: 08258-262725, Fax: 08258-262726",
-        "STUDENT LEAVE NOTE / ON-DUTY (OD) FORM",
+    # Overlaid vector text inspection
+    vector_text = page.get_text()
+    vector_checks = [
         "HOD APPROVED — DEMONSTRATION COPY",
         "SAMPLE / DEMO — NOT AN OFFICIAL SIGNATURE OR SEAL",
-        "SYSTEM-GENERATED SAMPLE - NOT VALID AS AN OFFICIAL SIGNED FORM",
+        "[SAMPLE / DEMO SIGNATURE]",
         "Page 1 of 1"
     ]
-    for c in checks:
-        found = c in text
+    print("Vector overlay checks:")
+    for c in vector_checks:
+        found = c in vector_text or c.replace('—', '-').replace('–', '-') in vector_text.replace('—', '-').replace('–', '-')
         print(f"  [{'PASS' if found else 'FAIL'}] '{c}'")
-        if not found:
-            # Check with normalized hyphens/dashes
-            alt_c = c.replace('—', '-').replace('–', '-')
-            if alt_c in text.replace('—', '-').replace('–', '-'):
-                print(f"     (Matched with dash normalization)")
 
-print("\nAll renderings completed successfully.")
+    # OCR inspection of bottom printed notes to verify authentic original physical notes
+    # Crop bottom notes region (y: 1300 to height)
+    bottom_crop = np.array(img.crop((0, 1300, img.width, img.height)))
+    ocr_result, _ = ocr(bottom_crop)
+    detected_lines = [item[1] for item in ocr_result]
+    ocr_text = ' '.join(detected_lines).lower()
+
+    print("Authentic physical notes OCR checks:")
+    physical_note_checks = [
+        ("Note 1 (Mess bill reduction)", "separate mess bill reduction"),
+        ("Note 2 (Prior permission)", "prior permission"),
+        ("Note 3 (HOD & AO/Principal signature)", "hod & ao/principal"),
+        ("Note 4 (Dates considered)", "only above mentioned dates")
+    ]
+    for label, needle in physical_note_checks:
+        found = needle in ocr_text
+        print(f"  [{'PASS' if found else 'FAIL'}] {label}")
+
+print("\nAll renderings and fidelity checks completed successfully.")

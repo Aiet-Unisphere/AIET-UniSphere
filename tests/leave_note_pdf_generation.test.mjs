@@ -199,7 +199,7 @@ describe('Mission 09.2 — Approved Leave Note PDF Generation & Security Audit',
     assert.ok(pdfOutput.includes('REMARKS & SIGNATURE OF PRINCIPAL'), 'Principal/AO box must be present');
   });
 
-  it('11. Institutional header and VTU attendance regulations are rendered', async () => {
+  it('11. Institutional header and original physical form printed notes are preserved', async () => {
     const doc = await generateLeaveNotePdf(baseApprovedLeave);
     const pdfOutput = doc.output();
 
@@ -209,7 +209,10 @@ describe('Mission 09.2 — Approved Leave Note PDF Generation & Security Audit',
     assert.ok(pdfOutput.includes('Fax: 08258-262726'), 'Fax contact must be present');
     assert.ok(!pdfOutput.includes('NAAC'), 'Unverified NAAC accreditation should not be in the physical header');
     assert.ok(!pdfOutput.includes('info@aiet.org.in'), 'Modern email not present on physical form header');
-    assert.ok(pdfOutput.includes('75% attendance'), 'VTU 75% attendance regulation must be present');
+    assert.ok(
+      pdfOutput.includes('mess bill reduction') || pdfOutput.includes('Separate mess bill'),
+      'Original physical form mess bill reduction notes must be present'
+    );
   });
 
   it('12. Migration 00041 schema integrity check', () => {

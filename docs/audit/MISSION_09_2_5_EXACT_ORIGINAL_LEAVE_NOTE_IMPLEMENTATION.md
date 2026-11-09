@@ -24,7 +24,7 @@ All synthetic form redesigns, separate certificate layouts, and content rearrang
 | **Overlaid Particulars on Dotted Lines** | Candidate Name, Branch, USN, Year/Sem, Section, Student Phone, Parent Phone, Leave Dates, Days, Reason, and Date positioned exactly on dotted baselines | **PASS** |
 | **Blank Physical Signatures** | Mentor, Class Coordinator, Principal/AO, and SWO/Warden sections left completely blank for physical signing | **PASS** |
 | **HOD Endorsement Bounding** | Fictional HOD signature, remarks, and demonstration badge confined strictly inside the existing HOD section (`y: 255 - 305 pt`) | **PASS** |
-| **Preserve Printed Bottom Notes** | All 4 original printed notes preserved in their original typography and position (VTU 75% attendance, 3-day submission, guardian signature, medical certificate) | **PASS** |
+| **Preserve Printed Bottom Notes** | All 4 original printed notes preserved in their original typography and position (mess bill reduction, prior permission, HOD & AO/Principal signature, dates considered) | **PASS** |
 | **Demonstration Disclaimers** | Prominently displays `SAMPLE / DEMO — NOT AN OFFICIAL SIGNATURE OR SEAL`, `HOD APPROVED — DEMONSTRATION COPY`, and `[SAMPLE / DEMO SIGNATURE]` | **PASS** |
 | **Single-Page Guarantee** | Strict 1-page A4 PDF output (21 KB vector PDF) | **PASS** |
 
@@ -155,3 +155,4 @@ $ npm run build
 Mission 09.2.5 has completely fulfilled the owner's non-negotiable requirement. The original physical AIET Leave Note form (`1000230720.pdf`) is preserved 100% intact, and student leave notes are generated with exact overlay alignment, strict security gating, and comprehensive visual verification.
 
 **Final Verdict:** `EXACT ORIGINAL TEMPLATE IMPLEMENTED`
+

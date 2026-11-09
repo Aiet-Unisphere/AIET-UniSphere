@@ -18,3 +18,4 @@ export const AIET_LEAVE_NOTE_TEMPLATE_BASE64 = "${b64}";
 const outPath = path.join(rootDir, 'src', 'assets', 'templates', 'aietLeaveNoteTemplateBase64.ts');
 fs.writeFileSync(outPath, tsContent);
 console.log(`Created ${outPath} (${b64.length} chars, original bytes: ${bytes.length})`);
+
