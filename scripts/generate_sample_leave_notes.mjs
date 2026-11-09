@@ -97,7 +97,7 @@ const samples = [
 ];
 
 for (const { name, data } of samples) {
-  const doc = generateLeaveNotePdf(data);
+  const doc = await generateLeaveNotePdf(data);
   const filePath = path.join(outDir, name);
   const pdfBytes = doc.output('arraybuffer');
   fs.writeFileSync(filePath, Buffer.from(pdfBytes));

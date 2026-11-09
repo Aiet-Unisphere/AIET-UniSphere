@@ -125,9 +125,9 @@ export const LeaveRequestsPage: React.FC = () => {
     }
   };
 
-  const handleDownloadLeaveNote = (leave: LeaveRequest) => {
+  const handleDownloadLeaveNote = async (leave: LeaveRequest) => {
     try {
-      downloadApprovedLeaveNote(leave);
+      await downloadApprovedLeaveNote(leave);
     } catch (err: any) {
       console.error('Failed to download leave note:', err);
       alert(err.message || 'Unable to generate leave note PDF.');

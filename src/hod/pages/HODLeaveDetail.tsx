@@ -84,9 +84,9 @@ export const HODLeaveDetail: React.FC = () => {
     }
   };
 
-  const handleDownloadLeaveNote = (item: LeaveRequest) => {
+  const handleDownloadLeaveNote = async (item: LeaveRequest) => {
     try {
-      downloadApprovedLeaveNote(item);
+      await downloadApprovedLeaveNote(item);
     } catch (err: any) {
       console.error("Leave note download error:", err);
       alert(err.message || "Failed to generate approved leave note PDF.");

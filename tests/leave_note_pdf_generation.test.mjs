@@ -58,37 +58,37 @@ describe('Mission 09.2 — Approved Leave Note PDF Generation & Security Audit',
     assert.strictEqual(isLeaveApproved(''), false);
   });
 
-  it('2. generateLeaveNotePdf strictly rejects unapproved leave requests with an informative error', () => {
+  it('2. generateLeaveNotePdf strictly rejects unapproved leave requests with an informative error', async () => {
     const pendingLeave = { ...baseApprovedLeave, status: 'Pending' };
-    assert.throws(
-      () => generateLeaveNotePdf(pendingLeave),
+    await assert.rejects(
+      async () => await generateLeaveNotePdf(pendingLeave),
       /Cannot generate approved leave note: Leave request is currently "Pending"/
     );
 
     const rejectedLeave = { ...baseApprovedLeave, status: 'Rejected' };
-    assert.throws(
-      () => generateLeaveNotePdf(rejectedLeave),
+    await assert.rejects(
+      async () => await generateLeaveNotePdf(rejectedLeave),
       /Cannot generate approved leave note: Leave request is currently "Rejected"/
     );
   });
 
-  it('3. generateLeaveNotePdf generates valid jsPDF document for approved leave', () => {
-    const doc = generateLeaveNotePdf(baseApprovedLeave);
+  it('3. generateLeaveNotePdf generates valid jsPDF document for approved leave', async () => {
+    const doc = await generateLeaveNotePdf(baseApprovedLeave);
     assert.ok(doc && typeof doc.getNumberOfPages === 'function', 'Expected jsPDF document');
     assert.strictEqual(doc.getNumberOfPages(), 1, 'Document must be exactly 1 page');
   });
 
-  it('4. Single-page constraint: document remains strictly 1 page even with lengthy reason and remarks', () => {
+  it('4. Single-page constraint: document remains strictly 1 page even with lengthy reason and remarks', async () => {
     const lengthyLeave = {
       ...baseApprovedLeave,
       reason: 'A'.repeat(500), // very long reason
       approvalRemarks: 'R'.repeat(300) // very long remark
     };
-    const doc = generateLeaveNotePdf(lengthyLeave);
+    const doc = await generateLeaveNotePdf(lengthyLeave);
     assert.strictEqual(doc.getNumberOfPages(), 1, 'Lengthy content must not spill onto a second page');
   });
 
-  it('5. Snapshot values take precedence over mutable profile fields', () => {
+  it('5. Snapshot values take precedence over mutable profile fields', async () => {
     const leaveWithSnapshots = {
       ...baseApprovedLeave,
       requesterName: 'Old Mutable Name',
@@ -100,7 +100,7 @@ describe('Mission 09.2 — Approved Leave Note PDF Generation & Security Audit',
       sectionSnapshot: 'ISE-B'
     };
 
-    const doc = generateLeaveNotePdf(leaveWithSnapshots);
+    const doc = await generateLeaveNotePdf(leaveWithSnapshots);
     const pdfOutput = doc.output();
 
     // Verify snapshot fields are in the output string
@@ -110,7 +110,7 @@ describe('Mission 09.2 — Approved Leave Note PDF Generation & Security Audit',
     assert.ok(pdfOutput.includes('Sec: ISE-B'), 'Snapshot section must be rendered');
   });
 
-  it('6. Fallback values are safely rendered when snapshot fields are missing', () => {
+  it('6. Fallback values are safely rendered when snapshot fields are missing', async () => {
     const legacyLeave = {
       ...baseApprovedLeave,
       studentNameSnapshot: undefined,
@@ -127,7 +127,7 @@ describe('Mission 09.2 — Approved Leave Note PDF Generation & Security Audit',
       semester: 5
     };
 
-    const doc = generateLeaveNotePdf(legacyLeave);
+    const doc = await generateLeaveNotePdf(legacyLeave);
     const pdfOutput = doc.output();
 
     assert.ok(pdfOutput.includes('Legacy Student'), 'Fallback requesterName must be rendered');
@@ -137,8 +137,8 @@ describe('Mission 09.2 — Approved Leave Note PDF Generation & Security Audit',
     assert.ok(pdfOutput.includes('Sec: -') || pdfOutput.includes('Sec:'), 'Fallback empty section must render dash');
   });
 
-  it('7. Approval remarks and reviewer details are rendered accurately', () => {
-    const doc = generateLeaveNotePdf(baseApprovedLeave);
+  it('7. Approval remarks and reviewer details are rendered accurately', async () => {
+    const doc = await generateLeaveNotePdf(baseApprovedLeave);
     const pdfOutput = doc.output();
 
     assert.ok(
@@ -156,12 +156,12 @@ describe('Mission 09.2 — Approved Leave Note PDF Generation & Security Audit',
     );
   });
 
-  it('8. Default approval remarks are rendered when approvalRemarks is omitted', () => {
+  it('8. Default approval remarks are rendered when approvalRemarks is omitted', async () => {
     const leaveWithoutRemarks = {
       ...baseApprovedLeave,
       approvalRemarks: undefined
     };
-    const doc = generateLeaveNotePdf(leaveWithoutRemarks);
+    const doc = await generateLeaveNotePdf(leaveWithoutRemarks);
     const pdfOutput = doc.output();
 
     assert.ok(
@@ -170,8 +170,8 @@ describe('Mission 09.2 — Approved Leave Note PDF Generation & Security Audit',
     );
   });
 
-  it('9. Prominent fictional watermark and sample labels are present in the PDF output', () => {
-    const doc = generateLeaveNotePdf(baseApprovedLeave);
+  it('9. Prominent fictional watermark and sample labels are present in the PDF output', async () => {
+    const doc = await generateLeaveNotePdf(baseApprovedLeave);
     const pdfOutput = doc.output();
 
     assert.ok(
@@ -188,8 +188,8 @@ describe('Mission 09.2 — Approved Leave Note PDF Generation & Security Audit',
     );
   });
 
-  it('10. Blank manual signature sections exist for all required signatories', () => {
-    const doc = generateLeaveNotePdf(baseApprovedLeave);
+  it('10. Blank manual signature sections exist for all required signatories', async () => {
+    const doc = await generateLeaveNotePdf(baseApprovedLeave);
     const pdfOutput = doc.output();
 
     assert.ok(pdfOutput.includes('STUDENT DECLARATION & SIGNATURE'), 'Student signature box must be present');
@@ -199,8 +199,8 @@ describe('Mission 09.2 — Approved Leave Note PDF Generation & Security Audit',
     assert.ok(pdfOutput.includes('REMARKS & SIGNATURE OF PRINCIPAL'), 'Principal/AO box must be present');
   });
 
-  it('11. Institutional header and VTU attendance regulations are rendered', () => {
-    const doc = generateLeaveNotePdf(baseApprovedLeave);
+  it('11. Institutional header and VTU attendance regulations are rendered', async () => {
+    const doc = await generateLeaveNotePdf(baseApprovedLeave);
     const pdfOutput = doc.output();
 
     assert.ok(pdfOutput.includes("ALVA'S INSTITUTE OF ENGINEERING & TECHNOLOGY"), 'Header institution title must be present');
@@ -281,10 +281,10 @@ describe('Mission 09.2 — Approved Leave Note PDF Generation & Security Audit',
     assert.ok(hodContent.includes('Approval Remarks'), 'HODLeaveDetail modal must have Approval Remarks input');
   });
 
-  it('15. Provenance tracking: PDF distinguishes SUBMISSION, RETROACTIVE_BACKFILL, and UNVERIFIED', () => {
+  it('15. Provenance tracking: PDF distinguishes SUBMISSION, RETROACTIVE_BACKFILL, and UNVERIFIED', async () => {
     // 1. Default / SUBMISSION
     const submissionLeave = { ...baseApprovedLeave, snapshotProvenance: 'SUBMISSION' };
-    const docSubmission = generateLeaveNotePdf(submissionLeave);
+    const docSubmission = await generateLeaveNotePdf(submissionLeave);
     assert.ok(
       docSubmission.output().includes('Provenance: Verified Submission Snapshot'),
       'SUBMISSION must render Verified Submission Snapshot'
@@ -292,7 +292,7 @@ describe('Mission 09.2 — Approved Leave Note PDF Generation & Security Audit',
 
     // 2. RETROACTIVE_BACKFILL
     const backfillLeave = { ...baseApprovedLeave, snapshotProvenance: 'RETROACTIVE_BACKFILL' };
-    const docBackfill = generateLeaveNotePdf(backfillLeave);
+    const docBackfill = await generateLeaveNotePdf(backfillLeave);
     assert.ok(
       docBackfill.output().includes('Provenance: Retroactive Backfill') && docBackfill.output().includes('Current Profile'),
       'RETROACTIVE_BACKFILL must render Retroactive Backfill (Current Profile)'
@@ -300,7 +300,7 @@ describe('Mission 09.2 — Approved Leave Note PDF Generation & Security Audit',
 
     // 3. UNVERIFIED
     const unverifiedLeave = { ...baseApprovedLeave, snapshotProvenance: 'UNVERIFIED' };
-    const docUnverified = generateLeaveNotePdf(unverifiedLeave);
+    const docUnverified = await generateLeaveNotePdf(unverifiedLeave);
     assert.ok(
       docUnverified.output().includes('Provenance: Unverified Historical Record'),
       'UNVERIFIED must render Unverified Historical Record'
