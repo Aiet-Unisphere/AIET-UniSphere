@@ -241,7 +241,9 @@ export const getAttendanceSummary = async (courseFilter?: string): Promise<Atten
         code: courseCode,
         status: rec.status,
         faculty: facultyName,
-        session: `${session.start_time}${session.end_time ? ' - ' + session.end_time : ''}`
+        session: `${session.start_time}${session.end_time ? ' - ' + session.end_time : ''}`,
+        isCorrected: rec.is_corrected ?? false,
+        correctionReason: rec.correction_reason ?? null
       });
 
       // Trend by month
@@ -476,6 +478,238 @@ export const markAttendanceSession = async (
     totalStudents: rpcResult.total_students,
     markedBy: profile.full_name || 'Faculty',
     createdAt: rpcResult.created_at
+  };
+};
+
+export interface AttendanceCorrectionResult {
+  recordId: string;
+  sessionId: string;
+  studentId: string;
+  previousStatus: 'Present' | 'Absent' | 'Late';
+  newStatus: 'Present' | 'Absent' | 'Late';
+  presentCount: number;
+  absentCount: number;
+  lateCount: number;
+  totalStudents: number;
+  correctedAt: string;
+  isIdempotent?: boolean;
+}
+
+export interface SessionRosterStudent {
+  recordId: string;
+  studentId: string;
+  studentName: string;
+  usn: string;
+  status: 'Present' | 'Absent' | 'Late';
+  remarks?: string | null;
+  isCorrected: boolean;
+  correctionReason?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface AttendanceCorrectionLogEntry {
+  id: string;
+  recordId: string;
+  studentId: string;
+  studentName: string;
+  usn: string;
+  previousStatus: 'Present' | 'Absent' | 'Late';
+  newStatus: 'Present' | 'Absent' | 'Late';
+  correctedBy: string;
+  correctionReason: string;
+  createdAt: string;
+}
+
+export interface SessionAttendanceDetailPayload {
+  session: AttendanceSessionLog;
+  roster: SessionRosterStudent[];
+  corrections: AttendanceCorrectionLogEntry[];
+}
+
+/**
+ * Executes an atomic correction of a student's attendance record using the PostgreSQL RPC function.
+ * Recalculates parent session counters and inserts an immutable audit log entry.
+ */
+export const correctStudentAttendance = async (
+  recordId: string,
+  newStatus: 'Present' | 'Absent' | 'Late',
+  reason: string
+): Promise<AttendanceCorrectionResult> => {
+  const cleanReason = (reason || '').trim();
+  if (cleanReason.length < 5) {
+    throw new Error('A correction reason of at least 5 characters is required.');
+  }
+
+  const { data, error } = await (supabase as any).rpc('correct_attendance_record_atomic', {
+    p_record_id: recordId,
+    p_new_status: newStatus,
+    p_reason: cleanReason
+  });
+
+  if (error) {
+    console.error('RPC correct_attendance_record_atomic failed:', error);
+    throw new Error(error.message || 'Failed to correct attendance record.');
+  }
+
+  if (!data) {
+    throw new Error('No data returned from attendance correction.');
+  }
+
+  return {
+    recordId: data.record_id,
+    sessionId: data.session_id,
+    studentId: data.student_id,
+    previousStatus: data.previous_status,
+    newStatus: data.new_status,
+    presentCount: data.present_count,
+    absentCount: data.absent_count,
+    lateCount: data.late_count,
+    totalStudents: data.total_students,
+    correctedAt: data.corrected_at,
+    isIdempotent: data.is_idempotent
+  };
+};
+
+/**
+ * Fetches the student roster and historical corrections for a specific attendance session.
+ */
+export const getSessionAttendanceDetails = async (
+  sessionId: string
+): Promise<SessionAttendanceDetailPayload> => {
+  const { data: { user } } = await (supabase as any).auth.getUser();
+  if (!user) throw new Error('Authenticated session required.');
+
+  // 1. Fetch session header
+  const { data: sessionData, error: sessionErr } = await (supabase as any)
+    .from('attendance_sessions')
+    .select('*')
+    .eq('id', sessionId)
+    .maybeSingle();
+
+  if (sessionErr || !sessionData) {
+    throw new Error(`Attendance session not found: ${sessionErr?.message || 'Invalid session ID'}`);
+  }
+
+  // 2. Fetch session creator profile
+  let markedBy = 'Faculty';
+  if (sessionData.faculty_id) {
+    const { data: creatorProf } = await (supabase as any)
+      .from('profiles')
+      .select('full_name')
+      .eq('id', sessionData.faculty_id)
+      .maybeSingle();
+    if (creatorProf?.full_name) markedBy = creatorProf.full_name;
+  }
+
+  const sessionLog: AttendanceSessionLog = {
+    id: sessionData.id,
+    date: sessionData.session_date,
+    timeSlot: `${sessionData.start_time}${sessionData.end_time ? ' - ' + sessionData.end_time : ''}`,
+    courseCode: sessionData.course_id,
+    courseName: sessionData.course_name,
+    section: sessionData.section || null,
+    semester: sessionData.semester || null,
+    presentCount: sessionData.present_count || 0,
+    absentCount: sessionData.absent_count || 0,
+    lateCount: sessionData.late_count || 0,
+    totalStudents: sessionData.total_students || 0,
+    markedBy,
+    createdAt: sessionData.created_at
+  };
+
+  // 3. Fetch attendance records for this session
+  const { data: records, error: recErr } = await (supabase as any)
+    .from('attendance_records')
+    .select('*')
+    .eq('session_id', sessionId);
+
+  if (recErr) {
+    throw new Error(`Failed to load attendance records: ${recErr.message}`);
+  }
+
+  // 4. Fetch profiles for students
+  const studentIds = (records || []).map((r: any) => r.student_id).filter(Boolean);
+  const studentProfileMap = new Map<string, { name: string; usn: string }>();
+
+  if (studentIds.length > 0) {
+    const { data: profiles } = await (supabase as any)
+      .from('profiles')
+      .select('id, full_name, usn_or_employee_id')
+      .in('id', studentIds);
+
+    if (profiles) {
+      profiles.forEach((p: any) => {
+        studentProfileMap.set(p.id, {
+          name: p.full_name || 'Student',
+          usn: p.usn_or_employee_id || 'N/A'
+        });
+      });
+    }
+  }
+
+  const roster: SessionRosterStudent[] = (records || []).map((r: any) => {
+    const p = studentProfileMap.get(r.student_id);
+    return {
+      recordId: r.id,
+      studentId: r.student_id,
+      studentName: p?.name || 'Student',
+      usn: p?.usn || 'N/A',
+      status: r.status,
+      remarks: r.remarks || null,
+      isCorrected: r.is_corrected ?? false,
+      correctionReason: r.correction_reason ?? null,
+      updatedAt: r.updated_at ?? null
+    };
+  });
+
+  // Sort roster alphabetically by name
+  roster.sort((a, b) => a.studentName.localeCompare(b.studentName));
+
+  // 5. Fetch correction history from attendance_corrections
+  const { data: corrData } = await (supabase as any)
+    .from('attendance_corrections')
+    .select('*')
+    .eq('session_id', sessionId)
+    .order('created_at', { ascending: false });
+
+  let corrections: AttendanceCorrectionLogEntry[] = [];
+
+  if (corrData && corrData.length > 0) {
+    const correctorIds = Array.from(new Set(corrData.map((c: any) => c.corrected_by))).filter(Boolean);
+    const correctorMap = new Map<string, string>();
+
+    if (correctorIds.length > 0) {
+      const { data: profs } = await (supabase as any)
+        .from('profiles')
+        .select('id, full_name')
+        .in('id', correctorIds);
+
+      if (profs) {
+        profs.forEach((p: any) => correctorMap.set(p.id, p.full_name || 'Faculty'));
+      }
+    }
+
+    corrections = corrData.map((c: any) => {
+      const sp = studentProfileMap.get(c.student_id);
+      return {
+        id: c.id,
+        recordId: c.record_id,
+        studentId: c.student_id,
+        studentName: sp?.name || 'Student',
+        usn: sp?.usn || 'N/A',
+        previousStatus: c.previous_status,
+        newStatus: c.new_status,
+        correctedBy: correctorMap.get(c.corrected_by) || 'Faculty',
+        correctionReason: c.correction_reason,
+        createdAt: c.created_at
+      };
+    });
+  }
+
+  return {
+    session: sessionLog,
+    roster,
+    corrections
   };
 };
 

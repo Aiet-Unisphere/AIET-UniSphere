@@ -130,6 +130,7 @@ async function run() {
     );
 
     -- student_analytics_view definition matching migration 00022
+    DROP VIEW IF EXISTS public.student_analytics_view CASCADE;
     CREATE OR REPLACE VIEW public.student_analytics_view AS
     SELECT
       p.id AS student_id,
@@ -175,22 +176,22 @@ async function run() {
   // 2. Seed test entities
   console.log('\n[2/5] Seeding faculty, student profiles, and attendance sessions/records...');
   const seedSql = `
-    DELETE FROM public.attendance_records;
-    DELETE FROM public.attendance_sessions;
-    DELETE FROM public.profiles WHERE id IN (
-      '10100000-0000-0000-0000-000000000001',
-      '20100000-0000-0000-0000-000000000001',
-      '20200000-0000-0000-0000-000000000002',
-      '20300000-0000-0000-0000-000000000003',
-      '20400000-0000-0000-0000-000000000004',
-      '20500000-0000-0000-0000-000000000005'
-    );
+    DO $$ BEGIN
+      IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'attendance_records') THEN DELETE FROM public.attendance_records; END IF;
+      IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'attendance_sessions') THEN DELETE FROM public.attendance_sessions; END IF;
+      IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'timetable_entries') THEN DELETE FROM public.timetable_entries; END IF;
+      IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'course_enrollments') THEN DELETE FROM public.course_enrollments; END IF;
+      IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'academic_materials') THEN DELETE FROM public.academic_materials; END IF;
+      IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'announcement_reads') THEN DELETE FROM public.announcement_reads; END IF;
+      IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'announcements') THEN DELETE FROM public.announcements; END IF;
+    END $$;
+    DELETE FROM public.profiles;
+    DELETE FROM public.departments;
 
     -- Departments
     INSERT INTO public.departments (id, name, code) VALUES
       ('11111111-1111-1111-1111-111111111111', 'Computer Science and Engineering', 'CSE'),
-      ('22222222-2222-2222-2222-222222222222', 'Electronics and Communication Engineering', 'ECE')
-    ON CONFLICT (code) DO NOTHING;
+      ('22222222-2222-2222-2222-222222222222', 'Electronics and Communication Engineering', 'ECE');
 
     -- Profiles
     INSERT INTO public.profiles (id, role, department_id, full_name, usn_or_employee_id, account_status) VALUES

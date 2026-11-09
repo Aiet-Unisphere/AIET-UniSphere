@@ -14,6 +14,8 @@ export interface AttendanceHistoryItem {
   status: 'Present' | 'Absent' | 'Late';
   faculty: string;
   session: string;
+  isCorrected?: boolean;
+  correctionReason?: string | null;
 }
 
 export interface AttendanceTrend {

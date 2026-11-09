@@ -143,6 +143,9 @@ async function run() {
       faculty_id uuid,
       status text DEFAULT 'Active'
     );
+    ALTER TABLE public.course_enrollments ENABLE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS "Users can view course enrollments" ON public.course_enrollments;
+    CREATE POLICY "Users can view course enrollments" ON public.course_enrollments FOR SELECT TO authenticated USING (true);
 
     CREATE TABLE IF NOT EXISTS public.timetable_entries (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -151,6 +154,9 @@ async function run() {
       course_code text,
       faculty_id uuid
     );
+    ALTER TABLE public.timetable_entries ENABLE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS "Users can view timetable entries" ON public.timetable_entries;
+    CREATE POLICY "Users can view timetable entries" ON public.timetable_entries FOR SELECT TO authenticated USING (true);
 
     CREATE TABLE IF NOT EXISTS public.academic_materials (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -12,16 +12,27 @@ import {
   Users,
   RotateCcw,
   Calendar,
-  Layers
+  Layers,
+  Edit3,
+  History,
+  X,
+  Check
 } from 'lucide-react';
 import { FacultyAppShell } from '../components/FacultyAppShell';
 import { ClockTimePicker } from '../components/ClockTimePicker';
 import { 
   getDepartmentStudentsForAttendance, 
   getFacultyAttendanceLogs, 
-  markAttendanceSession 
+  markAttendanceSession,
+  getSessionAttendanceDetails,
+  correctStudentAttendance
 } from '../../services/attendanceService';
-import type { DepartmentStudent, AttendanceSessionLog } from '../../services/attendanceService';
+import type { 
+  DepartmentStudent, 
+  AttendanceSessionLog,
+  SessionRosterStudent,
+  AttendanceCorrectionLogEntry
+} from '../../services/attendanceService';
 import { getAvailableDepartmentCourses } from '../../services/courseService';
 import { useAuth } from '../../app/context/AuthContext';
 
@@ -59,6 +70,111 @@ export const FacultyAttendancePage: React.FC = () => {
   const showToast = (type: 'success' | 'error' | 'warning', text: string) => {
     setToastMessage({ type, text });
     setTimeout(() => setToastMessage(null), 6000);
+  };
+
+  // Session detail & correction modal state
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [sessionDetail, setSessionDetail] = useState<{
+    session: AttendanceSessionLog;
+    roster: SessionRosterStudent[];
+    corrections: AttendanceCorrectionLogEntry[];
+  } | null>(null);
+  const [isLoadingDetail, setIsLoadingDetail] = useState(false);
+  const [modalTab, setModalTab] = useState<'roster' | 'corrections'>('roster');
+  const [modalSearch, setModalSearch] = useState('');
+  const [modalStatusFilter, setModalStatusFilter] = useState<'ALL' | 'Present' | 'Absent' | 'Late'>('ALL');
+
+  // Active student correction dialog
+  const [correctionStudent, setCorrectionStudent] = useState<SessionRosterStudent | null>(null);
+  const [targetStatus, setTargetStatus] = useState<'Present' | 'Absent' | 'Late' | null>(null);
+  const [correctionReason, setCorrectionReason] = useState('');
+  const [isSubmittingCorrection, setIsSubmittingCorrection] = useState(false);
+  const [correctionDialogError, setCorrectionDialogError] = useState<string | null>(null);
+
+  const handleOpenSessionModal = async (sessionId: string) => {
+    setSelectedSessionId(sessionId);
+    setIsLoadingDetail(true);
+    setCorrectionStudent(null);
+    setTargetStatus(null);
+    setCorrectionReason('');
+    setCorrectionDialogError(null);
+    setModalTab('roster');
+    setModalSearch('');
+    setModalStatusFilter('ALL');
+
+    try {
+      const detail = await getSessionAttendanceDetails(sessionId);
+      setSessionDetail(detail);
+    } catch (err: any) {
+      console.error('Failed to load session details:', err);
+      showToast('error', err?.message || 'Unable to load session details.');
+      setSelectedSessionId(null);
+    } finally {
+      setIsLoadingDetail(false);
+    }
+  };
+
+  const handleCloseSessionModal = () => {
+    setSelectedSessionId(null);
+    setSessionDetail(null);
+    setCorrectionStudent(null);
+    setTargetStatus(null);
+    setCorrectionReason('');
+    setCorrectionDialogError(null);
+  };
+
+  const handleStartCorrection = (student: SessionRosterStudent, newStatus: 'Present' | 'Absent' | 'Late') => {
+    if (student.status === newStatus) return;
+    setCorrectionStudent(student);
+    setTargetStatus(newStatus);
+    setCorrectionReason('');
+    setCorrectionDialogError(null);
+  };
+
+  const handleConfirmCorrection = async () => {
+    if (!correctionStudent || !targetStatus || !selectedSessionId) return;
+    const cleanReason = correctionReason.trim();
+    if (cleanReason.length < 5) {
+      setCorrectionDialogError('Correction reason must be at least 5 characters long.');
+      return;
+    }
+
+    setIsSubmittingCorrection(true);
+    setCorrectionDialogError(null);
+
+    try {
+      const result = await correctStudentAttendance(correctionStudent.recordId, targetStatus, cleanReason);
+      
+      showToast('success', `Attendance for ${correctionStudent.studentName} updated to ${result.newStatus}.`);
+
+      // Refresh session detail and counters
+      const updatedDetail = await getSessionAttendanceDetails(selectedSessionId);
+      setSessionDetail(updatedDetail);
+
+      // Synchronize parent history logs table
+      setHistoryLogs(prev => prev.map(log => {
+        if (log.id === selectedSessionId) {
+          return {
+            ...log,
+            presentCount: result.presentCount,
+            absentCount: result.absentCount,
+            lateCount: result.lateCount,
+            totalStudents: result.totalStudents
+          };
+        }
+        return log;
+      }));
+
+      // Close dialog
+      setCorrectionStudent(null);
+      setTargetStatus(null);
+      setCorrectionReason('');
+    } catch (err: any) {
+      console.error('Failed to correct attendance:', err);
+      setCorrectionDialogError(err?.message || 'Failed to apply attendance correction.');
+    } finally {
+      setIsSubmittingCorrection(false);
+    }
   };
 
   const loadData = async () => {
@@ -212,6 +328,18 @@ export const FacultyAttendancePage: React.FC = () => {
       return matchesSearch && matchesStatus;
     });
   }, [students, studentSearch, statusFilter, attendanceMap]);
+
+  // Filtering for session correction modal
+  const filteredModalRoster = useMemo(() => {
+    if (!sessionDetail) return [];
+    return sessionDetail.roster.filter(s => {
+      const matchesSearch = 
+        s.studentName.toLowerCase().includes(modalSearch.toLowerCase()) ||
+        s.usn.toLowerCase().includes(modalSearch.toLowerCase());
+      const matchesStatus = modalStatusFilter === 'ALL' || s.status === modalStatusFilter;
+      return matchesSearch && matchesStatus;
+    });
+  }, [sessionDetail, modalSearch, modalStatusFilter]);
 
   // Aggregate counts
   const totalStudentsCount = students.length;
@@ -1065,6 +1193,7 @@ export const FacultyAttendancePage: React.FC = () => {
                     <th>Late</th>
                     <th>Total Marked</th>
                     <th>Recorded By</th>
+                    <th style={{ textAlign: 'center' }}>Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1083,12 +1212,494 @@ export const FacultyAttendancePage: React.FC = () => {
                       <td style={{ fontFamily: 'monospace', fontWeight: 700, color: '#D97706' }}>{log.lateCount}</td>
                       <td style={{ fontFamily: 'monospace', fontWeight: 700 }}>{log.totalStudents}</td>
                       <td style={{ fontSize: '0.825rem', color: 'var(--brand-dark-grey)' }}>{log.markedBy}</td>
+                      <td style={{ textAlign: 'center' }}>
+                        <button
+                          type="button"
+                          className="btn btn-secondary font-sans"
+                          onClick={() => handleOpenSessionModal(log.id)}
+                          style={{
+                            fontSize: '0.78rem',
+                            padding: '0.35rem 0.75rem',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.35rem',
+                            color: 'var(--brand-blue)',
+                            borderColor: '#BFDBFE',
+                            backgroundColor: '#EFF6FF',
+                            fontWeight: 600
+                          }}
+                        >
+                          <Edit3 size={13} />
+                          <span>View / Correct</span>
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           )}
+        </div>
+      )}
+
+      {/* SECTION 4: SESSION DETAIL & CORRECTION MODAL */}
+      {selectedSessionId && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.65)',
+            backdropFilter: 'blur(3px)',
+            zIndex: 1000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1.25rem'
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !isSubmittingCorrection) handleCloseSessionModal();
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: '#FFFFFF',
+              borderRadius: '12px',
+              width: '100%',
+              maxWidth: '920px',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+              display: 'flex',
+              flexDirection: 'column',
+              position: 'relative'
+            }}
+          >
+            {/* Modal Header */}
+            <div
+              style={{
+                padding: '1.25rem 1.5rem',
+                borderBottom: '1px solid #E2E8F0',
+                display: 'flex',
+                alignItems: 'flex-start',
+                justifyContent: 'space-between',
+                backgroundColor: '#F8FAFC',
+                borderTopLeftRadius: '12px',
+                borderTopRightRadius: '12px'
+              }}
+            >
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+                  <Edit3 size={18} style={{ color: 'var(--brand-blue)' }} />
+                  <h3 style={{ fontSize: '1.2rem', fontWeight: 800, margin: 0, color: 'var(--brand-black)', fontFamily: 'var(--font-display)' }}>
+                    Session Attendance &amp; Correction
+                  </h3>
+                </div>
+                {sessionDetail && (
+                  <p style={{ fontSize: '0.825rem', color: '#64748B', margin: 0 }}>
+                    <strong style={{ color: '#0F172A' }}>{sessionDetail.session.courseName}</strong> ({sessionDetail.session.courseCode}) • Date: <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{sessionDetail.session.date}</span> ({sessionDetail.session.timeSlot})
+                  </p>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={handleCloseSessionModal}
+                disabled={isSubmittingCorrection}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#64748B',
+                  cursor: 'pointer',
+                  padding: '0.25rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderRadius: '6px'
+                }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: '1.5rem' }}>
+              {isLoadingDetail ? (
+                <div style={{ textAlign: 'center', padding: '3.5rem', color: '#64748B' }}>
+                  Loading session details and student roster...
+                </div>
+              ) : !sessionDetail ? (
+                <div style={{ textAlign: 'center', padding: '3rem', color: '#EF4444' }}>
+                  Unable to load session details.
+                </div>
+              ) : (
+                <>
+                  {/* Summary Metric Strip */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '0.75rem', marginBottom: '1.25rem' }}>
+                    <div style={{ padding: '0.75rem 1rem', borderRadius: '8px', backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0' }}>
+                      <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748B', textTransform: 'uppercase' }}>Total Enrolled</span>
+                      <div style={{ fontSize: '1.35rem', fontWeight: 800, color: '#0F172A' }}>{sessionDetail.session.totalStudents}</div>
+                    </div>
+                    <div style={{ padding: '0.75rem 1rem', borderRadius: '8px', backgroundColor: '#ECFDF5', border: '1px solid #A7F3D0' }}>
+                      <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#065F46', textTransform: 'uppercase' }}>Present</span>
+                      <div style={{ fontSize: '1.35rem', fontWeight: 800, color: '#065F46' }}>{sessionDetail.session.presentCount}</div>
+                    </div>
+                    <div style={{ padding: '0.75rem 1rem', borderRadius: '8px', backgroundColor: '#FEF2F2', border: '1px solid #FECACA' }}>
+                      <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#991B1B', textTransform: 'uppercase' }}>Absent</span>
+                      <div style={{ fontSize: '1.35rem', fontWeight: 800, color: '#991B1B' }}>{sessionDetail.session.absentCount}</div>
+                    </div>
+                    <div style={{ padding: '0.75rem 1rem', borderRadius: '8px', backgroundColor: '#FFFBEB', border: '1px solid #FDE68A' }}>
+                      <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#92400E', textTransform: 'uppercase' }}>Late</span>
+                      <div style={{ fontSize: '1.35rem', fontWeight: 800, color: '#92400E' }}>{sessionDetail.session.lateCount}</div>
+                    </div>
+                    <div style={{ padding: '0.75rem 1rem', borderRadius: '8px', backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0' }}>
+                      <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748B', textTransform: 'uppercase' }}>Recorded By</span>
+                      <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#334155', marginTop: '0.35rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {sessionDetail.session.markedBy}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Active Student Correction Dialog / Drawer */}
+                  {correctionStudent && targetStatus && (
+                    <div
+                      style={{
+                        padding: '1.25rem',
+                        marginBottom: '1.25rem',
+                        borderRadius: '10px',
+                        backgroundColor: '#FEF3C7',
+                        border: '2px solid #F59E0B',
+                        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
+                        <div>
+                          <strong style={{ display: 'block', fontSize: '0.95rem', color: '#92400E', fontWeight: 800 }}>
+                            Confirm Attendance Status Correction
+                          </strong>
+                          <span style={{ fontSize: '0.825rem', color: '#78350F' }}>
+                            Changing status for <strong>{correctionStudent.studentName}</strong> ({correctionStudent.usn}) from{' '}
+                            <span style={{ fontWeight: 700, textDecoration: 'line-through' }}>{correctionStudent.status}</span> to{' '}
+                            <span style={{ fontWeight: 800, color: targetStatus === 'Present' ? '#047857' : targetStatus === 'Absent' ? '#B91C1C' : '#B45309' }}>
+                              {targetStatus}
+                            </span>.
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => { setCorrectionStudent(null); setTargetStatus(null); setCorrectionReason(''); setCorrectionDialogError(null); }}
+                          disabled={isSubmittingCorrection}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#92400E' }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+
+                      {correctionDialogError && (
+                        <div style={{ padding: '0.5rem 0.75rem', marginBottom: '0.75rem', backgroundColor: '#FEF2F2', border: '1px solid #FCA5A5', color: '#991B1B', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 600 }}>
+                          {correctionDialogError}
+                        </div>
+                      )}
+
+                      <div style={{ marginBottom: '0.75rem' }}>
+                        <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#78350F', textTransform: 'uppercase', marginBottom: '0.35rem' }}>
+                          Correction Reason (Required, min 5 chars) *
+                        </label>
+                        <textarea
+                          className="form-input font-sans"
+                          rows={2}
+                          placeholder="e.g. On-duty attendance sanctioned for college sports tournament, medical leave approved by HOD..."
+                          value={correctionReason}
+                          onChange={(e) => setCorrectionReason(e.target.value)}
+                          disabled={isSubmittingCorrection}
+                          style={{ width: '100%', fontSize: '0.85rem', padding: '0.5rem', borderRadius: '6px', border: '1px solid #D97706', backgroundColor: '#FFFFFF' }}
+                        />
+                      </div>
+
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.65rem' }}>
+                        <button
+                          type="button"
+                          className="btn btn-secondary font-sans"
+                          onClick={() => { setCorrectionStudent(null); setTargetStatus(null); setCorrectionReason(''); setCorrectionDialogError(null); }}
+                          disabled={isSubmittingCorrection}
+                          style={{ fontSize: '0.8rem', padding: '0.4rem 0.85rem' }}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-primary font-sans"
+                          onClick={handleConfirmCorrection}
+                          disabled={isSubmittingCorrection || correctionReason.trim().length < 5}
+                          style={{ fontSize: '0.8rem', padding: '0.4rem 1.1rem', display: 'inline-flex', alignItems: 'center', gap: '0.4rem', backgroundColor: '#D97706', borderColor: '#B45309' }}
+                        >
+                          {isSubmittingCorrection ? <Clock size={14} className="animate-spin" /> : <Check size={14} />}
+                          <span>{isSubmittingCorrection ? 'Applying Correction...' : 'Confirm & Save Correction'}</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Tabs: Roster vs Corrections History */}
+                  <div style={{ display: 'flex', gap: '0.5rem', borderBottom: '1px solid #E2E8F0', paddingBottom: '0.65rem', marginBottom: '1rem' }}>
+                    <button
+                      type="button"
+                      onClick={() => setModalTab('roster')}
+                      style={{
+                        padding: '0.45rem 0.9rem',
+                        fontSize: '0.825rem',
+                        fontWeight: modalTab === 'roster' ? 700 : 500,
+                        borderRadius: '6px',
+                        border: 'none',
+                        backgroundColor: modalTab === 'roster' ? '#EFF6FF' : 'transparent',
+                        color: modalTab === 'roster' ? 'var(--brand-blue)' : '#64748B',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Enrolled Roster ({sessionDetail.roster.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setModalTab('corrections')}
+                      style={{
+                        padding: '0.45rem 0.9rem',
+                        fontSize: '0.825rem',
+                        fontWeight: modalTab === 'corrections' ? 700 : 500,
+                        borderRadius: '6px',
+                        border: 'none',
+                        backgroundColor: modalTab === 'corrections' ? '#EFF6FF' : 'transparent',
+                        color: modalTab === 'corrections' ? 'var(--brand-blue)' : '#64748B',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Correction Audit History ({sessionDetail.corrections.length})
+                    </button>
+                  </div>
+
+                  {/* TAB A: ROSTER & CORRECTION CONTROLS */}
+                  {modalTab === 'roster' && (
+                    <>
+                      {/* Search & Filter Toolbar inside Modal */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.65rem', marginBottom: '1rem' }}>
+                        <div style={{ position: 'relative', width: '260px' }}>
+                          <input
+                            type="text"
+                            placeholder="Search student or USN..."
+                            className="form-input font-sans"
+                            value={modalSearch}
+                            onChange={(e) => setModalSearch(e.target.value)}
+                            style={{ width: '100%', padding: '0.45rem 0.65rem 0.45rem 2rem', fontSize: '0.8rem', borderRadius: '6px', border: '1px solid #CBD5E1' }}
+                          />
+                          <Search size={14} style={{ position: 'absolute', left: '0.65rem', top: '50%', transform: 'translateY(-50%)', color: '#94A3B8' }} />
+                          {modalSearch && (
+                            <button
+                              type="button"
+                              onClick={() => setModalSearch('')}
+                              style={{ position: 'absolute', right: '0.65rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: '#94A3B8', cursor: 'pointer', fontSize: '0.8rem' }}
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '0.35rem' }}>
+                          {(['ALL', 'Present', 'Absent', 'Late'] as const).map(tab => (
+                            <button
+                              key={tab}
+                              type="button"
+                              onClick={() => setModalStatusFilter(tab)}
+                              style={{
+                                padding: '0.3rem 0.65rem',
+                                fontSize: '0.75rem',
+                                borderRadius: '6px',
+                                border: modalStatusFilter === tab ? '1px solid var(--brand-blue)' : '1px solid #E2E8F0',
+                                backgroundColor: modalStatusFilter === tab ? '#EFF6FF' : '#FFFFFF',
+                                color: modalStatusFilter === tab ? 'var(--brand-blue)' : '#64748B',
+                                fontWeight: modalStatusFilter === tab ? 700 : 500,
+                                cursor: 'pointer'
+                              }}
+                            >
+                              {tab}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Roster Table */}
+                      <div className="table-responsive" style={{ border: '1px solid #E2E8F0', borderRadius: '8px' }}>
+                        <table className="table font-sans" style={{ margin: 0 }}>
+                          <thead style={{ backgroundColor: '#F8FAFC' }}>
+                            <tr>
+                              <th style={{ width: '40px', textAlign: 'center', fontSize: '0.75rem' }}>#</th>
+                              <th style={{ fontSize: '0.75rem', textTransform: 'uppercase' }}>Student Name</th>
+                              <th style={{ fontSize: '0.75rem', textTransform: 'uppercase' }}>USN</th>
+                              <th style={{ fontSize: '0.75rem', textTransform: 'uppercase', textAlign: 'center' }}>Current Status</th>
+                              <th style={{ fontSize: '0.75rem', textTransform: 'uppercase', textAlign: 'center', minWidth: '240px' }}>
+                                Correct Status Action
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {filteredModalRoster.length === 0 ? (
+                              <tr>
+                                <td colSpan={5} style={{ textAlign: 'center', padding: '2rem', color: '#64748B' }}>
+                                  No students match your filter criteria.
+                                </td>
+                              </tr>
+                            ) : (
+                              filteredModalRoster.map((s, idx) => (
+                                <tr key={s.recordId} style={{ borderBottom: '1px solid #F1F5F9' }}>
+                                  <td style={{ textAlign: 'center', fontSize: '0.8rem', color: '#94A3B8' }}>{idx + 1}</td>
+                                  <td>
+                                    <div style={{ fontWeight: 600, color: '#0F172A', fontSize: '0.85rem' }}>{s.studentName}</div>
+                                  </td>
+                                  <td style={{ fontSize: '0.825rem', fontFamily: 'monospace', color: '#475569' }}>{s.usn}</td>
+                                  <td style={{ textAlign: 'center' }}>
+                                    <span
+                                      className={`badge ${
+                                        s.status === 'Present' ? 'badge-graded' : s.status === 'Late' ? 'badge-pending' : 'badge-overdue'
+                                      }`}
+                                      style={{ minWidth: '65px', justifyContent: 'center' }}
+                                    >
+                                      {s.status}
+                                    </span>
+                                    {s.isCorrected && (
+                                      <div style={{ marginTop: '0.2rem' }}>
+                                        <span
+                                          style={{
+                                            fontSize: '0.65rem',
+                                            fontWeight: 700,
+                                            backgroundColor: '#FEF3C7',
+                                            border: '1px solid #FCD34D',
+                                            color: '#92400E',
+                                            padding: '0.05rem 0.3rem',
+                                            borderRadius: '4px'
+                                          }}
+                                          title={s.correctionReason ? `Sanction: ${s.correctionReason}` : 'Amended post-submission'}
+                                        >
+                                          Amended
+                                        </span>
+                                      </div>
+                                    )}
+                                  </td>
+                                  <td style={{ textAlign: 'center' }}>
+                                    <div style={{ display: 'inline-flex', gap: '0.35rem' }}>
+                                      {(['Present', 'Absent', 'Late'] as const).map(st => {
+                                        const isCurrent = s.status === st;
+                                        return (
+                                          <button
+                                            key={st}
+                                            type="button"
+                                            disabled={isCurrent || isSubmittingCorrection}
+                                            onClick={() => handleStartCorrection(s, st)}
+                                            style={{
+                                              padding: '0.25rem 0.65rem',
+                                              fontSize: '0.75rem',
+                                              fontWeight: isCurrent ? 700 : 500,
+                                              borderRadius: '5px',
+                                              border: isCurrent ? '1px solid transparent' : '1px solid #CBD5E1',
+                                              backgroundColor: isCurrent ? (st === 'Present' ? '#10B981' : st === 'Absent' ? '#EF4444' : '#F59E0B') : '#FFFFFF',
+                                              color: isCurrent ? '#FFFFFF' : '#475569',
+                                              cursor: isCurrent ? 'default' : 'pointer',
+                                              opacity: isCurrent ? 1 : 0.85
+                                            }}
+                                            title={isCurrent ? `Currently ${st}` : `Correct status to ${st}`}
+                                          >
+                                            {st}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  )}
+
+                  {/* TAB B: CORRECTIONS AUDIT LOG */}
+                  {modalTab === 'corrections' && (
+                    <div className="table-responsive" style={{ border: '1px solid #E2E8F0', borderRadius: '8px' }}>
+                      <table className="table font-sans" style={{ margin: 0 }}>
+                        <thead style={{ backgroundColor: '#F8FAFC' }}>
+                          <tr>
+                            <th style={{ fontSize: '0.75rem', textTransform: 'uppercase' }}>Student Name</th>
+                            <th style={{ fontSize: '0.75rem', textTransform: 'uppercase' }}>USN</th>
+                            <th style={{ fontSize: '0.75rem', textTransform: 'uppercase' }}>Status Transition</th>
+                            <th style={{ fontSize: '0.75rem', textTransform: 'uppercase' }}>Sanctioned Reason</th>
+                            <th style={{ fontSize: '0.75rem', textTransform: 'uppercase' }}>Corrected By</th>
+                            <th style={{ fontSize: '0.75rem', textTransform: 'uppercase' }}>Timestamp</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sessionDetail.corrections.length === 0 ? (
+                            <tr>
+                              <td colSpan={6} style={{ textAlign: 'center', padding: '2.5rem', color: '#64748B' }}>
+                                No attendance corrections have been recorded for this session.
+                              </td>
+                            </tr>
+                          ) : (
+                            sessionDetail.corrections.map((c) => (
+                              <tr key={c.id} style={{ borderBottom: '1px solid #F1F5F9' }}>
+                                <td style={{ fontWeight: 600, color: '#0F172A', fontSize: '0.85rem' }}>{c.studentName}</td>
+                                <td style={{ fontSize: '0.825rem', fontFamily: 'monospace', color: '#475569' }}>{c.usn}</td>
+                                <td>
+                                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem', fontWeight: 700 }}>
+                                    <span style={{ color: c.previousStatus === 'Present' ? '#047857' : c.previousStatus === 'Absent' ? '#DC2626' : '#D97706', textDecoration: 'line-through' }}>
+                                      {c.previousStatus}
+                                    </span>
+                                    <span>→</span>
+                                    <span style={{ color: c.newStatus === 'Present' ? '#047857' : c.newStatus === 'Absent' ? '#DC2626' : '#D97706' }}>
+                                      {c.newStatus}
+                                    </span>
+                                  </div>
+                                </td>
+                                <td style={{ fontSize: '0.8rem', color: '#334155', maxWidth: '240px' }}>
+                                  {c.correctionReason}
+                                </td>
+                                <td style={{ fontSize: '0.8rem', color: '#64748B' }}>{c.correctedBy}</td>
+                                <td style={{ fontSize: '0.78rem', color: '#64748B', fontFamily: 'monospace' }}>
+                                  {new Date(c.createdAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div
+              style={{
+                padding: '1rem 1.5rem',
+                borderTop: '1px solid #E2E8F0',
+                backgroundColor: '#F8FAFC',
+                display: 'flex',
+                justifyContent: 'flex-end',
+                borderBottomLeftRadius: '12px',
+                borderBottomRightRadius: '12px'
+              }}
+            >
+              <button
+                type="button"
+                className="btn btn-secondary font-sans"
+                onClick={handleCloseSessionModal}
+                disabled={isSubmittingCorrection}
+                style={{ fontSize: '0.85rem', padding: '0.5rem 1.25rem' }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </FacultyAppShell>

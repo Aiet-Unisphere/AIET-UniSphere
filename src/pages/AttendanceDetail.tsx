@@ -388,9 +388,30 @@ export const AttendanceDetail: React.FC = () => {
                       <span className="attendance-history-meta">
                         ⏱️ {log.session} · Instructor: {log.faculty}
                       </span>
+                      {log.isCorrected && (
+                        <div style={{ marginTop: '0.25rem', fontSize: '0.75rem', color: '#B45309', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                          <span style={{
+                            fontSize: '0.68rem',
+                            fontWeight: 700,
+                            backgroundColor: '#FEF3C7',
+                            border: '1px solid #FCD34D',
+                            color: '#92400E',
+                            padding: '0.1rem 0.35rem',
+                            borderRadius: '4px',
+                            display: 'inline-block'
+                          }}>
+                            Status Amended
+                          </span>
+                          {log.correctionReason && (
+                            <span style={{ color: '#64748B', fontStyle: 'italic' }}>
+                              Reason: {log.correctionReason}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                     
-                    <div className="attendance-history-right">
+                    <div className="attendance-history-right" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.25rem' }}>
                       <span className={`badge ${getAttendanceBadgeClass(log.status)}`} style={{ minWidth: '70px', justifyContent: 'center' }}>
                         {log.status}
                       </span>

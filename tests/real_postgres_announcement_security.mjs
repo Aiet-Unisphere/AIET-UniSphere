@@ -254,6 +254,9 @@ async function run() {
       IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'attendance_sessions') THEN
         DELETE FROM public.attendance_sessions;
       END IF;
+      IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'timetable_entries') THEN
+        DELETE FROM public.timetable_entries;
+      END IF;
       IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'course_enrollments') THEN
         DELETE FROM public.course_enrollments;
       END IF;
