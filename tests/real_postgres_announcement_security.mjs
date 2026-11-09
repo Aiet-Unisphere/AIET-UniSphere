@@ -198,8 +198,8 @@ async function run() {
     -- Grants
     GRANT USAGE ON SCHEMA public TO authenticated, anon;
     GRANT USAGE ON SCHEMA storage TO authenticated, anon;
+    GRANT SELECT ON ALL TABLES IN SCHEMA public TO authenticated;
     GRANT SELECT, INSERT ON public.announcement_reads TO authenticated;
-    GRANT SELECT ON public.announcements TO authenticated;
     GRANT SELECT ON storage.objects TO authenticated;
   `;
 
@@ -247,6 +247,14 @@ async function run() {
   // 3. Seed Test Matrix Entities
   console.log('\n[3/6] Seeding departments, profiles, announcements, and storage objects...');
   const seedSql = `
+    DO $$ BEGIN
+      IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'course_enrollments') THEN
+        DELETE FROM public.course_enrollments;
+      END IF;
+      IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'academic_materials') THEN
+        DELETE FROM public.academic_materials;
+      END IF;
+    END $$;
     DELETE FROM storage.objects;
     DELETE FROM public.announcement_reads;
     DELETE FROM public.announcements;

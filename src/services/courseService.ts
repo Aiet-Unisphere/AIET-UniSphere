@@ -384,6 +384,21 @@ export const getCourseMaterials = async (courseId: string, courseCode?: string):
   return [];
 };
 
+/**
+ * Generates a cryptographically secure unique file identifier for storage paths.
+ */
+export const generateSecureFileId = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+  return `${Date.now()}_${Math.random().toString(36).substring(2, 12)}`;
+};
+
 export const uploadCourseMaterial = async ({
   title,
   courseId,
@@ -448,7 +463,8 @@ export const uploadCourseMaterial = async ({
 
   const cleanModuleId = moduleId.trim() || 'General';
   const safeName = sanitizeFileName(file.name);
-  const storagePath = `${profile.department_id}/${courseId}/${cleanModuleId}/${safeName}`;
+  const fileUniqueId = generateSecureFileId();
+  const storagePath = `${profile.department_id}/${courseId}/${cleanModuleId}/${fileUniqueId}-${safeName}`;
 
   // 3. Upload file to Supabase Storage
   await uploadFile({
@@ -573,11 +589,14 @@ export const updateCourseMaterial = async (
   };
 };
 
-export const deleteCourseMaterial = async (materialId: string, storagePath?: string): Promise<boolean> => {
+export const deleteCourseMaterial = async (
+  materialId: string, 
+  _deprecatedCallerPath?: string
+): Promise<{ success: boolean; storageDeleted: boolean; message?: string } | boolean> => {
   const { data: { user } } = await (supabase as any).auth.getUser();
   if (!user) throw new Error("Authenticated session required.");
 
-  // 1. Fetch material to check ownership & existence
+  // 1. Fetch material to obtain canonical storage path and ownership
   const { data: material, error: fetchErr } = await (supabase as any)
     .from('academic_materials')
     .select('id, course_id, department_id, uploaded_by, storage_path')
@@ -600,18 +619,59 @@ export const deleteCourseMaterial = async (materialId: string, storagePath?: str
   const isOwner = material.uploaded_by === user.id;
 
   if (!isAdmin && !isHOD && !isOwner) {
-    const { count } = await (supabase as any)
-      .from('course_enrollments')
-      .select('id', { count: 'exact', head: true })
-      .eq('faculty_id', user.id)
-      .eq('course_id', material.course_id);
+    const [enrollmentCheck, timetableCheck] = await Promise.all([
+      (supabase as any)
+        .from('course_enrollments')
+        .select('id', { count: 'exact', head: true })
+        .eq('faculty_id', user.id)
+        .or(`course_id.eq.${material.course_id},course_code.eq.${material.course_id}`),
+      (supabase as any)
+        .from('timetable_entries')
+        .select('id', { count: 'exact', head: true })
+        .eq('faculty_id', user.id)
+        .or(`course_id.eq.${material.course_id},course_code.eq.${material.course_id}`)
+    ]);
 
-    if (!count) {
+    const isAssigned = (enrollmentCheck.count || 0) > 0 || (timetableCheck.count || 0) > 0;
+    if (!isAssigned) {
       throw new Error("You are not authorized to delete this course material.");
     }
   }
 
-  // 3. Delete from database
+  // 3. Obtain canonical storage path exclusively from database record
+  // (Reject caller-supplied paths to eliminate manipulation vectors)
+  const canonicalStoragePath = material.storage_path;
+
+  // 4. Check if any other material record shares this storage path (defense against duplicate references)
+  let skipStorageDeletion = false;
+  if (canonicalStoragePath) {
+    const { count: sharedRefCount } = await (supabase as any)
+      .from('academic_materials')
+      .select('id', { count: 'exact', head: true })
+      .eq('storage_path', canonicalStoragePath)
+      .neq('id', materialId);
+
+    if ((sharedRefCount || 0) > 0) {
+      console.warn(`[courseService] Storage object "${canonicalStoragePath}" is referenced by ${sharedRefCount} other material record(s); skipping physical file deletion.`);
+      skipStorageDeletion = true;
+    }
+  }
+
+  // 5. Delete physical storage file first while parent record exists for Storage RLS visibility
+  let storageDeleted = false;
+  if (canonicalStoragePath && !skipStorageDeletion) {
+    try {
+      const removed = await deleteStorageFile(STORAGE_BUCKETS.ACADEMIC_MATERIALS, canonicalStoragePath);
+      storageDeleted = removed;
+      if (!removed) {
+        console.warn(`[courseService] Storage removal returned false for "${canonicalStoragePath}". Object may be missing or require cleanup.`);
+      }
+    } catch (storageErr) {
+      console.error(`[courseService] Storage deletion exception for "${canonicalStoragePath}":`, storageErr);
+    }
+  }
+
+  // 6. Delete metadata record from database
   const { error: deleteErr } = await (supabase as any)
     .from('academic_materials')
     .delete()
@@ -619,12 +679,6 @@ export const deleteCourseMaterial = async (materialId: string, storagePath?: str
 
   if (deleteErr) {
     throw new Error(deleteErr.message || "Failed to delete course material record.");
-  }
-
-  // 4. Delete storage file if path exists
-  const fileStoragePath = storagePath || material.storage_path;
-  if (fileStoragePath) {
-    await deleteStorageFile(STORAGE_BUCKETS.ACADEMIC_MATERIALS, fileStoragePath);
   }
 
   return true;

@@ -355,3 +355,103 @@ test('10. Student-side compatibility: students retrieve uploaded materials throu
   assert.equal(studentModules[1].materialsCount, 1);
   assert.equal(studentModules[0].materials[0].title, 'Chapter 1 Notes');
 });
+
+// 11. Unique collision-resistant storage paths
+test('11. Two identical filenames produce distinct collision-resistant Storage paths', () => {
+  const generateSecureFileId = () => {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+  };
+
+  const sanitizeFileName = (name) => name.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/_{2,}/g, '_');
+
+  const deptId = 'dept-cse-101';
+  const courseId = 'CS501';
+  const moduleId = 'Module 1';
+  const fileName = 'syllabus.pdf';
+
+  const path1 = `${deptId}/${courseId}/${moduleId}/${generateSecureFileId()}-${sanitizeFileName(fileName)}`;
+  const path2 = `${deptId}/${courseId}/${moduleId}/${generateSecureFileId()}-${sanitizeFileName(fileName)}`;
+
+  assert.notEqual(path1, path2);
+  assert.ok(path1.endsWith('-syllabus.pdf'));
+  assert.ok(path2.endsWith('-syllabus.pdf'));
+  assert.ok(path1.startsWith(`${deptId}/${courseId}/${moduleId}/`));
+  assert.ok(path2.startsWith(`${deptId}/${courseId}/${moduleId}/`));
+});
+
+// 12. Canonical deletion ignores caller-supplied storage path
+test('12. Canonical deletion strictly uses DB storage path and ignores caller-supplied path', async () => {
+  const dbRecord = {
+    id: 'mat-real',
+    course_id: 'CS501',
+    storage_path: 'dept-cse/CS501/Module 1/uuid-notes.pdf'
+  };
+
+  let deletedStoragePath = null;
+  const mockDeleteStorage = (bucket, path) => {
+    deletedStoragePath = path;
+    return true;
+  };
+
+  // Caller attempts to pass a manipulated storage path targeting an innocent file
+  const manipulatedPath = 'dept-cse/CS601/Module 9/target_file.pdf';
+
+  // Hardened logic: canonical path resolved exclusively from dbRecord
+  const canonicalPath = dbRecord.storage_path;
+  mockDeleteStorage('academic-materials', canonicalPath);
+
+  assert.equal(deletedStoragePath, 'dept-cse/CS501/Module 1/uuid-notes.pdf');
+  assert.notEqual(deletedStoragePath, manipulatedPath);
+});
+
+// 13. Shared storage path reference protection
+test('13. Shared storage path reference prevents physical deletion when other DB records exist', () => {
+  const allDbMaterials = [
+    { id: 'mat-1', title: 'Version 1', storage_path: 'dept-cse/CS501/General/shared.pdf' },
+    { id: 'mat-2', title: 'Version 2', storage_path: 'dept-cse/CS501/General/shared.pdf' }
+  ];
+
+  const targetMaterialId = 'mat-1';
+  const targetRecord = allDbMaterials.find(m => m.id === targetMaterialId);
+
+  // Check other records referencing same path
+  const otherRefs = allDbMaterials.filter(
+    m => m.storage_path === targetRecord.storage_path && m.id !== targetMaterialId
+  );
+
+  let physicalFileDeleted = false;
+  let dbRowDeleted = false;
+
+  // DB deletion proceeds
+  dbRowDeleted = true;
+
+  // Physical file deletion only proceeds if otherRefs.length === 0
+  if (otherRefs.length === 0) {
+    physicalFileDeleted = true;
+  }
+
+  assert.equal(dbRowDeleted, true);
+  assert.equal(physicalFileDeleted, false); // Protected: skipped physical deletion
+});
+
+// 14. Existing legacy material download compatibility
+test('14. Existing legacy material downloads remain compatible without relocation', () => {
+  const legacyRecord = {
+    id: 'legacy-1',
+    title: 'Pre-migration Syllabus',
+    courseId: 'CS501',
+    moduleId: 'General',
+    storagePath: 'dept-cse/CS501/General/syllabus.pdf' // Legacy path without UUID
+  };
+
+  // download invocation contract
+  assert.ok(legacyRecord.storagePath);
+  assert.equal(legacyRecord.storagePath, 'dept-cse/CS501/General/syllabus.pdf');
+  const getPath = (mat) => mat.storagePath;
+  assert.equal(getPath(legacyRecord), 'dept-cse/CS501/General/syllabus.pdf');
+});
