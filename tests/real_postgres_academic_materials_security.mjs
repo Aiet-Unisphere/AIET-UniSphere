@@ -164,6 +164,58 @@ async function run() {
       created_at timestamptz DEFAULT now()
     );
 
+    ALTER TABLE public.academic_materials ENABLE ROW LEVEL SECURITY;
+
+    DROP POLICY IF EXISTS "Users can view academic materials in department" ON public.academic_materials;
+    CREATE POLICY "Users can view academic materials in department"
+      ON public.academic_materials FOR SELECT
+      TO authenticated
+      USING (
+        department_id = public.get_auth_user_department_id()
+        OR public.get_auth_user_role() = 'ADMIN'
+      );
+
+    DROP POLICY IF EXISTS "Faculty and HOD can manage academic materials" ON public.academic_materials;
+    CREATE POLICY "Faculty and HOD can manage academic materials"
+      ON public.academic_materials FOR ALL
+      TO authenticated
+      USING (
+        (department_id = public.get_auth_user_department_id() AND public.get_auth_user_role() IN ('FACULTY', 'HOD'))
+        OR public.get_auth_user_role() = 'ADMIN'
+      )
+      WITH CHECK (
+        (department_id = public.get_auth_user_department_id() AND public.get_auth_user_role() IN ('FACULTY', 'HOD'))
+        OR public.get_auth_user_role() = 'ADMIN'
+      );
+
+    CREATE TABLE IF NOT EXISTS public.audit_logs (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      actor_id UUID,
+      actor_email TEXT,
+      actor_role TEXT,
+      action TEXT NOT NULL,
+      entity_type TEXT NOT NULL,
+      entity_id TEXT,
+      description TEXT,
+      metadata JSONB DEFAULT '{}'::jsonb,
+      ip_address TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
+
+    DROP POLICY IF EXISTS "Admin can view audit logs" ON public.audit_logs;
+    CREATE POLICY "Admin can view audit logs"
+      ON public.audit_logs FOR SELECT
+      TO authenticated
+      USING (public.get_auth_user_role() = 'ADMIN');
+
+    DROP POLICY IF EXISTS "Authenticated users can insert audit logs" ON public.audit_logs;
+    CREATE POLICY "Authenticated users can insert audit logs"
+      ON public.audit_logs FOR INSERT
+      TO authenticated
+      WITH CHECK (true);
+
     GRANT USAGE ON SCHEMA public TO authenticated, anon;
     GRANT USAGE ON SCHEMA storage TO authenticated, anon;
     GRANT USAGE ON SCHEMA auth TO authenticated, anon;
@@ -485,6 +537,57 @@ async function run() {
   const countRemoved = parseInt(checkRemoved.stdout.split('\n').map(l => l.trim()).filter(Boolean).pop(), 10);
   assert.equal(countRemoved, 0, 'Assigned faculty DELETE must remove object');
   console.log('  ✔ Assigned Faculty DELETE: ALLOW');
+
+  // MISSION 08.2.3: Real PostgreSQL Deletion Recovery & Database-Level RLS Verification
+  console.log('\n[6/6] Verifying Mission 08.2.3 Deletion Recovery & Database RLS...');
+
+  // A. Verify student cannot delete academic_materials row
+  await runSqlAsUser('20100000-0000-0000-0000-000000000001', `DELETE FROM public.academic_materials WHERE id = '00060000-0000-0000-0000-000000000001';`);
+  const checkStudentDbDel = await runSql(`SELECT count(*)::int FROM public.academic_materials WHERE id = '00060000-0000-0000-0000-000000000001';`);
+  const countAfterStudent = parseInt(checkStudentDbDel.stdout.split('\n').map(l => l.trim()).filter(Boolean).pop(), 10);
+  assert.equal(countAfterStudent, 1, 'Student must not be able to delete academic_materials row');
+  console.log('  ✔ Student DELETE on public.academic_materials: BLOCKED BY RLS');
+
+  // B. Verify cross-department faculty cannot delete academic_materials row
+  await runSqlAsUser('10300000-0000-0000-0000-000000000003', `DELETE FROM public.academic_materials WHERE id = '00060000-0000-0000-0000-000000000001';`);
+  const checkCrossDeptDel = await runSql(`SELECT count(*)::int FROM public.academic_materials WHERE id = '00060000-0000-0000-0000-000000000001';`);
+  const countAfterCross = parseInt(checkCrossDeptDel.stdout.split('\n').map(l => l.trim()).filter(Boolean).pop(), 10);
+  assert.equal(countAfterCross, 1, 'Cross-department faculty must not be able to delete academic_materials row');
+  console.log('  ✔ Cross-Department Faculty DELETE on public.academic_materials: BLOCKED BY RLS');
+
+  // C. Verify assigned faculty CAN delete academic_materials row
+  await runSqlAsUser('10100000-0000-0000-0000-000000000001', `DELETE FROM public.academic_materials WHERE id = '00060000-0000-0000-0000-000000000001';`);
+  const checkFacDel = await runSql(`SELECT count(*)::int FROM public.academic_materials WHERE id = '00060000-0000-0000-0000-000000000001';`);
+  const countAfterFac = parseInt(checkFacDel.stdout.split('\n').map(l => l.trim()).filter(Boolean).pop(), 10);
+  assert.equal(countAfterFac, 0, 'Assigned faculty must be able to delete academic_materials row');
+  console.log('  ✔ Assigned Faculty DELETE on public.academic_materials: ALLOW');
+
+  // D. Verify authenticated user can insert failure recovery audit log into public.audit_logs
+  const auditRes = await runSqlAsUser('10100000-0000-0000-0000-000000000001', `
+    INSERT INTO public.audit_logs (actor_id, actor_role, action, entity_type, entity_id, description, metadata)
+    VALUES (
+      '10100000-0000-0000-0000-000000000001',
+      'FACULTY',
+      'ACADEMIC_MATERIAL_DELETE_FAILED',
+      'academic_materials',
+      '00060000-0000-0000-0000-000000000001',
+      'Test deletion recovery audit log',
+      '{"storage_path": "11111111-1111-1111-1111-111111111111/CS501/Module 2/uuid-new.pdf", "retries": 3}'::jsonb
+    );
+  `);
+  assert.equal(auditRes.success, true, `Audit log insertion failed: ${auditRes.stderr}`);
+  const checkAudit = await runSql(`SELECT count(*)::int FROM public.audit_logs WHERE action = 'ACADEMIC_MATERIAL_DELETE_FAILED';`);
+  const countAudit = parseInt(checkAudit.stdout.split('\n').map(l => l.trim()).filter(Boolean).pop(), 10);
+  assert.ok(countAudit >= 1, 'Audit log entry must exist in public.audit_logs');
+  console.log('  ✔ Authenticated User INSERT to public.audit_logs: ALLOW');
+
+  // E. Verify PostgreSQL RLS behavior: deleting an orphan storage object without parent record is blocked by SELECT policy
+  const orphanObj = '11111111-1111-1111-1111-111111111111/CS501/Module 1/orphan-unlinked.pdf';
+  await runSqlAsUser('10100000-0000-0000-0000-000000000001', `DELETE FROM storage.objects WHERE name = '${orphanObj}';`);
+  const checkOrphan = await runSql(`SELECT count(*)::int FROM storage.objects WHERE name = '${orphanObj}';`);
+  const countOrphan = parseInt(checkOrphan.stdout.split('\n').map(l => l.trim()).filter(Boolean).pop(), 10);
+  assert.equal(countOrphan, 1, 'Orphan object without parent record must be invisible to non-admin DELETE');
+  console.log('  ✔ Orphan storage object without parent record protected from non-admin DELETE: CONFIRMED');
 
   console.log('\n=============================================================');
   console.log('>>> ALL REAL POSTGRESQL 16 ACADEMIC MATERIALS CHECKS PASSED! <<<');

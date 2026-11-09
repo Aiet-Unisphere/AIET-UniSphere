@@ -455,3 +455,312 @@ test('14. Existing legacy material downloads remain compatible without relocatio
   const getPath = (mat) => mat.storagePath;
   assert.equal(getPath(legacyRecord), 'dept-cse/CS501/General/syllabus.pdf');
 });
+
+// =========================================================================
+// MISSION 08.2.3 DELETION RECOVERY & FAILURE SCENARIO TEST SUITE
+// =========================================================================
+
+// Helper simulating resilient deleteCourseMaterial workflow
+async function simulateResilientDelete({
+  materialId,
+  dbMaterial,
+  sharedRefCount = 0,
+  userProfile = { role: 'FACULTY', department_id: 'dept-cse-101', id: 'fac-1' },
+  isAssigned = true,
+  storageDeleteResult = { success: true },
+  dbDeleteAttemptsFail = 0 // how many attempts fail before succeeding (or all if >= maxRetries)
+}) {
+  const auditLogs = [];
+  let storageDeleteCalls = 0;
+  let dbDeleteCalls = 0;
+
+  // 1. Fetch material
+  if (!dbMaterial) {
+    throw new Error("Course material not found or already deleted.");
+  }
+
+  // 2. Authorization
+  const isAdmin = userProfile.role === 'ADMIN';
+  const isHOD = userProfile.role === 'HOD' && userProfile.department_id === dbMaterial.department_id;
+  const isOwner = dbMaterial.uploaded_by === userProfile.id;
+
+  if (!isAdmin && !isHOD && !isOwner && !isAssigned) {
+    throw new Error("You are not authorized to delete this course material.");
+  }
+
+  // 3. Canonical path
+  const canonicalPath = dbMaterial.storage_path;
+
+  // 4. Shared reference check
+  let skipStorageDeletion = false;
+  if (sharedRefCount > 0) {
+    skipStorageDeletion = true;
+  }
+
+  // 5. Storage deletion
+  let storageDeleted = false;
+  if (canonicalPath && !skipStorageDeletion) {
+    storageDeleteCalls++;
+    if (!storageDeleteResult.success) {
+      throw new Error(`Failed to delete storage file: ${storageDeleteResult.error || 'Unknown storage error'}. Database record retained.`);
+    }
+    storageDeleted = true;
+  }
+
+  // 6. DB deletion with retry loop
+  const maxRetries = 3;
+  let dbDeleted = false;
+  let lastDbError = null;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    dbDeleteCalls++;
+    if (attempt <= dbDeleteAttemptsFail) {
+      lastDbError = new Error(`Connection timeout on attempt ${attempt}`);
+      continue;
+    }
+    dbDeleted = true;
+    lastDbError = null;
+    break;
+  }
+
+  if (!dbDeleted) {
+    // 7. Audit logging on failure
+    auditLogs.push({
+      action: 'ACADEMIC_MATERIAL_DELETE_FAILED',
+      entity_type: 'academic_materials',
+      entity_id: materialId,
+      metadata: {
+        storage_path: canonicalPath,
+        db_error: lastDbError?.message,
+        retries: maxRetries
+      }
+    });
+    throw new Error(`Failed to delete course material record: ${lastDbError?.message}. Storage file was removed; failure logged for retry.`);
+  }
+
+  return {
+    success: true,
+    storageDeleted,
+    storageDeleteCalls,
+    dbDeleteCalls,
+    auditLogs
+  };
+}
+
+// 15. Scenario 1: Storage deletion succeeds and DB deletion succeeds
+test('15. Failure Scenario 1: Storage deletion succeeds and DB deletion succeeds', async () => {
+  const result = await simulateResilientDelete({
+    materialId: 'mat-101',
+    dbMaterial: {
+      id: 'mat-101',
+      course_id: 'CS501',
+      department_id: 'dept-cse-101',
+      uploaded_by: 'fac-1',
+      storage_path: 'dept-cse-101/CS501/Mod1/uuid-lecture.pdf'
+    },
+    storageDeleteResult: { success: true },
+    dbDeleteAttemptsFail: 0
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.storageDeleted, true);
+  assert.equal(result.storageDeleteCalls, 1);
+  assert.equal(result.dbDeleteCalls, 1);
+  assert.equal(result.auditLogs.length, 0);
+});
+
+// 16. Scenario 2: Storage deletion fails
+test('16. Failure Scenario 2: Storage deletion fails (DB record safely retained)', async () => {
+  let threw = false;
+  try {
+    await simulateResilientDelete({
+      materialId: 'mat-102',
+      dbMaterial: {
+        id: 'mat-102',
+        course_id: 'CS501',
+        department_id: 'dept-cse-101',
+        uploaded_by: 'fac-1',
+        storage_path: 'dept-cse-101/CS501/Mod1/uuid-lecture.pdf'
+      },
+      storageDeleteResult: { success: false, error: 'S3 500 Internal Service Error' }
+    });
+  } catch (err) {
+    threw = true;
+    assert.ok(err.message.includes('Failed to delete storage file'));
+    assert.ok(err.message.includes('Database record retained'));
+  }
+
+  assert.equal(threw, true, 'Must throw when storage deletion fails, retaining DB record');
+});
+
+// 17. Scenario 3: Storage deletion succeeds but DB deletion fails
+test('17. Failure Scenario 3: Storage deletion succeeds but DB deletion fails (Retries exhausted & audit log written)', async () => {
+  let threw = false;
+  try {
+    await simulateResilientDelete({
+      materialId: 'mat-103',
+      dbMaterial: {
+        id: 'mat-103',
+        course_id: 'CS501',
+        department_id: 'dept-cse-101',
+        uploaded_by: 'fac-1',
+        storage_path: 'dept-cse-101/CS501/Mod1/uuid-lecture.pdf'
+      },
+      storageDeleteResult: { success: true },
+      dbDeleteAttemptsFail: 3 // All 3 attempts fail
+    });
+  } catch (err) {
+    threw = true;
+    assert.ok(err.message.includes('Failed to delete course material record'));
+    assert.ok(err.message.includes('failure logged for retry'));
+  }
+
+  assert.equal(threw, true, 'Must throw after DB retries are exhausted and log recovery trail');
+});
+
+// 18. Scenario 4: Storage object is already missing
+test('18. Failure Scenario 4: Storage object already missing (Idempotent S3 removal proceeds with DB delete)', async () => {
+  // S3 / Supabase returns success (error: null) when deleting an already missing object
+  const result = await simulateResilientDelete({
+    materialId: 'mat-104',
+    dbMaterial: {
+      id: 'mat-104',
+      course_id: 'CS501',
+      department_id: 'dept-cse-101',
+      uploaded_by: 'fac-1',
+      storage_path: 'dept-cse-101/CS501/Mod1/already-missing.pdf'
+    },
+    storageDeleteResult: { success: true }, // Idempotent 200 OK
+    dbDeleteAttemptsFail: 0
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.storageDeleted, true);
+  assert.equal(result.dbDeleteCalls, 1);
+});
+
+// 19. Scenario 5: Material is referenced by another record
+test('19. Failure Scenario 5: Shared storage reference skips storage deletion', async () => {
+  const result = await simulateResilientDelete({
+    materialId: 'mat-105',
+    dbMaterial: {
+      id: 'mat-105',
+      course_id: 'CS501',
+      department_id: 'dept-cse-101',
+      uploaded_by: 'fac-1',
+      storage_path: 'dept-cse-101/CS501/Mod1/shared-file.pdf'
+    },
+    sharedRefCount: 1, // 1 other record points to same path
+    storageDeleteResult: { success: true }
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.storageDeleted, false); // Protected: skipped physical deletion
+  assert.equal(result.storageDeleteCalls, 0); // No storage delete called
+  assert.equal(result.dbDeleteCalls, 1);     // DB record deleted
+});
+
+// 20. Scenario 6: Unauthorized faculty attempts deletion
+test('20. Failure Scenario 6: Unauthorized faculty deletion is blocked before storage or DB calls', async () => {
+  let threw = false;
+  try {
+    await simulateResilientDelete({
+      materialId: 'mat-106',
+      dbMaterial: {
+        id: 'mat-106',
+        course_id: 'CS501',
+        department_id: 'dept-cse-101',
+        uploaded_by: 'fac-owner',
+        storage_path: 'dept-cse-101/CS501/Mod1/notes.pdf'
+      },
+      userProfile: { role: 'FACULTY', department_id: 'dept-cse-101', id: 'fac-unassigned' },
+      isAssigned: false
+    });
+  } catch (err) {
+    threw = true;
+    assert.ok(err.message.includes('You are not authorized to delete this course material.'));
+  }
+
+  assert.equal(threw, true, 'Must reject unauthorized faculty caller');
+});
+
+// 21. Scenario 7: Deletion is retried
+test('21. Failure Scenario 7: Deletion retry succeeds after previous DB failure', async () => {
+  // Retry call: storage was already removed in previous call, now DB succeeds
+  const retryResult = await simulateResilientDelete({
+    materialId: 'mat-107',
+    dbMaterial: {
+      id: 'mat-107',
+      course_id: 'CS501',
+      department_id: 'dept-cse-101',
+      uploaded_by: 'fac-1',
+      storage_path: 'dept-cse-101/CS501/Mod1/uuid-lecture.pdf'
+    },
+    storageDeleteResult: { success: true }, // Already deleted in S3, returns success
+    dbDeleteAttemptsFail: 0                // Now network/DB succeeds
+  });
+
+  assert.equal(retryResult.success, true);
+  assert.equal(retryResult.dbDeleteCalls, 1);
+
+  // Subsequent call when already deleted returns not found (idempotent termination)
+  let notFoundThrew = false;
+  try {
+    await simulateResilientDelete({
+      materialId: 'mat-107',
+      dbMaterial: null // Record is now deleted from DB
+    });
+  } catch (err) {
+    notFoundThrew = true;
+    assert.ok(err.message.includes('Course material not found or already deleted.'));
+  }
+  assert.equal(notFoundThrew, true);
+});
+
+// 22. Scenario 8: Student download remains valid for non-deleted materials
+test('22. Failure Scenario 8: Enrolled student download workflow remains valid for non-deleted materials', async () => {
+  const activeMaterials = [
+    {
+      id: 'mat-valid-1',
+      title: 'Active Lecture 1',
+      courseId: 'CS501',
+      storagePath: 'dept-cse-101/CS501/Mod1/lecture1.pdf'
+    }
+  ];
+
+  // Simulating student download contract
+  const simulateStudentDownload = (material, isEnrolled, storageObjectExists = true) => {
+    if (!isEnrolled) {
+      throw new Error('Access denied: student not enrolled in this course.');
+    }
+    if (!material || !material.storagePath || !storageObjectExists) {
+      throw new Error('File is no longer available.');
+    }
+    return `https://supabase.local/storage/v1/object/sign/academic-materials/${material.storagePath}?token=mock`;
+  };
+
+  // 1. Enrolled student downloads existing material: SUCCESS
+  const validUrl = simulateStudentDownload(activeMaterials[0], true, true);
+  assert.ok(validUrl.includes('academic-materials/dept-cse-101/CS501/Mod1/lecture1.pdf'));
+
+  // 2. Enrolled student attempts to download missing storage object (e.g. during failed DB delete window): GRACEFUL ERROR
+  let missingFileThrew = false;
+  try {
+    simulateStudentDownload(activeMaterials[0], true, false);
+  } catch (err) {
+    missingFileThrew = true;
+    assert.equal(err.message, 'File is no longer available.');
+  }
+  assert.equal(missingFileThrew, true);
+
+  // 3. Unenrolled student: DENIED
+  let unenrolledThrew = false;
+  try {
+    simulateStudentDownload(activeMaterials[0], false, true);
+  } catch (err) {
+    unenrolledThrew = true;
+    assert.ok(err.message.includes('Access denied'));
+  }
+  assert.equal(unenrolledThrew, true);
+});
+

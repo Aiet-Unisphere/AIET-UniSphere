@@ -5,6 +5,7 @@ import {
   getSignedUrl, 
   downloadStorageFile, 
   deleteStorageFile,
+  deleteStorageFileWithResult,
   validateFile,
   sanitizeFileName 
 } from './storageService';
@@ -660,28 +661,64 @@ export const deleteCourseMaterial = async (
   // 5. Delete physical storage file first while parent record exists for Storage RLS visibility
   let storageDeleted = false;
   if (canonicalStoragePath && !skipStorageDeletion) {
-    try {
-      const removed = await deleteStorageFile(STORAGE_BUCKETS.ACADEMIC_MATERIALS, canonicalStoragePath);
-      storageDeleted = removed;
-      if (!removed) {
-        console.warn(`[courseService] Storage removal returned false for "${canonicalStoragePath}". Object may be missing or require cleanup.`);
-      }
-    } catch (storageErr) {
-      console.error(`[courseService] Storage deletion exception for "${canonicalStoragePath}":`, storageErr);
+    const storageRes = await deleteStorageFileWithResult(STORAGE_BUCKETS.ACADEMIC_MATERIALS, canonicalStoragePath);
+    if (!storageRes.success) {
+      // Hard storage failure: abort before deleting database record to avoid orphaned files in Storage
+      console.error(`[courseService] Storage deletion failed for "${canonicalStoragePath}": ${storageRes.error}`);
+      throw new Error(`Failed to delete storage file: ${storageRes.error || 'Unknown storage error'}. Database record retained.`);
+    }
+    storageDeleted = true;
+  }
+
+  // 6. Delete metadata record from database with retry loop for transient failures
+  let deleteErr: any = null;
+  const maxDbRetries = 3;
+  for (let attempt = 1; attempt <= maxDbRetries; attempt++) {
+    const { error } = await (supabase as any)
+      .from('academic_materials')
+      .delete()
+      .eq('id', materialId);
+
+    if (!error) {
+      deleteErr = null;
+      break;
+    }
+    deleteErr = error;
+    if (attempt < maxDbRetries) {
+      console.warn(`[courseService] DB deletion attempt ${attempt} failed: ${error.message}; retrying...`);
+      await new Promise(res => setTimeout(res, attempt * 150));
     }
   }
 
-  // 6. Delete metadata record from database
-  const { error: deleteErr } = await (supabase as any)
-    .from('academic_materials')
-    .delete()
-    .eq('id', materialId);
-
   if (deleteErr) {
-    throw new Error(deleteErr.message || "Failed to delete course material record.");
+    // 7. DB deletion failure recovery: Storage file was deleted, but DB row remains.
+    // Record to audit_logs so administrators/operations have an immutable recovery trail.
+    try {
+      await (supabase as any)
+        .from('audit_logs')
+        .insert({
+          actor_id: user.id,
+          actor_role: profile?.role || 'FACULTY',
+          action: 'ACADEMIC_MATERIAL_DELETE_FAILED',
+          entity_type: 'academic_materials',
+          entity_id: materialId,
+          description: 'Physical storage file was deleted, but database record deletion failed after retries.',
+          metadata: {
+            storage_path: canonicalStoragePath,
+            course_id: material.course_id,
+            department_id: material.department_id,
+            db_error: deleteErr.message || 'Unknown database error',
+            retries: maxDbRetries
+          }
+        });
+    } catch (auditErr) {
+      console.error('[courseService] Failed to record deletion failure audit log:', auditErr);
+    }
+
+    throw new Error(deleteErr.message || "Failed to delete course material record. Storage file was removed; failure logged for retry.");
   }
 
-  return true;
+  return { success: true, storageDeleted };
 };
 
 export const downloadCourseMaterial = async (storagePath: string, fileName?: string): Promise<void> => {

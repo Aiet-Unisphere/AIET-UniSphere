@@ -250,13 +250,13 @@ export const downloadStorageFile = async (
 };
 
 /**
- * Deletes a file from Supabase Storage.
+ * Deletes a file from Supabase Storage and returns explicit result and error message.
  */
-export const deleteStorageFile = async (
+export const deleteStorageFileWithResult = async (
   bucket: StorageBucket,
   path: string
-): Promise<boolean> => {
-  if (!path) return false;
+): Promise<{ success: boolean; error?: string }> => {
+  if (!path) return { success: false, error: 'Path is required.' };
   const cleanPath = path.replace(/^\/+/, '');
 
   try {
@@ -266,12 +266,23 @@ export const deleteStorageFile = async (
 
     if (error) {
       console.error(`[StorageService] Delete error for ${bucket}/${cleanPath}:`, error);
-      return false;
+      return { success: false, error: error.message };
     }
 
-    return true;
-  } catch (err) {
-    console.error(`[StorageService] Delete exception:`, err);
-    return false;
+    return { success: true };
+  } catch (err: any) {
+    console.error(`[StorageService] Delete exception for ${bucket}/${cleanPath}:`, err);
+    return { success: false, error: err?.message || 'Storage deletion exception' };
   }
+};
+
+/**
+ * Deletes a file from Supabase Storage.
+ */
+export const deleteStorageFile = async (
+  bucket: StorageBucket,
+  path: string
+): Promise<boolean> => {
+  const res = await deleteStorageFileWithResult(bucket, path);
+  return res.success;
 };
