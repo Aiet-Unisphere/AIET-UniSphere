@@ -4,6 +4,8 @@ import {
   uploadFile, 
   getSignedUrl, 
   downloadStorageFile, 
+  deleteStorageFile,
+  validateFile,
   sanitizeFileName 
 } from './storageService';
 
@@ -115,6 +117,7 @@ export interface CourseMaterialItem {
   fileSize?: number;
   mimeType?: string;
   createdAt: string;
+  uploadedBy?: string;
 }
 
 export interface FacultyCourseItem extends Course {
@@ -278,7 +281,12 @@ export const getFacultyCourseById = async (id: string): Promise<FacultyCourseIte
   if (!user) return undefined;
   const { data: profile } = await (supabase as any).from('profiles').select('role').eq('id', user.id).single();
   const courses = ['HOD', 'ADMIN'].includes(profile?.role) ? await getDepartmentCourses() : await getFacultyCourses();
-  return courses.find(c => c.id === id || c.code.toLowerCase() === id.toLowerCase());
+  const found = courses.find(c => c.id === id || c.code.toLowerCase() === id.toLowerCase());
+  if (found) {
+    const materials = await getCourseMaterials(found.id, found.code);
+    found.modules = deriveCourseModules(materials);
+  }
+  return found;
 };
 
 export const deriveCourseModules = (
@@ -317,9 +325,12 @@ export const deriveCourseModules = (
 
   return Array.from(moduleMap.values()).map(mod => {
     // Correlate assignments mentioning this module if present
+    const modSearchKey = mod.id.toLowerCase().startsWith('module') 
+      ? mod.id.toLowerCase() 
+      : `module ${mod.id}`.toLowerCase();
     const matchingAssignments = courseAssignments.filter(a => 
-      (a.title && a.title.toLowerCase().includes(`module ${mod.id}`.toLowerCase())) ||
-      (a.instructions && a.instructions.toLowerCase().includes(`module ${mod.id}`.toLowerCase()))
+      (a.title && a.title.toLowerCase().includes(modSearchKey)) ||
+      (a.instructions && a.instructions.toLowerCase().includes(modSearchKey))
     );
 
     const assignmentsCount = matchingAssignments.length;
@@ -364,7 +375,8 @@ export const getCourseMaterials = async (courseId: string, courseCode?: string):
         storagePath: m.storage_path,
         fileSize: m.file_size ? Number(m.file_size) : undefined,
         mimeType: m.mime_type,
-        createdAt: m.created_at
+        createdAt: m.created_at,
+        uploadedBy: m.uploaded_by
       }));
     }
   } catch {}
@@ -386,9 +398,17 @@ export const uploadCourseMaterial = async ({
   const { data: { user } } = await (supabase as any).auth.getUser();
   if (!user) throw new Error("Authenticated session required.");
 
+  if (!title || !title.trim()) {
+    throw new Error("Material title is required.");
+  }
+
+  if (!file) {
+    throw new Error("A file must be selected for upload.");
+  }
+
   const { data: profile } = await (supabase as any)
     .from('profiles')
-    .select('department_id')
+    .select('role, department_id')
     .eq('id', user.id)
     .single();
 
@@ -396,9 +416,41 @@ export const uploadCourseMaterial = async ({
     throw new Error("No active department found on profile.");
   }
 
-  const safeName = sanitizeFileName(file.name);
-  const storagePath = `${profile.department_id}/${courseId}/${moduleId}/${safeName}`;
+  // 1. Validate file against bucket rules (max 50MB, allowed types)
+  const validation = validateFile(file, STORAGE_BUCKETS.ACADEMIC_MATERIALS);
+  if (!validation.valid) {
+    throw new Error(validation.error || "File validation failed.");
+  }
 
+  // 2. Authorization check: verify faculty teaches this course (unless Admin or HOD)
+  const isAdmin = profile.role === 'ADMIN';
+  const isHOD = profile.role === 'HOD';
+
+  if (!isAdmin && !isHOD) {
+    const [enrollmentCheck, timetableCheck] = await Promise.all([
+      (supabase as any)
+        .from('course_enrollments')
+        .select('id', { count: 'exact', head: true })
+        .eq('faculty_id', user.id)
+        .or(`course_id.eq.${courseId},course_code.eq.${courseId}`),
+      (supabase as any)
+        .from('timetable_entries')
+        .select('id', { count: 'exact', head: true })
+        .eq('faculty_id', user.id)
+        .or(`course_id.eq.${courseId},course_code.eq.${courseId}`)
+    ]);
+
+    const isAssigned = (enrollmentCheck.count || 0) > 0 || (timetableCheck.count || 0) > 0;
+    if (!isAssigned) {
+      throw new Error("You are not authorized to upload materials for a course you do not teach.");
+    }
+  }
+
+  const cleanModuleId = moduleId.trim() || 'General';
+  const safeName = sanitizeFileName(file.name);
+  const storagePath = `${profile.department_id}/${courseId}/${cleanModuleId}/${safeName}`;
+
+  // 3. Upload file to Supabase Storage
   await uploadFile({
     bucket: STORAGE_BUCKETS.ACADEMIC_MATERIALS,
     path: storagePath,
@@ -406,39 +458,176 @@ export const uploadCourseMaterial = async ({
     upsert: true
   });
 
-  const { data, error } = await (supabase as any)
+  // 4. Insert metadata record in academic_materials
+  try {
+    const { data, error } = await (supabase as any)
+      .from('academic_materials')
+      .insert({
+        title: title.trim(),
+        course_id: courseId,
+        module_id: cleanModuleId,
+        file_type: file.name.split('.').pop()?.toUpperCase() || 'PDF',
+        storage_path: storagePath,
+        file_name: file.name,
+        file_size: file.size,
+        mime_type: file.type || 'application/pdf',
+        department_id: profile.department_id,
+        uploaded_by: user.id
+      })
+      .select()
+      .single();
+
+    if (error || !data) {
+      throw new Error(error?.message || "Failed to save course material metadata.");
+    }
+
+    return {
+      id: data.id,
+      title: data.title,
+      courseId: data.course_id,
+      moduleId: data.module_id,
+      fileType: data.file_type,
+      fileName: data.file_name,
+      storagePath: data.storage_path,
+      fileSize: Number(data.file_size),
+      mimeType: data.mime_type,
+      createdAt: data.created_at,
+      uploadedBy: data.uploaded_by
+    };
+  } catch (dbErr: any) {
+    // Roll back storage file if database insert failed to prevent orphaned storage objects
+    await deleteStorageFile(STORAGE_BUCKETS.ACADEMIC_MATERIALS, storagePath).catch(() => {});
+    throw dbErr;
+  }
+};
+
+export const updateCourseMaterial = async (
+  materialId: string,
+  updates: { title?: string; moduleId?: string }
+): Promise<CourseMaterialItem> => {
+  const { data: { user } } = await (supabase as any).auth.getUser();
+  if (!user) throw new Error("Authenticated session required.");
+
+  const { data: material, error: fetchErr } = await (supabase as any)
     .from('academic_materials')
-    .insert({
-      title,
-      course_id: courseId,
-      module_id: moduleId,
-      file_type: file.name.split('.').pop()?.toUpperCase() || 'PDF',
-      storage_path: storagePath,
-      file_name: file.name,
-      file_size: file.size,
-      mime_type: file.type,
-      department_id: profile.department_id,
-      uploaded_by: user.id
+    .select('*')
+    .eq('id', materialId)
+    .single();
+
+  if (fetchErr || !material) {
+    throw new Error("Course material not found.");
+  }
+
+  const { data: profile } = await (supabase as any)
+    .from('profiles')
+    .select('role, department_id')
+    .eq('id', user.id)
+    .single();
+
+  const isAdmin = profile?.role === 'ADMIN';
+  const isHOD = profile?.role === 'HOD' && profile.department_id === material.department_id;
+  const isOwner = material.uploaded_by === user.id;
+
+  if (!isAdmin && !isHOD && !isOwner) {
+    const { count } = await (supabase as any)
+      .from('course_enrollments')
+      .select('id', { count: 'exact', head: true })
+      .eq('faculty_id', user.id)
+      .eq('course_id', material.course_id);
+
+    if (!count) {
+      throw new Error("You are not authorized to update this course material.");
+    }
+  }
+
+  const newTitle = updates.title !== undefined ? updates.title.trim() : material.title;
+  if (!newTitle) throw new Error("Material title cannot be empty.");
+  const newModuleId = updates.moduleId !== undefined ? (updates.moduleId.trim() || 'General') : material.module_id;
+
+  const { data: updated, error: updateErr } = await (supabase as any)
+    .from('academic_materials')
+    .update({
+      title: newTitle,
+      module_id: newModuleId
     })
+    .eq('id', materialId)
     .select()
     .single();
 
-  if (error || !data) {
-    throw new Error(error?.message || "Failed to save course material metadata.");
+  if (updateErr || !updated) {
+    throw new Error(updateErr?.message || "Failed to update course material.");
   }
 
   return {
-    id: data.id,
-    title: data.title,
-    courseId: data.course_id,
-    moduleId: data.module_id,
-    fileType: data.file_type,
-    fileName: data.file_name,
-    storagePath: data.storage_path,
-    fileSize: Number(data.file_size),
-    mimeType: data.mime_type,
-    createdAt: data.created_at
+    id: updated.id,
+    title: updated.title,
+    courseId: updated.course_id,
+    moduleId: updated.module_id || 'General',
+    fileType: updated.file_type || 'PDF',
+    fileName: updated.file_name,
+    storagePath: updated.storage_path,
+    fileSize: updated.file_size ? Number(updated.file_size) : undefined,
+    mimeType: updated.mime_type,
+    createdAt: updated.created_at,
+    uploadedBy: updated.uploaded_by
   };
+};
+
+export const deleteCourseMaterial = async (materialId: string, storagePath?: string): Promise<boolean> => {
+  const { data: { user } } = await (supabase as any).auth.getUser();
+  if (!user) throw new Error("Authenticated session required.");
+
+  // 1. Fetch material to check ownership & existence
+  const { data: material, error: fetchErr } = await (supabase as any)
+    .from('academic_materials')
+    .select('id, course_id, department_id, uploaded_by, storage_path')
+    .eq('id', materialId)
+    .single();
+
+  if (fetchErr || !material) {
+    throw new Error("Course material not found or already deleted.");
+  }
+
+  // 2. Authorization check
+  const { data: profile } = await (supabase as any)
+    .from('profiles')
+    .select('role, department_id')
+    .eq('id', user.id)
+    .single();
+
+  const isAdmin = profile?.role === 'ADMIN';
+  const isHOD = profile?.role === 'HOD' && profile.department_id === material.department_id;
+  const isOwner = material.uploaded_by === user.id;
+
+  if (!isAdmin && !isHOD && !isOwner) {
+    const { count } = await (supabase as any)
+      .from('course_enrollments')
+      .select('id', { count: 'exact', head: true })
+      .eq('faculty_id', user.id)
+      .eq('course_id', material.course_id);
+
+    if (!count) {
+      throw new Error("You are not authorized to delete this course material.");
+    }
+  }
+
+  // 3. Delete from database
+  const { error: deleteErr } = await (supabase as any)
+    .from('academic_materials')
+    .delete()
+    .eq('id', materialId);
+
+  if (deleteErr) {
+    throw new Error(deleteErr.message || "Failed to delete course material record.");
+  }
+
+  // 4. Delete storage file if path exists
+  const fileStoragePath = storagePath || material.storage_path;
+  if (fileStoragePath) {
+    await deleteStorageFile(STORAGE_BUCKETS.ACADEMIC_MATERIALS, fileStoragePath);
+  }
+
+  return true;
 };
 
 export const downloadCourseMaterial = async (storagePath: string, fileName?: string): Promise<void> => {
