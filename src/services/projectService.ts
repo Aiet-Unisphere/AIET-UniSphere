@@ -432,6 +432,130 @@ export const getProjectResources = async (projectId: string): Promise<ProjectRes
 };
 
 // ---------------------------------------------------------------------------
+// FACULTY PROJECT MENTORING
+// ---------------------------------------------------------------------------
+
+export interface FacultyProjectsStats {
+  totalMentored: number;
+  totalDepartment: number;
+  pendingReview: number;
+  active: number;
+  completed: number;
+  onHold: number;
+}
+
+export interface FacultyProjectsResponse {
+  mentoredProjects: Project[];
+  departmentProjects: Project[];
+  allProjects: Project[];
+  stats: FacultyProjectsStats;
+}
+
+export const getFacultyMentoredProjects = async (): Promise<FacultyProjectsResponse> => {
+  const { data: { user }, error: authErr } = await supabase.auth.getUser();
+  if (authErr || !user) {
+    return {
+      mentoredProjects: [],
+      departmentProjects: [],
+      allProjects: [],
+      stats: { totalMentored: 0, totalDepartment: 0, pendingReview: 0, active: 0, completed: 0, onHold: 0 }
+    };
+  }
+
+  // Retrieve current faculty profile
+  const { data: profile } = await sb
+    .from('profiles')
+    .select('id, full_name, role, department_id, email')
+    .eq('id', user.id)
+    .single();
+
+  const callerName = (profile?.full_name || '').trim().toLowerCase();
+  const callerEmail = (profile?.email || user.email || '').trim().toLowerCase();
+
+  // Query user_projects (RLS automatically scopes to caller's department for FACULTY / HOD)
+  let query = sb
+    .from('user_projects')
+    .select('*')
+    .order('updated_at', { ascending: false });
+
+  if (profile?.department_id && profile?.role === 'FACULTY') {
+    query = query.eq('department_id', profile.department_id);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    console.error('[projectService] getFacultyMentoredProjects error:', error.message);
+    throw new Error(`Failed to load mentored projects: ${error.message}`);
+  }
+
+  const allProjects: Project[] = (data || []).map(dbToProject);
+
+  // Match faculty mentor name or email
+  const isMentorMatch = (mentorField?: string | null): boolean => {
+    if (!mentorField) return false;
+    const mentorNorm = mentorField.trim().toLowerCase();
+    if (!mentorNorm) return false;
+
+    // Check email match
+    if (callerEmail && mentorNorm === callerEmail) return true;
+
+    // Check full name exact or substring match
+    if (callerName) {
+      if (mentorNorm === callerName) return true;
+      if (mentorNorm.includes(callerName) || callerName.includes(mentorNorm)) return true;
+      
+      // Token-based check (e.g. "Dr. Alan Turing" matches "Alan Turing")
+      const callerTokens = callerName.split(/\s+/).filter((t: string) => t.length > 2);
+      const mentorTokens = mentorNorm.split(/\s+/).filter((t: string) => t.length > 2);
+      const matchCount = callerTokens.filter((t: string) => mentorTokens.includes(t)).length;
+      if (matchCount >= 2 || (callerTokens.length === 1 && matchCount === 1)) return true;
+    }
+
+    return false;
+  };
+
+  const mentoredProjects = allProjects.filter(p => isMentorMatch(p.faculty_mentor));
+  const departmentProjects = allProjects.filter(p => !isMentorMatch(p.faculty_mentor));
+
+  const stats: FacultyProjectsStats = {
+    totalMentored: mentoredProjects.length,
+    totalDepartment: allProjects.length,
+    pendingReview: allProjects.filter(p => p.status === 'Pending Review').length,
+    active: allProjects.filter(p => p.status === 'Active').length,
+    completed: allProjects.filter(p => p.status === 'Completed').length,
+    onHold: allProjects.filter(p => p.status === 'On Hold').length,
+  };
+
+  return {
+    mentoredProjects,
+    departmentProjects,
+    allProjects,
+    stats,
+  };
+};
+
+export const updateProjectReviewStatus = async (
+  projectId: string,
+  status: Project['status'],
+  progress?: number
+): Promise<Project> => {
+  const allowedStatuses: Project['status'][] = ['Active', 'Completed', 'On Hold', 'Pending Review', 'Upcoming'];
+  if (!allowedStatuses.includes(status)) {
+    throw new Error(`Invalid project status '${status}'. Must be one of: ${allowedStatuses.join(', ')}`);
+  }
+
+  const updates: Partial<Project> = { status };
+  if (progress !== undefined) {
+    if (progress < 0 || progress > 100) {
+      throw new Error(`Invalid progress '${progress}'. Must be between 0 and 100.`);
+    }
+    updates.progress = progress;
+  }
+
+  return updateProject(projectId, updates);
+};
+
+// ---------------------------------------------------------------------------
 // HELPERS
 // ---------------------------------------------------------------------------
 

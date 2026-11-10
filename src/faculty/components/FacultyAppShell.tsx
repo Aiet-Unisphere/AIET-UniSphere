@@ -16,7 +16,8 @@ import {
   User as UserIcon,
   ChevronDown,
   Megaphone,
-  Sparkles
+  Sparkles,
+  FolderGit2
 } from 'lucide-react';
 import { AuthLogo } from '../../components/AuthLogo';
 import { useAuth } from '../../app/context/AuthContext';
@@ -145,6 +146,7 @@ export const FacultyAppShell: React.FC<FacultyAppShellProps> = ({ children }) =>
     { label: 'Timetable', path: '/faculty/timetable', icon: <Clock size={18} /> },
     { label: 'Assignments', path: '/faculty/assignments', icon: <ClipboardList size={18} /> },
     { label: 'Assessments', path: '/faculty/assessments', icon: <Award size={18} /> },
+    { label: 'Project Mentoring', path: '/faculty/projects', icon: <FolderGit2 size={18} /> },
     { label: 'AI Assistant', path: '/faculty/ai-assistant', icon: <Sparkles size={18} /> }
   ];
 
@@ -168,6 +170,7 @@ export const FacultyAppShell: React.FC<FacultyAppShellProps> = ({ children }) =>
     if (path.includes('/faculty/assignments')) return 'Assignment Management';
     if (path.includes('/faculty/assessments/')) return 'Assessment Details';
     if (path.includes('/faculty/assessments')) return 'Assessment Management';
+    if (path.includes('/faculty/projects')) return 'Project Mentoring';
     if (path.includes('/faculty/announcements')) return 'Faculty Announcements';
     if (path.includes('/faculty/ai-assistant')) return 'Faculty AI Assistant';
     return 'Faculty Portal';

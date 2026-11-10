@@ -65,6 +65,7 @@ const FacultyAssignmentDetail = React.lazy(() => import('./faculty/pages/Faculty
 const FacultyAssessmentList = React.lazy(() => import('./faculty/pages/FacultyAssessmentList').then(m => ({ default: m.FacultyAssessmentList })));
 const FacultyAssessmentDetail = React.lazy(() => import('./faculty/pages/FacultyAssessmentDetail').then(m => ({ default: m.FacultyAssessmentDetail })));
 const FacultyAnnouncementPage = React.lazy(() => import('./faculty/pages/FacultyAnnouncementPage').then(m => ({ default: m.FacultyAnnouncementPage })));
+const FacultyProjectsPage = React.lazy(() => import('./faculty/pages/FacultyProjectsPage').then(m => ({ default: m.FacultyProjectsPage })));
 const FacultyAIAssistantPage = React.lazy(() => import('./faculty/pages/FacultyAIAssistantPage').then(m => ({ default: m.FacultyAIAssistantPage })));
 const FacultyTimetablePage = React.lazy(() => import('./faculty/pages/FacultyTimetablePage').then(m => ({ default: m.FacultyTimetablePage })));
 const FacultyProfilePage = React.lazy(() => import('./faculty/pages/FacultyProfilePage').then(m => ({ default: m.FacultyProfilePage })));
@@ -173,6 +174,7 @@ const App: React.FC = () => {
             <Route path="/faculty/assessments/:id" element={<RoleGuard allowedRoles={['FACULTY', 'HOD', 'ADMIN']}><FacultyAssessmentDetail /></RoleGuard>} />
             <Route path="/faculty/assessments/:id/results/:attemptId" element={<RoleGuard allowedRoles={['FACULTY', 'HOD', 'ADMIN']}><FacultyAssessmentDetail /></RoleGuard>} />
             <Route path="/faculty/announcements" element={<RoleGuard allowedRoles={['FACULTY', 'ADMIN']}><FacultyAnnouncementPage /></RoleGuard>} />
+            <Route path="/faculty/projects" element={<RoleGuard allowedRoles={['FACULTY', 'HOD', 'ADMIN']}><FacultyProjectsPage /></RoleGuard>} />
             <Route path="/faculty/ai-assistant" element={<RoleGuard allowedRoles={['FACULTY', 'HOD', 'ADMIN']}><FacultyAIAssistantPage /></RoleGuard>} />
             <Route path="/faculty/profile" element={<RoleGuard allowedRoles={['FACULTY', 'ADMIN']}><FacultyProfilePage /></RoleGuard>} />
             <Route path="/faculty/notifications" element={<RoleGuard allowedRoles={['FACULTY', 'ADMIN']}><FacultyNotificationsPage /></RoleGuard>} />
