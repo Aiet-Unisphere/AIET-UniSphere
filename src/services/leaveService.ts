@@ -710,4 +710,11 @@ export const getLeaveDocumentUrl = async (storagePath: string): Promise<string |
 };
 
 // Re-export PDF generation functions
-export { generateLeaveNotePdf, downloadApprovedLeaveNote, isLeaveApproved } from './leaveNotePdfService';
+export { 
+  generateLeaveNotePdf, 
+  generateStudentApplicationPdf, 
+  generateLeaveNoteDocument,
+  downloadApprovedLeaveNote, 
+  downloadStudentApplicationPdf,
+  isLeaveApproved 
+} from './leaveNotePdfService';

@@ -1,7 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { generateLeaveNotePdf } from '../src/services/leaveNotePdfService.ts';
+import { 
+  generateLeaveNotePdf, 
+  generateStudentApplicationPdf 
+} from '../src/services/leaveNotePdfService.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -12,7 +15,7 @@ if (!fs.existsSync(outDir)) {
   fs.mkdirSync(outDir, { recursive: true });
 }
 
-// 1. Scenario A: Complete student information
+// 1. Scenario A: Complete student information (Approved)
 const scenarioA = {
   id: 'LV-2026-001',
   studentId: 'a0000000-0000-0000-0000-000000000001',
@@ -47,9 +50,9 @@ const scenarioB = {
   branchSnapshot: 'Information Science and Engineering',
   semesterSnapshot: 4,
   academicYearSnapshot: '2025-2026',
-  sectionSnapshot: undefined, // Missing section
+  sectionSnapshot: undefined,
   studentPhoneSnapshot: '9845123456',
-  parentPhoneSnapshot: undefined, // Missing parent mobile
+  parentPhoneSnapshot: undefined,
   leaveType: 'Medical Leave',
   startDate: '2026-11-18',
   endDate: '2026-11-18',
@@ -90,16 +93,42 @@ const scenarioC = {
   snapshotProvenance: 'RETROACTIVE_BACKFILL'
 };
 
+// 4. Scenario Student Application: Pending Leave Request
+const scenarioApplication = {
+  id: 'LV-2026-104',
+  studentId: 'a0000000-0000-0000-0000-000000000004',
+  studentNameSnapshot: 'Sneha Rao',
+  studentUsnSnapshot: '4AL22CS088',
+  branchSnapshot: 'Computer Science and Engineering',
+  semesterSnapshot: 6,
+  academicYearSnapshot: '2025-2026',
+  sectionSnapshot: 'A',
+  studentPhoneSnapshot: '9741234567',
+  parentPhoneSnapshot: '9741234568',
+  leaveType: 'Academic Duty / Event',
+  startDate: '2026-11-20',
+  endDate: '2026-11-22',
+  days: 3,
+  reason: 'Representing AIET at the Inter-Collegiate Technical Symposium for Project Presentation and Coding Challenge.',
+  status: 'Pending',
+  submittedAt: '10/11/2026',
+  snapshotProvenance: 'SUBMISSION'
+};
+
 const samples = [
-  { name: 'scenario_a_complete_student.pdf', data: scenarioA },
-  { name: 'scenario_b_missing_optional.pdf', data: scenarioB },
-  { name: 'scenario_c_retroactive_backfill.pdf', data: scenarioC }
+  { name: 'scenario_a_complete_student.pdf', data: scenarioA, type: 'approved' },
+  { name: 'scenario_b_missing_optional.pdf', data: scenarioB, type: 'approved' },
+  { name: 'scenario_c_retroactive_backfill.pdf', data: scenarioC, type: 'approved' },
+  { name: 'scenario_student_application.pdf', data: scenarioApplication, type: 'application' },
+  { name: 'scenario_approved_leave_note.pdf', data: scenarioA, type: 'approved' }
 ];
 
-for (const { name, data } of samples) {
-  const doc = await generateLeaveNotePdf(data);
+for (const { name, data, type } of samples) {
+  const doc = type === 'application' 
+    ? await generateStudentApplicationPdf(data) 
+    : await generateLeaveNotePdf(data);
   const filePath = path.join(outDir, name);
   const pdfBytes = doc.output('arraybuffer');
   fs.writeFileSync(filePath, Buffer.from(pdfBytes));
-  console.log(`Generated: ${filePath} (${pdfBytes.byteLength} bytes, pages: ${doc.getNumberOfPages()})`);
+  console.log(`Generated (${type}): ${filePath} (${pdfBytes.byteLength} bytes, pages: ${doc.getNumberOfPages()})`);
 }

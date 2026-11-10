@@ -24,7 +24,8 @@ import {
   approveLeaveRequest, 
   rejectLeaveRequest, 
   downloadLeaveDocument,
-  downloadApprovedLeaveNote 
+  downloadApprovedLeaveNote,
+  downloadStudentApplicationPdf 
 } from '../../services/leaveService';
 import type { LeaveRequest } from '../../data/leaveRequests';
 
@@ -90,6 +91,15 @@ export const HODLeaveDetail: React.FC = () => {
     } catch (err: any) {
       console.error("Leave note download error:", err);
       alert(err.message || "Failed to generate approved leave note PDF.");
+    }
+  };
+
+  const handleDownloadApplicationForm = async (item: LeaveRequest) => {
+    try {
+      await downloadStudentApplicationPdf(item);
+    } catch (err: any) {
+      console.error("Leave application download error:", err);
+      alert(err.message || "Failed to generate student leave application PDF.");
     }
   };
 
@@ -458,27 +468,47 @@ export const HODLeaveDetail: React.FC = () => {
                   </div>
                 )}
               </div>
-              <button
-                onClick={() => handleDownloadLeaveNote(leave)}
-                className="btn font-sans"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.45rem',
-                  backgroundColor: '#16A34A',
-                  color: '#FFFFFF',
-                  border: '1px solid #16A34A',
-                  fontWeight: 700,
-                  padding: '0.55rem 1.15rem',
-                  borderRadius: 'var(--border-radius)',
-                  cursor: 'pointer',
-                  fontSize: '0.875rem'
-                }}
-                title="Download official single-page approved leave note PDF"
-              >
-                <Download size={16} />
-                <span>Download Approved Leave Note PDF</span>
-              </button>
+              <div style={{ display: 'flex', gap: '0.65rem', flexWrap: 'wrap' }}>
+                <button
+                  onClick={() => handleDownloadLeaveNote(leave)}
+                  className="btn font-sans"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.45rem',
+                    backgroundColor: '#16A34A',
+                    color: '#FFFFFF',
+                    border: '1px solid #16A34A',
+                    fontWeight: 700,
+                    padding: '0.55rem 1.15rem',
+                    borderRadius: 'var(--border-radius)',
+                    cursor: 'pointer',
+                    fontSize: '0.875rem'
+                  }}
+                  title="Download official single-page approved leave note PDF"
+                >
+                  <Download size={16} />
+                  <span>Download Approved Leave Note PDF</span>
+                </button>
+                <button
+                  onClick={() => handleDownloadApplicationForm(leave)}
+                  className="btn font-sans btn-secondary"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.45rem',
+                    fontWeight: 600,
+                    padding: '0.55rem 1rem',
+                    borderRadius: 'var(--border-radius)',
+                    cursor: 'pointer',
+                    fontSize: '0.875rem'
+                  }}
+                  title="Download student leave application form PDF"
+                >
+                  <Download size={16} />
+                  <span>Download Application Form</span>
+                </button>
+              </div>
             </div>
           </div>
         )}

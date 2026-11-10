@@ -6,6 +6,7 @@ import {
   submitLeaveRequest, 
   downloadLeaveDocument, 
   downloadApprovedLeaveNote,
+  downloadStudentApplicationPdf,
   getStudentLeaveProfileDefaults 
 } from '../services/leaveService';
 import type { LeaveRequest } from '../data/leaveRequests';
@@ -134,6 +135,15 @@ export const LeaveRequestsPage: React.FC = () => {
     }
   };
 
+  const handleDownloadApplicationForm = async (leave: LeaveRequest) => {
+    try {
+      await downloadStudentApplicationPdf(leave);
+    } catch (err: any) {
+      console.error('Failed to download leave application:', err);
+      alert(err.message || 'Unable to generate leave application PDF.');
+    }
+  };
+
   return (
     <AppShell>
       <div className="page-header-container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.5rem' }}>
@@ -230,34 +240,51 @@ export const LeaveRequestsPage: React.FC = () => {
                       {l.reviewedBy || 'Pending Review'}
                     </td>
                     <td style={{ padding: '1rem' }}>
-                      {l.status === 'Approved' ? (
+                      <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                        {l.status === 'Approved' ? (
+                          <button
+                            onClick={() => handleDownloadLeaveNote(l)}
+                            className="btn font-sans"
+                            style={{
+                              width: 'auto',
+                              padding: '0.35rem 0.65rem',
+                              fontSize: '0.75rem',
+                              fontWeight: 700,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.35rem',
+                              backgroundColor: '#16A34A',
+                              borderColor: '#16A34A',
+                              color: '#FFFFFF',
+                              borderRadius: 'var(--border-radius)',
+                              cursor: 'pointer'
+                            }}
+                            title="Download official single-page approved leave note PDF"
+                          >
+                            <Download size={13} />
+                            <span>Download Note</span>
+                          </button>
+                        ) : null}
+
                         <button
-                          onClick={() => handleDownloadLeaveNote(l)}
-                          className="btn font-sans"
+                          onClick={() => handleDownloadApplicationForm(l)}
+                          className="btn font-sans btn-secondary"
                           style={{
                             width: 'auto',
-                            padding: '0.35rem 0.75rem',
+                            padding: '0.35rem 0.65rem',
                             fontSize: '0.75rem',
-                            fontWeight: 700,
+                            fontWeight: 600,
                             display: 'inline-flex',
                             alignItems: 'center',
                             gap: '0.35rem',
-                            backgroundColor: '#16A34A',
-                            borderColor: '#16A34A',
-                            color: '#FFFFFF',
-                            borderRadius: 'var(--border-radius)',
                             cursor: 'pointer'
                           }}
-                          title="Download official single-page approved leave note PDF"
+                          title="Download filled AIET leave application form PDF"
                         >
                           <Download size={13} />
-                          <span>Download Note</span>
+                          <span>Application PDF</span>
                         </button>
-                      ) : (
-                        <span style={{ fontSize: '0.8rem', color: 'var(--brand-dark-grey)', fontStyle: 'italic' }}>
-                          {l.status === 'Pending' ? 'Pending Approval' : 'Not Available'}
-                        </span>
-                      )}
+                      </div>
                     </td>
                   </tr>
                 ))}

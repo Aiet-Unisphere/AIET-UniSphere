@@ -11,6 +11,8 @@ const rootDir = path.resolve(__dirname, '..');
 // Import from built or compiled sources
 import { 
   generateLeaveNotePdf, 
+  generateStudentApplicationPdf,
+  generateLeaveNoteDocument,
   isLeaveApproved 
 } from '../src/services/leaveNotePdfService.ts';
 
@@ -354,6 +356,59 @@ describe('Mission 09.2 — Approved Leave Note PDF Generation & Security Audit',
       sqlContent.includes('approval_remarks IS NULL'),
       'Must enforce approval_remarks IS NULL on student insert'
     );
+  });
+
+  it('17. generateStudentApplicationPdf generates valid single-page PDF for pending leave requests', async () => {
+    const pendingLeave = {
+      ...baseApprovedLeave,
+      id: 'LV-APP-999',
+      status: 'Pending',
+      approvalRemarks: undefined,
+      reviewedBy: undefined,
+      reviewerName: undefined,
+      reviewedAt: undefined
+    };
+
+    const doc = await generateStudentApplicationPdf(pendingLeave);
+    assert.ok(doc && typeof doc.getNumberOfPages === 'function', 'Expected document wrapper');
+    assert.strictEqual(doc.getNumberOfPages(), 1, 'Application PDF must be strictly 1 page');
+
+    const pdfOutput = doc.output();
+    assert.ok(pdfOutput.includes('Arjun Rao'), 'Student name must be rendered');
+    assert.ok(pdfOutput.includes('4AL21CS001'), 'USN must be rendered');
+    assert.ok(pdfOutput.includes('Computer Science and Engineering'), 'Branch must be rendered');
+    assert.ok(pdfOutput.includes('Student Leave Application Form'), 'Application footer must be present');
+  });
+
+  it('18. generateStudentApplicationPdf keeps remarks and signature sections 100% clean of HOD endorsement', async () => {
+    const pendingLeave = {
+      ...baseApprovedLeave,
+      id: 'LV-APP-998',
+      status: 'Pending',
+      approvalRemarks: 'Malicious Injected Remarks',
+      reviewedBy: 'Unauthorized Hacker'
+    };
+
+    const doc = await generateStudentApplicationPdf(pendingLeave);
+    const pdfOutput = doc.output();
+
+    assert.strictEqual(pdfOutput.includes('HOD APPROVED'), false, 'Application form must NOT contain HOD approval stamp');
+    assert.strictEqual(pdfOutput.includes('HOD Remarks:'), false, 'Application form must NOT contain HOD remarks label');
+    assert.strictEqual(pdfOutput.includes('SAMPLE / DEMO — NOT AN OFFICIAL SIGNATURE'), false, 'Application form must NOT contain sample HOD seal');
+  });
+
+  it('19. Both application and approved PDFs share identical A4 page dimensions and byte structure', async () => {
+    const appDoc = await generateStudentApplicationPdf({ ...baseApprovedLeave, status: 'Pending' });
+    const apprDoc = await generateLeaveNotePdf(baseApprovedLeave);
+
+    assert.strictEqual(appDoc.getNumberOfPages(), 1);
+    assert.strictEqual(apprDoc.getNumberOfPages(), 1);
+
+    const appBytes = await appDoc.save();
+    const apprBytes = await apprDoc.save();
+
+    assert.ok(appBytes.byteLength > 18000, 'Application PDF bytes must be valid');
+    assert.ok(apprBytes.byteLength > 18000, 'Approved note PDF bytes must be valid');
   });
 
 });

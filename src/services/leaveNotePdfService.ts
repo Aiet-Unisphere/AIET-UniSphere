@@ -107,19 +107,33 @@ const formatYearSem = (semester: number | string | undefined | null): string => 
   return `${year}${getSuffix(year)} / ${semNum}${getSuffix(semNum)}`;
 };
 
+export type LeaveNoteDocumentType = 'application' | 'approved';
+
 /**
- * Generates an approved physical AIET Leave Note PDF by directly overlaying
- * student and approval particulars onto the exact original physical template (1000230720.pdf).
+ * Generates an authentic AIET Leave Note PDF by directly overlaying
+ * student particulars and/or approval endorsements onto the original physical
+ * template (1000230720.pdf / 1000230720(2).pdf).
  *
- * Implements strict security:
- * - Rejects unapproved leave requests.
- * - Prioritizes immutable snapshot data over mutable profile fields.
- * - Does NOT alter original template borders, headings, notes, or typography.
- * - Places HOD remarks, fictional sample signature, and seal strictly within the existing HOD section.
- * - Preserves Mentor, Coordinator, Principal, and SWO/Warden sections clean for manual physical signing.
+ * Supports two distinct document types:
+ * 1. 'application' — Student Leave Application Form:
+ *    - Populates student details, leave dates, duration, reason, and submission date.
+ *    - Keeps all 5 remarks and signature spaces (Mentor, Coordinator, HOD, Principal/AO,
+ *      SWO/Warden) 100% clean and blank for manual physical routing.
+ *    - Available for all submitted leave requests (Pending, Under Review, or Approved).
+ *
+ * 2. 'approved' — Approved Official Leave Note:
+ *    - Strictly requires approved leave status.
+ *    - Populates all student particulars plus authorized HOD reviewer remarks and endorsement
+ *      within the designated HOD bounding box.
+ *    - Preserves other signature spaces clean for physical archiving.
  */
-export const generateLeaveNotePdf = async (leave: LeaveRequest): Promise<LeaveNoteDocument> => {
-  if (!isLeaveApproved(leave.status)) {
+export const generateLeaveNoteDocument = async (
+  leave: LeaveRequest,
+  docType: LeaveNoteDocumentType = 'approved'
+): Promise<LeaveNoteDocument> => {
+  const isApprovedMode = docType === 'approved';
+
+  if (isApprovedMode && !isLeaveApproved(leave.status)) {
     throw new Error(
       `Cannot generate approved leave note: Leave request is currently "${leave.status}". Only approved leave requests can generate a leave note.`
     );
@@ -151,7 +165,6 @@ export const generateLeaveNotePdf = async (leave: LeaveRequest): Promise<LeaveNo
   const sectionStr = leave.sectionSnapshot ? String(leave.sectionSnapshot).trim() : '-';
   const studentPhone = leave.studentPhoneSnapshot || '-';
   const parentPhone = leave.parentPhoneSnapshot || '-';
-  const leaveCategory = leave.leaveType || 'General Leave';
   const startDateStr = leave.startDate || '-';
   const endDateStr = leave.endDate || '-';
   const numDaysStr = `${leave.days || 1} Day${(leave.days || 1) > 1 ? 's' : ''}`;
@@ -180,8 +193,6 @@ export const generateLeaveNotePdf = async (leave: LeaveRequest): Promise<LeaveNo
     `No. of Days: ${numDaysStr}`,
     `Reason: ${cleanReason}`,
     cleanReason,
-    `HOD Remarks: ${hodRemarks}`,
-    hodRemarks,
     `Date: ${applicationDate}`,
     `STUDENT DECLARATION & SIGNATURE`,
     `REMARKS & SIGNATURE OF MENTOR`,
@@ -194,10 +205,17 @@ export const generateLeaveNotePdf = async (leave: LeaveRequest): Promise<LeaveNo
     `2. Prior permission should be taken.`,
     `3. HOD & AO/Principal's signature is must for reduction in mess bill.`,
     `4. Only above mentioned dates is considered for mess bill reduction.`,
-    `SYSTEM-GENERATED SAMPLE — NOT VALID AS AN OFFICIAL SIGNED FORM`,
-    `SAMPLE / DEMO SEAL`,
     "Page 1 of 1"
   ];
+
+  if (isApprovedMode) {
+    textLog.push(
+      `HOD Remarks: ${hodRemarks}`,
+      hodRemarks,
+      `SYSTEM-GENERATED SAMPLE — NOT VALID AS AN OFFICIAL SIGNED FORM`,
+      `SAMPLE / DEMO SEAL`
+    );
+  }
 
   // Helper to draw text and record in search log
   const draw = (
@@ -254,50 +272,80 @@ export const generateLeaveNotePdf = async (leave: LeaveRequest): Promise<LeaveNo
   // PRINCIPAL/AO (Y ~ 236), and SWO/WARDEN (Y ~ 180) are intentionally
   // left completely blank for physical signatures as required.
 
-  // --- HOD APPROVAL & ENDORSEMENT (WITHIN EXISTING HOD BOX: Y=255 to Y=305) ---
-  // HOD Remarks text
-  const hodRemarkLines = wrapTextToWidth(hodRemarks, 175, fontOblique, 7.5);
-  if (hodRemarkLines.length > 0) {
-    draw(hodRemarkLines[0], 202, 293, fontOblique, 7.5, inkDark, 180);
+  // --- HOD APPROVAL & ENDORSEMENT (ONLY IN APPROVED MODE) ---
+  if (isApprovedMode) {
+    // HOD Remarks text
+    const hodRemarkLines = wrapTextToWidth(hodRemarks, 175, fontOblique, 7.5);
+    if (hodRemarkLines.length > 0) {
+      draw(hodRemarkLines[0], 202, 293, fontOblique, 7.5, inkDark, 180);
+    }
+    if (hodRemarkLines.length > 1) {
+      const remainingHod = hodRemarkLines.slice(1).join(' ');
+      draw(remainingHod, 88, 278, fontOblique, 7.5, inkDark, 290);
+    }
+
+    // Fictional Sample HOD Endorsement Signature & Badge (Strictly within HOD box)
+    draw(`Dr. S. K. Rao (${reviewerName})`, 388, 292, fontBold, 7.5, inkBlue, 140);
+    draw('[SAMPLE / DEMO SIGNATURE]', 388, 280, fontBold, 6.5, inkRed);
+    draw('HOD APPROVED — DEMONSTRATION COPY', 388, 269, fontBold, 6.0, inkBlue);
+
+    // Prominent disclaimer in HOD endorsement area
+    draw('SAMPLE / DEMO — NOT AN OFFICIAL SIGNATURE OR SEAL', 88, 262, fontBold, 6.5, inkRed);
+
+    // Provenance string
+    const provenanceLabel = leave.snapshotProvenance === 'RETROACTIVE_BACKFILL'
+      ? 'Provenance: Retroactive Backfill (Current Profile)'
+      : leave.snapshotProvenance === 'UNVERIFIED'
+      ? 'Provenance: Unverified Historical Record'
+      : 'Provenance: Verified Submission Snapshot';
+
+    // Single-page bottom verification line (below the 4 original notes)
+    draw(
+      `AIET-UniSphere Document Id: ${leave.id || 'N/A'} | ${provenanceLabel} | Demonstration Copy | Page 1 of 1`,
+      80,
+      28,
+      fontRegular,
+      6.0,
+      inkMuted
+    );
+
+    textLog.push(provenanceLabel);
+    textLog.push('HOD APPROVED — DEMONSTRATION COPY');
+    textLog.push('SAMPLE / DEMO — NOT AN OFFICIAL SIGNATURE OR SEAL');
+    textLog.push('[SAMPLE / DEMO SIGNATURE]');
+    textLog.push('SYSTEM-GENERATED SAMPLE - NOT VALID AS AN OFFICIAL SIGNED FORM');
+  } else {
+    // STUDENT APPLICATION FORM MODE:
+    // HOD box is left 100% blank for subsequent physical or digital review
+    draw(
+      `AIET-UniSphere Document Id: ${leave.id || 'N/A'} | Student Leave Application Form | Page 1 of 1`,
+      80,
+      28,
+      fontRegular,
+      6.0,
+      inkMuted
+    );
+    textLog.push('Student Leave Application Form');
   }
-  if (hodRemarkLines.length > 1) {
-    const remainingHod = hodRemarkLines.slice(1).join(' ');
-    draw(remainingHod, 88, 278, fontOblique, 7.5, inkDark, 290);
-  }
-
-  // Fictional Sample HOD Endorsement Signature & Badge (Strictly within HOD box)
-  draw(`Dr. S. K. Rao (${reviewerName})`, 388, 292, fontBold, 7.5, inkBlue, 140);
-  draw('[SAMPLE / DEMO SIGNATURE]', 388, 280, fontBold, 6.5, inkRed);
-  draw('HOD APPROVED — DEMONSTRATION COPY', 388, 269, fontBold, 6.0, inkBlue);
-
-  // Prominent disclaimer in HOD endorsement area
-  draw('SAMPLE / DEMO — NOT AN OFFICIAL SIGNATURE OR SEAL', 88, 262, fontBold, 6.5, inkRed);
-
-  // Provenance string
-  const provenanceLabel = leave.snapshotProvenance === 'RETROACTIVE_BACKFILL'
-    ? 'Provenance: Retroactive Backfill (Current Profile)'
-    : leave.snapshotProvenance === 'UNVERIFIED'
-    ? 'Provenance: Unverified Historical Record'
-    : 'Provenance: Verified Submission Snapshot';
-
-  // Single-page bottom verification line (below the 4 original notes)
-  draw(
-    `AIET-UniSphere Document Id: ${leave.id || 'N/A'} | ${provenanceLabel} | Demonstration Copy | Page 1 of 1`,
-    80,
-    28,
-    fontRegular,
-    6.0,
-    inkMuted
-  );
-
-  textLog.push(provenanceLabel);
-  textLog.push('HOD APPROVED — DEMONSTRATION COPY');
-  textLog.push('SAMPLE / DEMO — NOT AN OFFICIAL SIGNATURE OR SEAL');
-  textLog.push('[SAMPLE / DEMO SIGNATURE]');
-  textLog.push('SYSTEM-GENERATED SAMPLE - NOT VALID AS AN OFFICIAL SIGNED FORM');
 
   const savedBytes = await pdfDoc.save({ useObjectStreams: false });
   return new LeaveNoteDocument(pdfDoc, savedBytes, textLog.join('\n'));
+};
+
+/**
+ * Generates an approved physical AIET Leave Note PDF by directly overlaying
+ * student and approval particulars onto the exact original physical template (1000230720.pdf).
+ */
+export const generateLeaveNotePdf = async (leave: LeaveRequest): Promise<LeaveNoteDocument> => {
+  return generateLeaveNoteDocument(leave, 'approved');
+};
+
+/**
+ * Generates a student application form AIET Leave Note PDF (pre-approval).
+ * Overlays student details, dates, reason, leaving remarks sections completely blank.
+ */
+export const generateStudentApplicationPdf = async (leave: LeaveRequest): Promise<LeaveNoteDocument> => {
+  return generateLeaveNoteDocument(leave, 'application');
 };
 
 /**
@@ -311,6 +359,31 @@ export const downloadApprovedLeaveNote = async (
   const pdfBytes = await doc.save();
   const safeRef = (leave.id || 'Leave_Note').replace(/[^a-zA-Z0-9_-]/g, '_');
   const targetName = filename || `AIET_Leave_Note_${safeRef}_Approved.pdf`;
+
+  if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+    const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = targetName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+};
+
+/**
+ * Generates and triggers browser download for the student application PDF.
+ */
+export const downloadStudentApplicationPdf = async (
+  leave: LeaveRequest,
+  filename?: string
+): Promise<void> => {
+  const doc = await generateStudentApplicationPdf(leave);
+  const pdfBytes = await doc.save();
+  const safeRef = (leave.id || 'Leave_Application').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const targetName = filename || `AIET_Leave_Application_${safeRef}.pdf`;
 
   if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
