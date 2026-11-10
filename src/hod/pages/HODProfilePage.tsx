@@ -290,7 +290,7 @@ export const HODProfilePage: React.FC = () => {
                   Academic Designation
                 </label>
                 <div style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--brand-black)', marginTop: '0.2rem' }}>
-                  Professor &amp; Head of Department
+                  {authProfile?.designation || 'Professor & Head of Department'}
                 </div>
               </div>
             </div>

@@ -104,7 +104,7 @@ export const FacultyDashboard: React.FC = () => {
             {getGreeting()}, {facultyName} 👋
           </h1>
           <p style={{ fontSize: '0.875rem', color: 'var(--brand-dark-grey)', fontWeight: 500, margin: 0 }}>
-            {deptDisplayName} · Faculty
+            {deptDisplayName} · {authProfile?.designation || 'Faculty'}
           </p>
         </div>
 

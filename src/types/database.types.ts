@@ -18,6 +18,7 @@ export interface Profile {
   role: UserRole;
   department_id?: string | null;
   department?: Department | null;
+  designation?: string | null;
   account_status: AccountStatus;
   avatar_path?: string | null;
   avatar_url?: string | null;

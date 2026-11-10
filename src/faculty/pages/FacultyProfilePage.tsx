@@ -202,7 +202,7 @@ export const FacultyProfilePage: React.FC = () => {
           
           <div style={{ marginTop: '0.35rem', display: 'flex', justifyContent: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
             <span className="badge badge-active" style={{ fontSize: '0.725rem' }}>
-              Faculty Member
+              {authProfile?.designation || 'Faculty Member'}
             </span>
             <span className="badge badge-graded" style={{ fontSize: '0.725rem' }}>
               {deptCode}
@@ -289,7 +289,7 @@ export const FacultyProfilePage: React.FC = () => {
                   Academic Designation
                 </label>
                 <div style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--brand-black)', marginTop: '0.2rem' }}>
-                  Assistant / Associate Professor
+                  {authProfile?.designation || 'Designation not specified'}
                 </div>
               </div>
             </div>

@@ -18,6 +18,7 @@ export const UserForm: React.FC = () => {
   const [userId, setUserId] = useState('');
   const [email, setEmail] = useState('');
   const [departmentId, setDepartmentId] = useState('');
+  const [designation, setDesignation] = useState('');
 
   // Dynamic Departments State
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -54,6 +55,7 @@ export const UserForm: React.FC = () => {
           setUserId(u.userId);
           setEmail(u.email);
           setDepartmentId(u.departmentId || '');
+          setDesignation(u.designation || '');
         }
         setLoading(false);
       };
@@ -108,6 +110,7 @@ export const UserForm: React.FC = () => {
           email,
           departmentId,
           departmentName: deptName,
+          designation: (role === 'FACULTY' || role === 'HOD') ? (designation.trim() || undefined) : undefined,
           status: 'Active'
         });
         setSuccessMessage('User profile updated successfully.');
@@ -120,6 +123,7 @@ export const UserForm: React.FC = () => {
           password,
           departmentId,
           departmentName: deptName,
+          designation: (role === 'FACULTY' || role === 'HOD') ? (designation.trim() || undefined) : undefined,
           status: 'Active'
         });
         setSuccessMessage('User account created successfully.');
@@ -280,6 +284,25 @@ export const UserForm: React.FC = () => {
               )}
               {errors.departmentId && <span style={{ color: 'var(--color-error)', fontSize: '0.75rem', marginTop: '0.2rem', display: 'block' }}>{errors.departmentId}</span>}
             </div>
+
+            {/* Academic Designation (Faculty & HOD only) */}
+            {(role === 'FACULTY' || role === 'HOD') && (
+              <div>
+                <label className="form-label font-sans" style={{ fontWeight: 600 }}>
+                  Academic Designation (Optional)
+                </label>
+                <input 
+                  type="text"
+                  placeholder={role === 'HOD' ? 'e.g. Professor & HOD' : 'e.g. Assistant Professor, Associate Professor, Professor'}
+                  className="form-input font-sans"
+                  value={designation}
+                  onChange={(e) => setDesignation(e.target.value)}
+                />
+                <span style={{ fontSize: '0.75rem', color: 'var(--brand-dark-grey)', marginTop: '0.2rem', display: 'block' }}>
+                  Official institutional title displayed on academic profile and documents.
+                </span>
+              </div>
+            )}
 
             {/* Password Fields for New User Provisioning */}
             {!isEditMode && (

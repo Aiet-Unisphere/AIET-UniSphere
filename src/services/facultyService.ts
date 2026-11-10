@@ -18,7 +18,7 @@ const mapProfileToFaculty = (
     departmentId: profile.department_id || profile.department?.id || '',
     email: profile.email,
     phone: profile.phone || 'Not recorded',
-    designation: profile.designation || (profile.role === 'HOD' ? 'Head of Department' : 'Faculty'),
+    designation: profile.designation || (profile.role === 'HOD' ? 'Head of Department' : 'Designation not specified'),
     status: profile.account_status === 'ACTIVE' ? 'Active' : profile.account_status === 'LOCKED' ? 'Locked' : profile.account_status === 'PENDING' ? 'Pending' : 'Inactive',
     assignedCourses,
     totalStudents,
@@ -44,7 +44,7 @@ export const getAllFaculty = async (): Promise<FacultyMember[]> => {
 
   let query = (supabase as any)
     .from('profiles')
-    .select('id, email, full_name, usn_or_employee_id, department_id, role, account_status, department:departments(id,name,code)')
+    .select('id, email, full_name, usn_or_employee_id, department_id, role, account_status, designation, department:departments(id,name,code)')
     .in('role', ['FACULTY', 'HOD']);
 
   if (callerProfile.role === 'HOD' && callerProfile.department_id) {

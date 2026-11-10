@@ -149,6 +149,17 @@ export const createUser = async (data: Omit<User, 'id' | 'createdAt' | 'lastActi
     }
 
     if (edgeData && edgeData.user) {
+      if (data.designation) {
+        try {
+          await (supabase as any)
+            .from('profiles')
+            .update({ designation: data.designation.trim() })
+            .eq('id', edgeData.user.id);
+        } catch (desigErr) {
+          console.warn('[userService] Non-fatal error persisting designation:', desigErr);
+        }
+      }
+
       // Re-fetch user by ID to get full department relation
       const createdUser = await getUserById(edgeData.user.id);
       
@@ -189,6 +200,9 @@ export const updateUser = async (id: string, updates: Partial<User>): Promise<Us
   }
   if (updates.role !== undefined && updates.role !== 'ADMIN') {
     payload.role = updates.role;
+  }
+  if (updates.designation !== undefined) {
+    payload.designation = updates.designation ? updates.designation.trim() : null;
   }
 
   try {

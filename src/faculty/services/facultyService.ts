@@ -30,14 +30,14 @@ export const getFacultyProfile = async (): Promise<FacultyProfile> => {
     if (authError || !user) throw new Error('Authenticated faculty session required.');
     const { data, error } = await (supabase as any)
       .from('profiles')
-      .select('id, full_name, email, department:departments(name)')
+      .select('id, full_name, email, designation, department:departments(name)')
       .eq('id', user.id)
       .single();
     if (error || !data) {
       return {
         id: user.id,
         name: user.email?.split('@')[0] || 'Faculty Member',
-        title: 'Faculty Member',
+        title: 'Designation not specified',
         department: 'Department not assigned',
         email: user.email || '',
         office: 'Not recorded',
@@ -47,7 +47,7 @@ export const getFacultyProfile = async (): Promise<FacultyProfile> => {
     return {
       id: data.id,
       name: data.full_name || data.email,
-      title: data.designation || 'Faculty Member',
+      title: data.designation || 'Designation not specified',
       department: data.department?.name || 'Department not assigned',
       email: data.email,
       office: 'Not recorded',
@@ -59,7 +59,7 @@ export const getFacultyProfile = async (): Promise<FacultyProfile> => {
     return {
       id: user?.id || '',
       name: user?.email?.split('@')[0] || 'Faculty Member',
-      title: 'Faculty Member',
+      title: 'Designation not specified',
       department: 'Department not assigned',
       email: user?.email || '',
       office: 'Not recorded',

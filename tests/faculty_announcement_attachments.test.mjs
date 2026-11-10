@@ -384,3 +384,4 @@ test('12. Announcement filtering regression: preserves audience filter for facul
   assert.strictEqual(facultyFiltered.length, 2);
   assert.deepStrictEqual(facultyFiltered.map(a => a.id), ['2', '3']);
 });
+
