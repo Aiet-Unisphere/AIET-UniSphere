@@ -1,8 +1,25 @@
 import React, { useEffect, useState } from 'react';
-import { Megaphone, Search, Calendar, CheckCircle2, X, AlertCircle, Eye, Inbox } from 'lucide-react';
+import { 
+  Megaphone, 
+  Search, 
+  Calendar, 
+  CheckCircle2, 
+  X, 
+  AlertCircle, 
+  Eye, 
+  Inbox, 
+  Paperclip, 
+  Download, 
+  Loader2 
+} from 'lucide-react';
 import { FacultyAppShell } from '../components/FacultyAppShell';
 import { StatCard } from '../../components/StatCard';
-import { getDepartmentAnnouncements, getReadAnnouncements, markAnnouncementAsRead } from '../../services/announcementService';
+import { 
+  getDepartmentAnnouncements, 
+  getReadAnnouncements, 
+  markAnnouncementAsRead,
+  downloadAnnouncementAttachment
+} from '../../services/announcementService';
 import type { Announcement } from '../../data/announcements';
 import { useAuth } from '../../app/context/AuthContext';
 
@@ -19,6 +36,36 @@ export const FacultyAnnouncementPage: React.FC = () => {
   
   // Selected detail
   const [selectedAnnouncement, setSelectedAnnouncement] = useState<Announcement | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+
+  const formatFileSize = (bytes?: number): string => {
+    if (!bytes || bytes <= 0) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  };
+
+  const handleDownload = async (anc: Announcement, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!anc.attachmentPath || downloadingId) return;
+
+    setDownloadingId(anc.id);
+    setDownloadError(null);
+
+    try {
+      await downloadAnnouncementAttachment(
+        anc.attachmentPath,
+        anc.attachmentName || 'Announcement_Document.pdf',
+        anc.id
+      );
+    } catch (err: any) {
+      console.error('[FacultyAnnouncementPage] Download error:', err);
+      setDownloadError(err.message || 'Failed to download attachment. Please try again.');
+    } finally {
+      setDownloadingId(null);
+    }
+  };
 
   useEffect(() => {
     if (profile?.department_id && profile?.id) {
@@ -50,6 +97,7 @@ export const FacultyAnnouncementPage: React.FC = () => {
 
   const handleOpenAnnouncement = async (anc: Announcement) => {
     setSelectedAnnouncement(anc);
+    setDownloadError(null);
     if (profile?.id && !readIds.includes(anc.id)) {
       const success = await markAnnouncementAsRead(anc.id, profile.id);
       if (success) {
@@ -225,9 +273,41 @@ export const FacultyAnnouncementPage: React.FC = () => {
                     </div>
                   </div>
 
-                  <p style={{ fontSize: '0.9rem', color: 'var(--brand-black)', lineHeight: 1.5, margin: '0.5rem 0 1rem 0', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                  <p style={{ fontSize: '0.9rem', color: 'var(--brand-black)', lineHeight: 1.5, margin: '0.5rem 0 0.5rem 0', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
                     {anc.content}
                   </p>
+
+                  {/* Attachment Pill Indicator */}
+                  {anc.attachmentPath && (
+                    <div 
+                      style={{ 
+                        display: 'inline-flex', 
+                        alignItems: 'center', 
+                        gap: '0.4rem', 
+                        margin: '0.25rem 0 0.75rem 0',
+                        padding: '0.25rem 0.6rem',
+                        borderRadius: '6px',
+                        backgroundColor: '#EFF6FF',
+                        border: '1px solid #DBEAFE',
+                        fontSize: '0.8rem', 
+                        color: '#1E40AF', 
+                        fontWeight: 500,
+                        maxWidth: '100%',
+                        overflow: 'hidden'
+                      }}
+                      title={anc.attachmentName || 'Official Attachment Available'}
+                    >
+                      <Paperclip size={13} style={{ flexShrink: 0, color: '#2563EB' }} />
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {anc.attachmentName || 'Attachment available'}
+                      </span>
+                      {anc.attachmentSize && (
+                        <span style={{ color: '#64748B', fontSize: '0.725rem', flexShrink: 0 }}>
+                          ({formatFileSize(anc.attachmentSize)})
+                        </span>
+                      )}
+                    </div>
+                  )}
 
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', paddingTop: '0.75rem', borderTop: '1px solid rgba(156, 163, 175, 0.12)', fontSize: '0.8rem', color: 'var(--brand-dark-grey)' }}>
                     <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
@@ -261,16 +341,114 @@ export const FacultyAnnouncementPage: React.FC = () => {
                   {selectedAnnouncement.title}
                 </h2>
               </div>
-              <button onClick={() => setSelectedAnnouncement(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--brand-dark-grey)' }}>
+              <button onClick={() => { setSelectedAnnouncement(null); setDownloadError(null); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--brand-dark-grey)' }}>
                 <X size={20} />
               </button>
             </div>
 
-            <div style={{ marginBottom: '1.5rem' }}>
+            <div style={{ marginBottom: '1.25rem' }}>
               <p style={{ fontSize: '0.95rem', color: 'var(--brand-black)', lineHeight: 1.6, whiteSpace: 'pre-wrap', margin: 0 }}>
                 {selectedAnnouncement.content}
               </p>
             </div>
+
+            {/* Supporting Attachment Section */}
+            {selectedAnnouncement.attachmentPath && (
+              <div style={{ marginBottom: '1.5rem' }}>
+                <div style={{
+                  fontSize: '0.75rem',
+                  fontWeight: 700,
+                  color: 'var(--brand-dark-grey)',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.04em',
+                  marginBottom: '0.5rem'
+                }}>
+                  Official Attachment / Circular
+                </div>
+
+                <div style={{
+                  padding: '0.85rem 1rem',
+                  backgroundColor: '#F8FAFC',
+                  borderRadius: 'var(--border-radius)',
+                  border: '1px solid rgba(156, 163, 175, 0.25)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: '0.75rem'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', minWidth: 0, flex: 1 }}>
+                    <div style={{
+                      width: '34px',
+                      height: '34px',
+                      borderRadius: '6px',
+                      backgroundColor: '#EFF6FF',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#2563EB',
+                      flexShrink: 0
+                    }}>
+                      <Paperclip size={16} />
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                      <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--brand-black)', wordBreak: 'break-all' }}>
+                        {selectedAnnouncement.attachmentName || 'Announcement_Document.pdf'}
+                      </span>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--brand-dark-grey)' }}>
+                        {selectedAnnouncement.attachmentSize ? formatFileSize(selectedAnnouncement.attachmentSize) : 'Document'}
+                        {selectedAnnouncement.attachmentType ? ` • ${selectedAnnouncement.attachmentType}` : ''}
+                      </span>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={downloadingId === selectedAnnouncement.id}
+                    onClick={() => handleDownload(selectedAnnouncement)}
+                    className="btn btn-secondary font-sans"
+                    style={{
+                      fontSize: '0.8rem',
+                      padding: '0.4rem 0.85rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.4rem',
+                      width: 'auto'
+                    }}
+                  >
+                    {downloadingId === selectedAnnouncement.id ? (
+                      <>
+                        <Loader2 size={14} className="spinner" />
+                        <span>Downloading...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Download size={14} />
+                        <span>Download Attachment</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {downloadError && (
+                  <div style={{
+                    marginTop: '0.65rem',
+                    padding: '0.5rem 0.75rem',
+                    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+                    border: '1px solid rgba(239, 68, 68, 0.25)',
+                    borderRadius: 'var(--border-radius)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    fontSize: '0.8rem',
+                    color: 'var(--brand-danger)'
+                  }}>
+                    <AlertCircle size={15} style={{ flexShrink: 0 }} />
+                    <span style={{ flex: 1 }}>{downloadError}</span>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '1rem', borderTop: '1px solid rgba(156, 163, 175, 0.2)', fontSize: '0.8rem', color: 'var(--brand-dark-grey)', flexWrap: 'wrap', gap: '0.75rem' }}>
               <div>
@@ -283,7 +461,7 @@ export const FacultyAnnouncementPage: React.FC = () => {
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1.5rem' }}>
               <button 
-                onClick={() => setSelectedAnnouncement(null)} 
+                onClick={() => { setSelectedAnnouncement(null); setDownloadError(null); }} 
                 className="btn btn-primary font-sans"
               >
                 Close
