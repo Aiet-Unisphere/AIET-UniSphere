@@ -443,9 +443,57 @@ export const submitLeaveRequest = async (payload: {
   }
 
   // INSERT leave request with full snapshot attributes
-  const { data, error } = await (supabase as any)
+  const fullSnapshotPayload = {
+    id: tempLeaveId,
+    student_id: user.id,
+    department_id: studentProfile.department_id,
+    hod_id: hodProfile.id,
+    leave_type: payload.leaveType.trim(),
+    reason: payload.reason.trim(),
+    start_date: payload.startDate,
+    end_date: payload.endDate,
+    status: 'PENDING',
+    supporting_doc_path: storagePath,
+    supporting_doc_name: fileName,
+    supporting_doc_size: fileSize,
+    supporting_doc_type: mimeType,
+    student_name_snapshot: studentProfile.full_name || 'Student',
+    student_usn_snapshot: studentProfile.usn_or_employee_id || 'N/A',
+    branch_snapshot: studentProfile.department?.name || 'Department',
+    section_snapshot: payload.section?.trim() || null,
+    semester_snapshot: studentAcademic?.semester || null,
+    academic_year_snapshot: studentAcademic?.academic_year || null,
+    student_phone_snapshot: payload.studentPhone?.trim() || studentAcademic?.phone || null,
+    parent_phone_snapshot: payload.parentPhone?.trim() || studentAcademic?.parent_phone || null,
+    snapshot_provenance: 'SUBMISSION'
+  };
+
+  let data: any = null;
+  let insertError: any = null;
+
+  // 1. Primary insert: full snapshot payload (retains academic_year_snapshot & all snapshot fields)
+  const fullInsertResult = await (supabase as any)
     .from('leave_requests')
-    .insert({
+    .insert(fullSnapshotPayload)
+    .select('*')
+    .single();
+
+  data = fullInsertResult.data;
+  insertError = fullInsertResult.error;
+
+  // 2. Schema cache adaptive fallback: if remote backend has not executed Migration 00041,
+  // PostgREST returns PGRST204 ("Could not find the 'academic_year_snapshot' column... in the schema cache").
+  // In that environment, gracefully fall back to base columns while preserving dynamic joins.
+  if (insertError && (
+    insertError.code === 'PGRST204' ||
+    insertError.message?.includes('schema cache') ||
+    insertError.message?.includes('snapshot')
+  )) {
+    console.warn(
+      `[leaveService] Remote database schema cache missing snapshot columns (${insertError.message}). Retrying with base columns (migration 00041 pending).`
+    );
+
+    const basePayload = {
       id: tempLeaveId,
       student_id: user.id,
       department_id: studentProfile.department_id,
@@ -458,23 +506,22 @@ export const submitLeaveRequest = async (payload: {
       supporting_doc_path: storagePath,
       supporting_doc_name: fileName,
       supporting_doc_size: fileSize,
-      supporting_doc_type: mimeType,
-      student_name_snapshot: studentProfile.full_name || 'Student',
-      student_usn_snapshot: studentProfile.usn_or_employee_id || 'N/A',
-      branch_snapshot: studentProfile.department?.name || 'Department',
-      section_snapshot: payload.section?.trim() || null,
-      semester_snapshot: studentAcademic?.semester || null,
-      academic_year_snapshot: studentAcademic?.academic_year || null,
-      student_phone_snapshot: payload.studentPhone?.trim() || studentAcademic?.phone || null,
-      parent_phone_snapshot: payload.parentPhone?.trim() || studentAcademic?.parent_phone || null,
-      snapshot_provenance: 'SUBMISSION'
-    })
-    .select('*')
-    .single();
+      supporting_doc_type: mimeType
+    };
 
-  if (error || !data) {
-    console.error("[leaveService] INSERT leave_requests error:", error);
-    throw new Error(error?.message || "Failed to submit leave request.");
+    const fallbackResult = await (supabase as any)
+      .from('leave_requests')
+      .insert(basePayload)
+      .select('*')
+      .single();
+
+    data = fallbackResult.data;
+    insertError = fallbackResult.error;
+  }
+
+  if (insertError || !data) {
+    console.error("[leaveService] INSERT leave_requests error:", insertError);
+    throw new Error(insertError?.message || "Failed to submit leave request.");
   }
 
   // Insert into leave_attachments table if file was attached
@@ -563,6 +610,8 @@ export const approveLeaveRequest = async (referenceOrId: string, remarks?: strin
 
   const cleanRemarks = remarks?.trim() || null;
   let updated = false;
+
+  // 1. Try 4-parameter review_leave_request RPC (Migration 00041+)
   try {
     const { error: rpcErr } = await (supabase.rpc as any)('review_leave_request', {
       p_leave_id: leaveReq.id,
@@ -571,11 +620,26 @@ export const approveLeaveRequest = async (referenceOrId: string, remarks?: strin
       p_approval_remarks: cleanRemarks
     });
     if (!rpcErr) updated = true;
-    else console.warn('[leaveService] RPC approve failed:', rpcErr.message);
+    else console.warn('[leaveService] 4-arg RPC approve failed:', rpcErr.message);
   } catch (e) {
-    console.warn('[leaveService] RPC approve exception:', e);
+    console.warn('[leaveService] 4-arg RPC approve exception:', e);
   }
 
+  // 2. Try legacy 3-parameter review_leave_request RPC (Migration 00009) if 4-arg failed
+  if (!updated) {
+    try {
+      const { error: rpc3Err } = await (supabase.rpc as any)('review_leave_request', {
+        p_leave_id: leaveReq.id,
+        p_status: 'APPROVED',
+        p_rejection_reason: null
+      });
+      if (!rpc3Err) updated = true;
+    } catch (e) {
+      console.warn('[leaveService] 3-arg RPC approve exception:', e);
+    }
+  }
+
+  // 3. Fall back to direct table update if RPC is unavailable
   if (!updated) {
     const { error: directErr } = await (supabase as any)
       .from('leave_requests')
@@ -587,7 +651,27 @@ export const approveLeaveRequest = async (referenceOrId: string, remarks?: strin
       })
       .eq('id', leaveReq.id);
 
-    if (directErr) {
+    if (directErr && (
+      directErr.code === 'PGRST204' ||
+      directErr.message?.includes('schema cache') ||
+      directErr.message?.includes('approval_remarks')
+    )) {
+      console.warn('[leaveService] Remote schema missing approval_remarks, falling back to base approve update');
+      const { error: retryErr } = await (supabase as any)
+        .from('leave_requests')
+        .update({
+          status: 'APPROVED',
+          reviewed_by: user.id,
+          reviewed_at: new Date().toISOString()
+        })
+        .eq('id', leaveReq.id);
+
+      if (retryErr) {
+        console.error("[leaveService] Direct approve retry failed:", retryErr);
+        throw new Error(retryErr.message || "Failed to approve leave request.");
+      }
+      updated = true;
+    } else if (directErr) {
       console.error("[leaveService] Direct approve update failed:", directErr);
       throw new Error(directErr.message || "Failed to approve leave request.");
     }

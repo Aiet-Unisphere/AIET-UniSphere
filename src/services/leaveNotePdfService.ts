@@ -217,7 +217,7 @@ export const generateLeaveNoteDocument = async (
     );
   }
 
-  // Helper to draw text and record in search log
+  // Helper to draw text and record in search log with auto-fitting
   const draw = (
     text: string,
     x: number,
@@ -225,21 +225,28 @@ export const generateLeaveNoteDocument = async (
     font: PDFFont,
     size: number,
     color = inkDark,
-    maxWidth?: number
+    maxWidth?: number,
+    minSize = 6.8
   ) => {
     let outText = text;
+    let actualSize = size;
     if (maxWidth) {
-      while (outText.length > 3 && font.widthOfTextAtSize(outText, size) > maxWidth) {
+      // First scale down font size gracefully if text is slightly too long
+      while (actualSize > minSize && font.widthOfTextAtSize(outText, actualSize) > maxWidth) {
+        actualSize -= 0.3;
+      }
+      // If still exceeding maxWidth at minSize, truncate cleanly
+      while (outText.length > 3 && font.widthOfTextAtSize(outText, actualSize) > maxWidth) {
         outText = outText.slice(0, -1);
       }
     }
-    page.drawText(outText, { x, y, font, size, color });
+    page.drawText(outText, { x, y, font, size: actualSize, color });
     textLog.push(text);
   };
 
   // --- ROW 1: STUDENT NAME & BRANCH ---
-  draw(studentName, 242, 628, fontBold, 9.0, inkDark, 120);
-  draw(branchName, 432, 628, fontRegular, 8.5, inkDark, 110);
+  draw(studentName, 242, 628, fontBold, 9.0, inkDark, 122);
+  draw(branchName, 418, 628, fontRegular, 8.0, inkDark, 124);
 
   // --- ROW 2: USN, YEAR/SEM & SECTION ---
   draw(studentUsn, 127, 598, fontBold, 8.5, inkDark, 95);
