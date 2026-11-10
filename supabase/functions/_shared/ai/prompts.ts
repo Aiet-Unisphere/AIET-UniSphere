@@ -259,6 +259,9 @@ export function buildSystemPrompt(ctx: UserContext): string {
 
   // Faculty Context
   if (ctx.role === 'FACULTY') {
+    if (ctx.designation) {
+      sections.push(`#### Academic Designation: ${ctx.designation}`);
+    }
     if (ctx.teachingCourses && ctx.teachingCourses.length > 0) {
       sections.push(
         "#### Assigned Teaching Courses:",
@@ -267,6 +270,18 @@ export function buildSystemPrompt(ctx: UserContext): string {
     }
     if (ctx.pendingGradingCount !== undefined) {
       sections.push(`#### Pending Submissions to Grade: ${ctx.pendingGradingCount}`);
+    }
+    if (ctx.facultyPendingAssignments && ctx.facultyPendingAssignments.length > 0) {
+      sections.push(
+        "#### Active Course Assignments:",
+        ...ctx.facultyPendingAssignments.map(a => `  * ${a.title} (${a.courseName}) — Due: ${a.deadline} — Pending Evaluation: ${a.pendingGradingCount}`)
+      );
+    }
+    if (ctx.facultyAttendanceAlerts && ctx.facultyAttendanceAlerts.length > 0) {
+      sections.push(
+        `#### Attendance Alerts (<75% attendance) for your classes (${ctx.facultyAttendanceAlerts.length} students):`,
+        ...ctx.facultyAttendanceAlerts.map(a => `  * ${a.studentName} (${a.usn}) in ${a.courseName}: ${a.attendancePercent}% (${a.attended}/${a.total} sessions)`)
+      );
     }
     if (ctx.facultySchedule && ctx.facultySchedule.length > 0) {
       sections.push(
@@ -317,7 +332,25 @@ export function buildDeterministicResponse(ctx: UserContext, _rawMessage: string
 
   switch (ctx.intent) {
     case 'ATTENDANCE':
-      if (ctx.attendancePercent !== undefined) {
+      if (ctx.role === 'FACULTY') {
+        parts.push(`### 📊 Faculty Attendance & Alerts Overview`);
+        if (ctx.facultyAttendanceOverview && ctx.facultyAttendanceOverview.length > 0) {
+          parts.push(`#### Teaching Attendance Statistics:`);
+          for (const att of ctx.facultyAttendanceOverview) {
+            parts.push(`* **${att.courseName}**: ${att.totalSessions} sessions conducted — Average Attendance: **${att.averageAttendancePercent}%**`);
+          }
+        }
+        if (ctx.facultyAttendanceAlerts && ctx.facultyAttendanceAlerts.length > 0) {
+          parts.push(
+            `\n⚠️ **Low Attendance Alerts (<75%)** (${ctx.facultyAttendanceAlerts.length} student${ctx.facultyAttendanceAlerts.length === 1 ? '' : 's'}):`,
+            ...ctx.facultyAttendanceAlerts.map(a => 
+              `* **${a.studentName}** (${a.usn}) — ${a.courseName}: **${a.attendancePercent}%** (${a.attended}/${a.total} sessions conducted)`
+            )
+          );
+        } else {
+          parts.push(`\n✅ No active low-attendance alerts (<75%) found across your conducted classes.`);
+        }
+      } else if (ctx.attendancePercent !== undefined) {
         parts.push(
           `### 📊 Attendance Summary`,
           `- **Overall Attendance**: **${ctx.attendancePercent}%** (${ctx.totalSessionsAttended ?? 0} attended out of ${ctx.totalSessionsHeld ?? 0} total sessions)`
@@ -347,9 +380,20 @@ export function buildDeterministicResponse(ctx: UserContext, _rawMessage: string
         }
       } else if (ctx.role === 'FACULTY') {
         parts.push(
-          `### 📝 Faculty Assignment Evaluations`,
+          `### 📝 Faculty Assignment Evaluations & Submissions`,
           `- **Submissions Pending Evaluation**: **${ctx.pendingGradingCount ?? 0}**`
         );
+        if (ctx.facultyPendingAssignments && ctx.facultyPendingAssignments.length > 0) {
+          parts.push(
+            `\n#### Active Assignments:`,
+            ...ctx.facultyPendingAssignments.map(a => {
+              const due = new Date(a.deadline).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+              return `* **${a.title}** (${a.courseName}) — Due: **${due}** — Pending Evaluation: **${a.pendingGradingCount}** (Total Submitted: ${a.submittedCount})`;
+            })
+          );
+        } else {
+          parts.push(`\nNo active assignments found.`);
+        }
         if (ctx.teachingCourses && ctx.teachingCourses.length > 0) {
           parts.push(`- **Assigned Courses**: ${ctx.teachingCourses.join(', ')}`);
         }
@@ -397,7 +441,10 @@ export function buildDeterministicResponse(ctx: UserContext, _rawMessage: string
       parts.push(
         `### 👤 Academic Profile Overview`,
         `- **Name**: ${ctx.fullName}`,
-        `- **Role**: ${ctx.role}`,
+        `- **Role**: ${ctx.role}`
+      );
+      if (ctx.designation) parts.push(`- **Designation**: ${ctx.designation}`);
+      parts.push(
         `- **USN / Employee ID**: ${ctx.usn || 'N/A'}`,
         `- **Department**: ${ctx.departmentName || 'N/A'}`
       );
@@ -416,13 +463,19 @@ export function buildDeterministicResponse(ctx: UserContext, _rawMessage: string
           parts.push(`No active course enrollments found in your profile.`);
         }
       } else if (ctx.role === 'FACULTY') {
-        if (ctx.teachingCourses && ctx.teachingCourses.length > 0) {
-          parts.push(
-            `### 👨‍🏫 Assigned Teaching Courses`,
-            ...ctx.teachingCourses.map(c => `* **${c}**`)
-          );
+        if (ctx.courseFilter) {
+          parts.push(`### 👨‍🏫 Selected Course: **${ctx.courseFilter}**`);
         } else {
-          parts.push(`No teaching course assignments found.`);
+          parts.push(`### 👨‍🏫 Assigned Teaching Courses`);
+        }
+        if (ctx.teachingCourses && ctx.teachingCourses.length > 0) {
+          parts.push(...ctx.teachingCourses.map(c => `* **${c}**`));
+        } else {
+          parts.push(`No teaching course assignments found for this filter.`);
+        }
+        if (ctx.facultySchedule && ctx.facultySchedule.length > 0) {
+          parts.push(`\n#### Scheduled Lecture Slots:`);
+          parts.push(...ctx.facultySchedule.map(t => `* **${t.dayOfWeek}**: ${t.startTime} - ${t.endTime}${t.room ? ` (Room ${t.room})` : ''}`));
         }
       } else if (ctx.role === 'HOD') {
         parts.push(

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Sparkles, MessageSquare, RotateCcw, Trash2, AlertCircle, RefreshCw, UserCheck, BookOpen } from 'lucide-react';
+import { Sparkles, RotateCcw, Trash2, AlertCircle, RefreshCw, UserCheck } from 'lucide-react';
 import { FacultyAppShell } from '../components/FacultyAppShell';
 import { LoadingState } from '../../components/LoadingState';
 import { AIMessage } from '../../components/AIMessage';
@@ -9,6 +9,7 @@ import { AIQuickAction } from '../../components/AIQuickAction';
 import { ConversationList } from '../../components/ConversationList';
 import { CourseContextSelector } from '../../components/CourseContextSelector';
 import { useAuth } from '../../app/context/AuthContext';
+import { getFacultyCourses } from '../../services/courseService';
 import {
   getConversations,
   getConversationMessages,
@@ -48,13 +49,25 @@ export const FacultyAIAssistantPage: React.FC = () => {
     const loadData = async () => {
       setIsLoading(true);
       try {
-        const [convList, qActions] = await Promise.all([
+        const [convList, qActions, facultyCourses] = await Promise.all([
           getConversations(),
           getQuickActions('FACULTY'),
+          getFacultyCourses().catch((err) => {
+            console.warn('[FacultyAIPage] Non-fatal error loading faculty courses:', err);
+            return [];
+          }),
         ]);
 
         setConversations(convList);
         setQuickActions(qActions);
+
+        // Dynamically populate authorized courses assigned to this faculty member
+        const assignedCourseNames = (facultyCourses || [])
+          .map((c) => c.name)
+          .filter((name): name is string => Boolean(name && name.trim()));
+        const uniqueCourses = [...new Set(assignedCourseNames)];
+        const contexts = ['All Courses', ...uniqueCourses];
+        setCourseContexts(contexts);
 
         if (convList.length > 0) {
           setActiveConvId(convList[0].id);

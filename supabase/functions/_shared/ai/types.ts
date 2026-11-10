@@ -161,9 +161,32 @@ export interface UserContext {
   citations?: DocumentCitation[];
 
   // Faculty specific data
+  designation?: string;
   teachingCourses?: string[];
   pendingGradingCount?: number;
   facultySchedule?: TimetableEntrySummary[];
+  facultyPendingAssignments?: Array<{
+    id: string;
+    title: string;
+    courseName: string;
+    deadline: string;
+    submittedCount: number;
+    pendingGradingCount: number;
+  }>;
+  facultyAttendanceAlerts?: Array<{
+    courseName: string;
+    studentName: string;
+    usn: string;
+    attendancePercent: number;
+    attended: number;
+    total: number;
+  }>;
+  facultyAttendanceOverview?: Array<{
+    courseName: string;
+    totalSessions: number;
+    totalStudents: number;
+    averageAttendancePercent: number;
+  }>;
 
   // HOD specific data
   departmentStudentCount?: number;

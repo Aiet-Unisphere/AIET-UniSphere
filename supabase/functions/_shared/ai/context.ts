@@ -111,6 +111,7 @@ export async function buildUserAcademicContext(
     fullName: profile.full_name || 'User',
     email: user.email || profile.email || '',
     departmentName: deptName,
+    designation: profile.designation || undefined,
     intent,
     courseFilter: courseFilter && courseFilter !== 'All Courses' ? courseFilter : undefined,
     usn: profile.usn_or_employee_id || undefined,
@@ -436,24 +437,34 @@ export async function buildUserAcademicContext(
   // -------------------------------------------------------------
   if (role === 'FACULTY') {
     try {
-      // Courses assigned to this faculty member
-      const { data: enrollments } = await userClient
+      // 1. Courses assigned to this faculty member
+      let enrollQuery = userClient
         .from('course_enrollments')
-        .select('course_name')
+        .select('course_id, course_name, course_code, semester, section, student_id')
         .eq('faculty_id', user.id)
-        .limit(10);
+        .eq('status', 'Active');
 
+      if (baseContext.courseFilter) {
+        enrollQuery = enrollQuery.ilike('course_name', `%${baseContext.courseFilter}%`);
+      }
+
+      const { data: enrollments } = await enrollQuery.limit(50);
       const uniqueCourses = [...new Set((enrollments || []).map((e: any) => e.course_name))];
       baseContext.teachingCourses = uniqueCourses as string[];
+      const enrolledStudentIds = [...new Set((enrollments || []).map((e: any) => e.student_id).filter(Boolean))];
 
-      // Teaching schedule
-      const { data: schedule } = await userClient
+      // 2. Teaching schedule
+      let scheduleQuery = userClient
         .from('timetable_entries')
         .select('day_of_week, start_time, end_time, course_name, room')
         .eq('faculty_id', user.id)
-        .order('start_time', { ascending: true })
-        .limit(10);
+        .order('start_time', { ascending: true });
 
+      if (baseContext.courseFilter) {
+        scheduleQuery = scheduleQuery.ilike('course_name', `%${baseContext.courseFilter}%`);
+      }
+
+      const { data: schedule } = await scheduleQuery.limit(10);
       if (schedule && schedule.length > 0) {
         baseContext.facultySchedule = schedule.map((s: any) => ({
           dayOfWeek: s.day_of_week,
@@ -462,6 +473,124 @@ export async function buildUserAcademicContext(
           courseName: s.course_name,
           room: s.room,
         }));
+      }
+
+      // 3. Active assignments created by this faculty member
+      let assignQuery = userClient
+        .from('assignments')
+        .select('id, title, course_name, deadline, marks, status')
+        .eq('created_by', user.id)
+        .neq('status', 'Completed');
+
+      if (baseContext.courseFilter) {
+        assignQuery = assignQuery.ilike('course_name', `%${baseContext.courseFilter}%`);
+      }
+
+      const { data: assignments } = await assignQuery.limit(10);
+      if (assignments && assignments.length > 0) {
+        const assignIds = assignments.map((a: any) => a.id);
+        const { data: subs } = await userClient
+          .from('assignment_submissions')
+          .select('assignment_id, status')
+          .in('assignment_id', assignIds);
+
+        const pendingCountByAssign = new Map<string, number>();
+        const totalSubsByAssign = new Map<string, number>();
+        let totalPendingEvaluations = 0;
+
+        for (const sub of (subs || [])) {
+          totalSubsByAssign.set(sub.assignment_id, (totalSubsByAssign.get(sub.assignment_id) || 0) + 1);
+          if (sub.status === 'Submitted') {
+            pendingCountByAssign.set(sub.assignment_id, (pendingCountByAssign.get(sub.assignment_id) || 0) + 1);
+            totalPendingEvaluations++;
+          }
+        }
+
+        baseContext.pendingGradingCount = totalPendingEvaluations;
+        baseContext.facultyPendingAssignments = assignments.map((a: any) => ({
+          id: a.id,
+          title: a.title,
+          courseName: a.course_name,
+          deadline: a.deadline,
+          marks: a.marks,
+          submittedCount: totalSubsByAssign.get(a.id) || 0,
+          pendingGradingCount: pendingCountByAssign.get(a.id) || 0,
+        }));
+      }
+
+      // 4. Attendance sessions summary for faculty courses
+      const { data: sessions } = await userClient
+        .from('attendance_sessions')
+        .select('course_id, total_students, present_count, late_count')
+        .eq('faculty_id', user.id);
+
+      if (sessions && sessions.length > 0) {
+        const courseMap = new Map<string, { totalSessions: number; totalStudents: number; attended: number }>();
+        for (const s of sessions) {
+          const cid = s.course_id;
+          const curr = courseMap.get(cid) || { totalSessions: 0, totalStudents: 0, attended: 0 };
+          curr.totalSessions += 1;
+          curr.totalStudents += Number(s.total_students || 0);
+          curr.attended += Number(s.present_count || 0) + Number(s.late_count || 0);
+          courseMap.set(cid, curr);
+        }
+
+        const courseNameById = new Map<string, string>();
+        for (const e of (enrollments || [])) {
+          if (e.course_id && e.course_name) courseNameById.set(e.course_id, e.course_name);
+        }
+
+        baseContext.facultyAttendanceOverview = Array.from(courseMap.entries()).map(([cid, stat]) => ({
+          courseName: courseNameById.get(cid) || cid,
+          totalSessions: stat.totalSessions,
+          totalStudents: stat.totalStudents,
+          averageAttendancePercent: stat.totalStudents > 0 ? Math.round((stat.attended / stat.totalStudents) * 100) : 0,
+        }));
+
+        if (baseContext.courseFilter) {
+          baseContext.facultyAttendanceOverview = baseContext.facultyAttendanceOverview.filter(a =>
+            a.courseName.toLowerCase().includes(baseContext.courseFilter!.toLowerCase())
+          );
+        }
+      }
+
+      // 5. Genuine Attendance Alerts for enrolled students (< 75% with conducted sessions)
+      if (enrolledStudentIds.length > 0) {
+        const { data: lowAttRows } = await userClient
+          .from('student_analytics_view')
+          .select('student_id, attendance_percentage, total_sessions, present_count')
+          .in('student_id', enrolledStudentIds.slice(0, 30))
+          .gt('total_sessions', 0)
+          .lt('attendance_percentage', 75);
+
+        if (lowAttRows && lowAttRows.length > 0) {
+          const studentIdsToFetch = lowAttRows.map((r: any) => r.student_id);
+          const { data: studentProfiles } = await userClient
+            .from('profiles')
+            .select('id, full_name, usn_or_employee_id')
+            .in('id', studentIdsToFetch);
+
+          const studentProfileMap = new Map<string, any>(
+            (studentProfiles || []).map((sp: any) => [sp.id, sp])
+          );
+
+          const studentCourseMap = new Map<string, string>();
+          for (const e of (enrollments || [])) {
+            if (e.student_id && e.course_name) studentCourseMap.set(e.student_id, e.course_name);
+          }
+
+          baseContext.facultyAttendanceAlerts = lowAttRows.map((row: any) => {
+            const sp = studentProfileMap.get(row.student_id);
+            return {
+              courseName: studentCourseMap.get(row.student_id) || 'Assigned Course',
+              studentName: sp?.full_name || 'Student',
+              usn: sp?.usn_or_employee_id || 'Not recorded',
+              attendancePercent: Number(row.attendance_percentage),
+              attended: Number(row.present_count || 0),
+              total: Number(row.total_sessions || 0),
+            };
+          });
+        }
       }
     } catch (e) {
       console.warn("Could not fetch faculty context:", e);

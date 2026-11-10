@@ -101,7 +101,7 @@ serve(async (req: Request) => {
     // 3. Verify Account Status & Identity
     const { data: profile, error: profileError } = await userClient
       .from('profiles')
-      .select('id, email, full_name, role, department_id, account_status, departments(name)')
+      .select('id, email, full_name, role, department_id, account_status, designation, departments(name)')
       .eq('id', user.id)
       .single();
 
