@@ -16,7 +16,8 @@ ALTER TABLE public.leave_requests
   ADD COLUMN IF NOT EXISTS academic_year_snapshot TEXT,
   ADD COLUMN IF NOT EXISTS student_phone_snapshot TEXT,
   ADD COLUMN IF NOT EXISTS parent_phone_snapshot TEXT,
-  ADD COLUMN IF NOT EXISTS approval_remarks TEXT;
+  ADD COLUMN IF NOT EXISTS approval_remarks TEXT,
+  ADD COLUMN IF NOT EXISTS snapshot_provenance TEXT DEFAULT 'SUBMISSION';
 
 -- 2. BACKFILL HISTORICAL SNAPSHOTS FROM EXISTING PROFILES WHERE MISSING
 UPDATE public.leave_requests lr

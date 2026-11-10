@@ -411,7 +411,7 @@ describe('Mission 09.2 — Approved Leave Note PDF Generation & Security Audit',
     assert.ok(apprBytes.byteLength > 18000, 'Approved note PDF bytes must be valid');
   });
 
-  it('20. Task 1 Verification: submitLeaveRequest handles schema-cache missing academic_year_snapshot with adaptive fallback', () => {
+  it('20. Authoritative Architecture: submitLeaveRequest preserves snapshots and fails safely on missing schema', () => {
     const leaveServicePath = path.join(rootDir, 'src', 'services', 'leaveService.ts');
     const serviceContent = fs.readFileSync(leaveServicePath, 'utf-8');
 
@@ -425,24 +425,40 @@ describe('Mission 09.2 — Approved Leave Note PDF Generation & Security Audit',
       'submitLeaveRequest must define fullSnapshotPayload containing all snapshot fields'
     );
 
-    // 2. Must handle PostgREST schema cache missing column error gracefully
+    // 2. Must NOT silently discard snapshots via basePayload fallback
     assert.ok(
-      serviceContent.includes('PGRST204') || serviceContent.includes('schema cache'),
-      'submitLeaveRequest must detect PGRST204 or schema cache error code'
-    );
-    assert.ok(
-      serviceContent.includes('basePayload'),
-      'submitLeaveRequest must provide basePayload fallback when remote schema cache is unmigrated'
+      !serviceContent.includes('const basePayload = {'),
+      'submitLeaveRequest must NOT define basePayload fallback that discards snapshot fields'
     );
 
-    // 3. approveLeaveRequest must support 4-arg RPC, 3-arg legacy RPC, and direct fallback
+    // 3. Must detect schema cache error and fail safely with clear error message
     assert.ok(
-      serviceContent.includes('4-arg RPC approve failed') || serviceContent.includes('review_leave_request'),
-      'approveLeaveRequest must handle RPC version differences gracefully'
+      serviceContent.includes('PGRST204'),
+      'submitLeaveRequest must detect PGRST204 schema error'
     );
     assert.ok(
-      serviceContent.includes('approval_remarks') && serviceContent.includes('retryErr'),
-      'approveLeaveRequest direct update must fallback gracefully if approval_remarks is missing in schema cache'
+      serviceContent.includes('Migration 00041 pending'),
+      'submitLeaveRequest must advise that Migration 00041 is pending'
+    );
+
+    // 4. Must not reconstruct historical snapshots from live student profiles
+    assert.ok(
+      serviceContent.includes('semester: l.semester_snapshot ?? null'),
+      'mapLeaveRow must not reconstruct semester from student_academic live profile'
+    );
+
+    // 5. Authoritative 4-parameter review_leave_request RPC is strictly required
+    assert.ok(
+      serviceContent.includes("p_approval_remarks: cleanRemarks"),
+      'approveLeaveRequest must pass cleanRemarks to review_leave_request'
+    );
+    assert.ok(
+      !serviceContent.includes(".from('leave_requests').update({"),
+      'approveLeaveRequest must NOT use direct table update fallback'
+    );
+    assert.ok(
+      serviceContent.includes("Authoritative 4-parameter 'review_leave_request' RPC is not registered"),
+      'approveLeaveRequest must require the authoritative 4-parameter RPC'
     );
   });
 

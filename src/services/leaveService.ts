@@ -67,7 +67,7 @@ const mapLeaveRow = (l: any): LeaveRequest => {
     supportingDocPath: docPath,
     supportingDocSize: docSize ? Number(docSize) : undefined,
     supportingDocType: docType,
-    semester: l.semester_snapshot ?? l.student_academic?.semester ?? null,
+    semester: l.semester_snapshot ?? null,
     cgpa: l.student_academic?.cgpa ?? null,
     studentNameSnapshot: l.student_name_snapshot || undefined,
     studentUsnSnapshot: l.student_usn_snapshot || undefined,
@@ -77,7 +77,7 @@ const mapLeaveRow = (l: any): LeaveRequest => {
     academicYearSnapshot: l.academic_year_snapshot || undefined,
     studentPhoneSnapshot: l.student_phone_snapshot || undefined,
     parentPhoneSnapshot: l.parent_phone_snapshot || undefined,
-    snapshotProvenance: l.snapshot_provenance || undefined
+    snapshotProvenance: l.snapshot_provenance || (l.student_name_snapshot ? 'SUBMISSION' : 'UNVERIFIED')
   };
 };
 
@@ -442,7 +442,7 @@ export const submitLeaveRequest = async (payload: {
     });
   }
 
-  // INSERT leave request with full snapshot attributes
+  // INSERT leave request with full snapshot attributes (authoritative contract)
   const fullSnapshotPayload = {
     id: tempLeaveId,
     student_id: user.id,
@@ -468,58 +468,27 @@ export const submitLeaveRequest = async (payload: {
     snapshot_provenance: 'SUBMISSION'
   };
 
-  let data: any = null;
-  let insertError: any = null;
-
-  // 1. Primary insert: full snapshot payload (retains academic_year_snapshot & all snapshot fields)
-  const fullInsertResult = await (supabase as any)
+  // Authoritative insert: preserves all required academic snapshots and provenance.
+  // Fails safely if required database schema or snapshot columns are missing to prevent data loss.
+  const { data, error: insertError } = await (supabase as any)
     .from('leave_requests')
     .insert(fullSnapshotPayload)
     .select('*')
     .single();
 
-  data = fullInsertResult.data;
-  insertError = fullInsertResult.error;
-
-  // 2. Schema cache adaptive fallback: if remote backend has not executed Migration 00041,
-  // PostgREST returns PGRST204 ("Could not find the 'academic_year_snapshot' column... in the schema cache").
-  // In that environment, gracefully fall back to base columns while preserving dynamic joins.
-  if (insertError && (
-    insertError.code === 'PGRST204' ||
-    insertError.message?.includes('schema cache') ||
-    insertError.message?.includes('snapshot')
-  )) {
-    console.warn(
-      `[leaveService] Remote database schema cache missing snapshot columns (${insertError.message}). Retrying with base columns (migration 00041 pending).`
-    );
-
-    const basePayload = {
-      id: tempLeaveId,
-      student_id: user.id,
-      department_id: studentProfile.department_id,
-      hod_id: hodProfile.id,
-      leave_type: payload.leaveType.trim(),
-      reason: payload.reason.trim(),
-      start_date: payload.startDate,
-      end_date: payload.endDate,
-      status: 'PENDING',
-      supporting_doc_path: storagePath,
-      supporting_doc_name: fileName,
-      supporting_doc_size: fileSize,
-      supporting_doc_type: mimeType
-    };
-
-    const fallbackResult = await (supabase as any)
-      .from('leave_requests')
-      .insert(basePayload)
-      .select('*')
-      .single();
-
-    data = fallbackResult.data;
-    insertError = fallbackResult.error;
-  }
-
   if (insertError || !data) {
+    if (
+      insertError?.code === 'PGRST204' ||
+      (insertError?.message?.includes('schema cache') &&
+        (insertError?.message?.includes('snapshot') ||
+         insertError?.message?.includes('academic_year_snapshot') ||
+         insertError?.message?.includes('column')))
+    ) {
+      console.error("[leaveService] Schema error: snapshot columns missing in 'leave_requests':", insertError);
+      throw new Error(
+        "Database schema error: Required academic snapshot columns are missing from 'leave_requests' (Migration 00041 pending). Submission aborted to prevent data loss. Please contact your system administrator."
+      );
+    }
     console.error("[leaveService] INSERT leave_requests error:", insertError);
     throw new Error(insertError?.message || "Failed to submit leave request.");
   }
@@ -609,87 +578,28 @@ export const approveLeaveRequest = async (referenceOrId: string, remarks?: strin
   }
 
   const cleanRemarks = remarks?.trim() || null;
-  let updated = false;
 
-  // 1. Try 4-parameter review_leave_request RPC (Migration 00041+)
-  try {
-    const { error: rpcErr } = await (supabase.rpc as any)('review_leave_request', {
-      p_leave_id: leaveReq.id,
-      p_status: 'APPROVED',
-      p_rejection_reason: null,
-      p_approval_remarks: cleanRemarks
-    });
-    if (!rpcErr) updated = true;
-    else console.warn('[leaveService] 4-arg RPC approve failed:', rpcErr.message);
-  } catch (e) {
-    console.warn('[leaveService] 4-arg RPC approve exception:', e);
-  }
+  // Authoritative approval mechanism: invoke 4-parameter review_leave_request RPC
+  // All authorization (authenticated HOD role, department ownership, PENDING-only transition,
+  // server timestamp, server caller identity, atomic notification) is strictly enforced in PostgreSQL.
+  const { data: rpcData, error: rpcErr } = await (supabase.rpc as any)('review_leave_request', {
+    p_leave_id: leaveReq.id,
+    p_status: 'APPROVED',
+    p_rejection_reason: null,
+    p_approval_remarks: cleanRemarks
+  });
 
-  // 2. Try legacy 3-parameter review_leave_request RPC (Migration 00009) if 4-arg failed
-  if (!updated) {
-    try {
-      const { error: rpc3Err } = await (supabase.rpc as any)('review_leave_request', {
-        p_leave_id: leaveReq.id,
-        p_status: 'APPROVED',
-        p_rejection_reason: null
-      });
-      if (!rpc3Err) updated = true;
-    } catch (e) {
-      console.warn('[leaveService] 3-arg RPC approve exception:', e);
+  if (rpcErr) {
+    console.error('[leaveService] Authoritative review_leave_request RPC failed:', rpcErr);
+    if (rpcErr.code === 'PGRST202' || rpcErr.message?.includes('review_leave_request')) {
+      throw new Error(
+        "Database migration pending: Authoritative 4-parameter 'review_leave_request' RPC is not registered (Migration 00041 required). Approval aborted to preserve audit integrity."
+      );
     }
+    throw new Error(rpcErr.message || "Failed to approve leave request.");
   }
 
-  // 3. Fall back to direct table update if RPC is unavailable
-  if (!updated) {
-    const { error: directErr } = await (supabase as any)
-      .from('leave_requests')
-      .update({
-        status: 'APPROVED',
-        reviewed_by: user.id,
-        reviewed_at: new Date().toISOString(),
-        approval_remarks: cleanRemarks
-      })
-      .eq('id', leaveReq.id);
-
-    if (directErr && (
-      directErr.code === 'PGRST204' ||
-      directErr.message?.includes('schema cache') ||
-      directErr.message?.includes('approval_remarks')
-    )) {
-      console.warn('[leaveService] Remote schema missing approval_remarks, falling back to base approve update');
-      const { error: retryErr } = await (supabase as any)
-        .from('leave_requests')
-        .update({
-          status: 'APPROVED',
-          reviewed_by: user.id,
-          reviewed_at: new Date().toISOString()
-        })
-        .eq('id', leaveReq.id);
-
-      if (retryErr) {
-        console.error("[leaveService] Direct approve retry failed:", retryErr);
-        throw new Error(retryErr.message || "Failed to approve leave request.");
-      }
-      updated = true;
-    } else if (directErr) {
-      console.error("[leaveService] Direct approve update failed:", directErr);
-      throw new Error(directErr.message || "Failed to approve leave request.");
-    }
-  }
-
-  try {
-    await (supabase as any).from('notifications').insert({
-      user_id: leaveReq.student_id,
-      title: `Leave Request ${leaveReq.reference_id || ''} Approved`,
-      short_message: `Your ${leaveReq.leave_type} request has been approved by your HOD.`,
-      source: 'HOD Portal',
-      category: 'Leave',
-      type: 'Approval',
-      related_link: '/student/leave-requests'
-    });
-  } catch (e) { console.warn('[leaveService] Approval notification failed:', e); }
-
-  return true;
+  return rpcData?.success ?? true;
 };
 
 // ============================================================
@@ -734,49 +644,25 @@ export const rejectLeaveRequest = async (referenceOrId: string, _reviewedBy?: st
     throw new Error(`This leave request is already ${leaveReq.status.toLowerCase()} and cannot be modified.`);
   }
 
-  let updated = false;
-  try {
-    const { error: rpcErr } = await (supabase.rpc as any)('review_leave_request', {
-      p_leave_id: leaveReq.id,
-      p_status: 'REJECTED',
-      p_rejection_reason: cleanRemark
-    });
-    if (!rpcErr) updated = true;
-    else console.warn('[leaveService] RPC reject failed:', rpcErr.message);
-  } catch (e) {
-    console.warn('[leaveService] RPC reject exception:', e);
-  }
+  // Authoritative rejection mechanism: invoke 4-parameter review_leave_request RPC
+  const { data: rpcData, error: rpcErr } = await (supabase.rpc as any)('review_leave_request', {
+    p_leave_id: leaveReq.id,
+    p_status: 'REJECTED',
+    p_rejection_reason: cleanRemark,
+    p_approval_remarks: null
+  });
 
-  if (!updated) {
-    const { error: directErr } = await (supabase as any)
-      .from('leave_requests')
-      .update({
-        status: 'REJECTED',
-        reviewed_by: user.id,
-        reviewed_at: new Date().toISOString(),
-        rejection_reason: cleanRemark
-      })
-      .eq('id', leaveReq.id);
-
-    if (directErr) {
-      console.error("[leaveService] Direct reject update failed:", directErr);
-      throw new Error(directErr.message || "Failed to reject leave request.");
+  if (rpcErr) {
+    console.error('[leaveService] Authoritative review_leave_request rejection failed:', rpcErr);
+    if (rpcErr.code === 'PGRST202' || rpcErr.message?.includes('review_leave_request')) {
+      throw new Error(
+        "Database migration pending: Authoritative 4-parameter 'review_leave_request' RPC is not registered (Migration 00041 required). Rejection aborted to preserve audit integrity."
+      );
     }
+    throw new Error(rpcErr.message || "Failed to reject leave request.");
   }
 
-  try {
-    await (supabase as any).from('notifications').insert({
-      user_id: leaveReq.student_id,
-      title: `Leave Request ${leaveReq.reference_id || ''} Rejected`,
-      short_message: `Your ${leaveReq.leave_type} request was rejected. Reason: ${cleanRemark}`,
-      source: 'HOD Portal',
-      category: 'Leave',
-      type: 'Rejection',
-      related_link: '/student/leave-requests'
-    });
-  } catch (e) { console.warn('[leaveService] Rejection notification failed:', e); }
-
-  return true;
+  return rpcData?.success ?? true;
 };
 
 /**
