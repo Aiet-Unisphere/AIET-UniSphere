@@ -567,11 +567,9 @@ NOTIFY pgrst, 'reload schema';
 ```
 
 ### Step 5: Migration Ledger Synchronization
-Execute CLI repair commands:
+Execute CLI repair command (Supabase CLI v3.1.0):
 ```powershell
-npx supabase migration repair --status applied 00037 --linked
-npx supabase migration repair --status applied 00041 --linked
-npx supabase migration repair --status applied 00042 --linked
+npx supabase migration repair --status applied 00041 00042 --remote
 ```
 Verify via:
 ```powershell
@@ -611,54 +609,26 @@ WHERE routine_name = 'review_leave_request';
 
 ---
 
-## 8. Failure Handling & Atomic Rollback Script
+## 8. Failure Handling & Non-Destructive Recovery Protocol
 
-If any validation step fails, execute this rollback in the Supabase SQL Editor:
+### 8.1 Critical Data Preservation Principles
+1. **Never Drop Snapshot Columns:**
+   Under no circumstances should `student_name_snapshot`, `approval_remarks`, or any snapshot columns be dropped during rollback. Dropping columns permanently destroys newly submitted leave data and audit remarks.
+2. **Never Delete Migration Ledger Rows:**
+   Applied migration rows in `supabase_migrations.schema_migrations` must NOT be deleted as a routine rollback. Deleting ledger entries disrupts migration tracking and causes future `supabase db push` commands to attempt re-executing skipped migrations.
 
-```sql
-BEGIN;
+### 8.2 Application-First Rollback (Zero Database Downtime)
+If an application defect is discovered in the frontend UI or PDF rendering:
+1. **Revert Frontend Code:** Revert the frontend deployment to the previous Git release.
+2. **Empirically Proven Compatibility:**
+   - In PostgreSQL, the 4-parameter `review_leave_request(UUID, TEXT, TEXT, TEXT)` declares `DEFAULT NULL` for both `p_rejection_reason` and `p_approval_remarks`.
+   - PostgREST uses named-parameter dispatch. An older client calling the 3-argument signature `{ p_leave_id, p_status, p_rejection_reason }` resolves directly to the 4-parameter function without ambiguity.
+   - Older clients submitting leave without snapshot fields succeed because all snapshot columns are nullable and `snapshot_provenance` defaults to `'SUBMISSION'`.
+3. **Outcome:** Application functionality is restored; newly submitted leave requests and approval records remain safely preserved in the database.
 
--- 1. Restore previous RLS policy from migration 00004
-DROP POLICY IF EXISTS "Students can create leave requests" ON public.leave_requests;
-
-CREATE POLICY "Students can create leave requests"
-  ON public.leave_requests FOR INSERT
-  TO authenticated
-  WITH CHECK (
-    student_id = auth.uid()
-    AND department_id = (SELECT department_id FROM public.profiles WHERE id = auth.uid())
-  );
-
--- 2. Drop 4-parameter review_leave_request RPC
-DROP FUNCTION IF EXISTS public.review_leave_request(UUID, TEXT, TEXT, TEXT);
-
--- 3. Re-create 3-parameter review_leave_request RPC from migration 00009
-CREATE OR REPLACE FUNCTION public.review_leave_request(
-  p_leave_id UUID,
-  p_status TEXT,
-  p_rejection_reason TEXT DEFAULT NULL
-)
-RETURNS JSONB
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
--- (Restore full body from 00009_review_leave_request_rpc.sql)
-$$;
-
-GRANT EXECUTE ON FUNCTION public.review_leave_request(UUID, TEXT, TEXT) TO authenticated;
-
--- 4. Reload PostgREST cache
-NOTIFY pgrst, 'reload schema';
-
-COMMIT;
-```
-
-Then synchronize CLI history:
-```powershell
-npx supabase migration repair --status reverted 00042 --linked
-npx supabase migration repair --status reverted 00041 --linked
-```
+### 8.3 Reference Runbook
+For the complete step-by-step 6-phase deployment instructions and exact SQL scripts, refer to:
+[`docs/audit/LEAVE_MANAGEMENT_PRODUCTION_RUNBOOK.md`](file:///c:/Users/Mahesh%20M/Projects/AIET-UniSphere/docs/audit/LEAVE_MANAGEMENT_PRODUCTION_RUNBOOK.md).
 
 ---
 
