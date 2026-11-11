@@ -85,7 +85,8 @@ describe('Mission 10.6 — Final Leave Management Authoritative Architecture Tes
         reviewed_by = NULL,
         reviewed_at = NULL,
         approval_remarks = NULL,
-        rejection_reason = NULL;
+        rejection_reason = NULL,
+        snapshot_provenance = EXCLUDED.snapshot_provenance;
     `);
 
     const result = runSql(`

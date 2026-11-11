@@ -20,6 +20,7 @@ ALTER TABLE public.leave_requests
   ADD COLUMN IF NOT EXISTS snapshot_provenance TEXT DEFAULT 'SUBMISSION';
 
 -- 2. BACKFILL HISTORICAL SNAPSHOTS FROM EXISTING PROFILES WHERE MISSING
+-- All existing records populated from current profiles are marked RETROACTIVE_BACKFILL.
 UPDATE public.leave_requests lr
 SET
   student_name_snapshot = COALESCE(lr.student_name_snapshot, p.full_name),
@@ -28,16 +29,19 @@ SET
   semester_snapshot = COALESCE(lr.semester_snapshot, sp.semester),
   academic_year_snapshot = COALESCE(lr.academic_year_snapshot, sp.academic_year),
   student_phone_snapshot = COALESCE(lr.student_phone_snapshot, sp.phone),
-  parent_phone_snapshot = COALESCE(lr.parent_phone_snapshot, sp.parent_phone)
+  parent_phone_snapshot = COALESCE(lr.parent_phone_snapshot, sp.parent_phone),
+  snapshot_provenance = 'RETROACTIVE_BACKFILL'
 FROM public.profiles p
 LEFT JOIN public.departments d ON p.department_id = d.id
 LEFT JOIN public.student_profiles sp ON p.id = sp.profile_id
-WHERE lr.student_id = p.id
-  AND (
-    lr.student_name_snapshot IS NULL
-    OR lr.student_usn_snapshot IS NULL
-    OR lr.branch_snapshot IS NULL
-  );
+WHERE lr.student_id = p.id;
+
+-- Records without trustworthy snapshot information are marked UNVERIFIED
+UPDATE public.leave_requests
+SET snapshot_provenance = 'UNVERIFIED'
+WHERE student_name_snapshot IS NULL
+   OR student_usn_snapshot IS NULL
+   OR branch_snapshot IS NULL;
 
 -- 3. DROP PREVIOUS 3-ARGUMENT review_leave_request FUNCTION IF EXISTS
 DROP FUNCTION IF EXISTS public.review_leave_request(UUID, TEXT, TEXT);
@@ -73,9 +77,11 @@ BEGIN
     RAISE EXCEPTION 'Only HODs or Administrators are authorized to review leave requests.';
   END IF;
 
+  -- Acquire explicit row-level lock on the leave request to prevent concurrent approval/rejection race conditions
   SELECT * INTO v_leave
   FROM public.leave_requests
-  WHERE id = p_leave_id;
+  WHERE id = p_leave_id
+  FOR UPDATE;
 
   IF v_leave IS NULL THEN
     RAISE EXCEPTION 'Leave request not found.';
@@ -98,6 +104,7 @@ BEGIN
     RAISE EXCEPTION 'Rejection reason is required when rejecting a leave request.';
   END IF;
 
+  -- Conditional atomic update: guarantees exactly one transaction can update the status
   UPDATE public.leave_requests
   SET
     status = p_status,
@@ -105,7 +112,11 @@ BEGIN
     reviewed_at = NOW(),
     rejection_reason = CASE WHEN p_status = 'REJECTED' THEN TRIM(p_rejection_reason) ELSE NULL END,
     approval_remarks = CASE WHEN p_status = 'APPROVED' THEN TRIM(p_approval_remarks) ELSE NULL END
-  WHERE id = p_leave_id;
+  WHERE id = p_leave_id AND status = 'PENDING';
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Conflict: This leave request has already been reviewed or modified by another concurrent transaction.';
+  END IF;
 
   -- Create Notification for the student
   INSERT INTO public.notifications (

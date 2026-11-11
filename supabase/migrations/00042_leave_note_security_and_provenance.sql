@@ -14,23 +14,30 @@ REVOKE ALL ON FUNCTION public.review_leave_request(UUID, TEXT, TEXT, TEXT) FROM 
 -- Explicitly permit execution only for authenticated users (further authorized inside RPC)
 GRANT EXECUTE ON FUNCTION public.review_leave_request(UUID, TEXT, TEXT, TEXT) TO authenticated;
 
--- 2. ADD SNAPSHOT PROVENANCE COLUMN TO LEAVE REQUESTS
+-- 2. HARDEN SNAPSHOT PROVENANCE CONSTRAINT & DETERMINISTIC CLASSIFICATION
 ALTER TABLE public.leave_requests
-  ADD COLUMN IF NOT EXISTS snapshot_provenance TEXT DEFAULT 'SUBMISSION'
+  ADD COLUMN IF NOT EXISTS snapshot_provenance TEXT DEFAULT 'SUBMISSION';
+
+ALTER TABLE public.leave_requests
+  DROP CONSTRAINT IF EXISTS leave_requests_snapshot_provenance_check;
+
+ALTER TABLE public.leave_requests
+  ADD CONSTRAINT leave_requests_snapshot_provenance_check
   CHECK (snapshot_provenance IN ('SUBMISSION', 'RETROACTIVE_BACKFILL', 'UNVERIFIED'));
 
--- Differentiate historical backfilled records from live submission snapshots
--- Records created before migration 00042 that had snapshot columns populated retroactively:
-UPDATE public.leave_requests
-SET snapshot_provenance = 'RETROACTIVE_BACKFILL'
-WHERE student_name_snapshot IS NOT NULL
-  AND (snapshot_provenance IS NULL OR snapshot_provenance = 'SUBMISSION')
-  AND created_at < NOW() - INTERVAL '1 minute';
-
--- Records that have missing student snapshots are marked UNVERIFIED
+-- Deterministic provenance classification (no time-based heuristics):
+-- A. Records lacking complete essential student snapshot attributes are marked UNVERIFIED
 UPDATE public.leave_requests
 SET snapshot_provenance = 'UNVERIFIED'
-WHERE student_name_snapshot IS NULL;
+WHERE student_name_snapshot IS NULL
+   OR student_usn_snapshot IS NULL
+   OR branch_snapshot IS NULL;
+
+-- B. Historical records without explicit provenance are confirmed as RETROACTIVE_BACKFILL
+UPDATE public.leave_requests
+SET snapshot_provenance = 'RETROACTIVE_BACKFILL'
+WHERE snapshot_provenance IS NULL
+   OR snapshot_provenance NOT IN ('SUBMISSION', 'RETROACTIVE_BACKFILL', 'UNVERIFIED');
 
 -- 3. HARDEN STUDENT INSERT RLS POLICY
 -- Ensures students cannot forge approval status, review timestamps, or remarks
