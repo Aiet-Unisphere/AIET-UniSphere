@@ -155,8 +155,8 @@ export const generateLeaveNoteDocument = async (
   const white = rgb(1, 1, 1);
 
   // 1. Resolve student details (prioritizing immutable snapshots)
-  const studentName = leave.studentNameSnapshot || leave.requesterName || 'Legacy Student';
-  const branchName = leave.branchSnapshot || leave.departmentName || 'Civil Engineering';
+  const studentName = leave.studentNameSnapshot || leave.requesterName || '-';
+  const branchName = leave.branchSnapshot || leave.departmentName || '-';
   const studentUsn = leave.studentUsnSnapshot || leave.requesterUsnOrEmpId || '-';
   const semesterVal = leave.semesterSnapshot || leave.semester;
   const yearSemStr = formatYearSem(semesterVal);
@@ -168,9 +168,10 @@ export const generateLeaveNoteDocument = async (
   const numDaysStr = `${leave.days || 1} Day${(leave.days || 1) > 1 ? 's' : ''}`;
   const submittedRaw = leave.submittedAt || (leave as any).createdAt;
   const applicationDate = submittedRaw ? String(submittedRaw).split('T')[0] : new Date().toLocaleDateString();
-  const cleanReason = leave.reason?.trim() || 'Leave requested for academic records.';
-  const reviewerName = leave.reviewerName || leave.reviewedBy || 'Dr. Ramesh HOD';
-  const hodRemarks = leave.approvalRemarks?.trim() || 'Leave request sanctioned and approved for academic records.';
+  const cleanReason = leave.reason?.trim() || '-';
+  const reviewerName = leave.reviewerName || leave.reviewedBy || '-';
+  const hodRemarks = leave.approvalRemarks?.trim() || '';
+  const approvalTimestamp = leave.reviewedAt ? String(leave.reviewedAt).split('T')[0] : '-';
 
   // Provenance label
   const provenanceLabel = leave.snapshotProvenance === 'RETROACTIVE_BACKFILL'
@@ -225,17 +226,18 @@ export const generateLeaveNoteDocument = async (
 
   if (isApprovedMode) {
     textLog.push(
-      "HOD APPROVED — DEMONSTRATION COPY",
       "HOD APPROVED",
-      "DEMONSTRATION COPY",
-      "SAMPLE / DEMO — NOT AN OFFICIAL SIGNATURE OR SEAL",
-      "SAMPLE / DEMO",
-      "NOT AN OFFICIAL SIGNATURE OR SEAL",
-      `Reviewer: ${reviewerName}`,
+      "APPROVED",
+      `Reviewed By: ${reviewerName}`,
       reviewerName,
-      `HOD Remarks: ${hodRemarks}`,
-      hodRemarks
+      `Approval Date: ${approvalTimestamp}`,
+      approvalTimestamp
     );
+    if (hodRemarks) {
+      textLog.push(`HOD Remarks: ${hodRemarks}`, `Remarks: ${hodRemarks}`, hodRemarks);
+    } else {
+      textLog.push("Remarks: -");
+    }
   } else {
     textLog.push("Student Leave Application Form");
   }
@@ -438,7 +440,7 @@ export const generateLeaveNoteDocument = async (
   });
   drawBounded("Declaration: I hereby declare that the particulars furnished above are true and correct to the best of my knowledge.", 40, declY - 10, fontOblique, 7.0, slateDark);
   drawBounded(`Application Date: ${applicationDate}`, 40, declY - 21, fontRegular, 7.5, slateMuted);
-  drawBounded("STUDENT DECLARATION & SIGNATURE: [ Signed Electronically ]", 290, declY - 21, fontBold, 7.5, primaryNavy);
+  drawBounded("Signature of Student: ___________________________", 290, declY - 21, fontRegular, 7.5, slateMuted);
 
   // --- 7. SECTION 4: INSTITUTIONAL RECOMMENDATIONS & APPROVALS (5 BLOCKS) ---
   const authHeaderY = declY - 26 - 6;
@@ -481,18 +483,18 @@ export const generateLeaveNoteDocument = async (
       borderWidth: 0.75,
       color: rgb(0.97, 0.98, 1.0)
     });
-    drawBounded("REMARKS BY HOD", 40, hodY - 11, fontBold, 8.0, primaryNavy);
-    drawBounded("HOD APPROVED — DEMONSTRATION COPY", 135, hodY - 11, fontBold, 7.5, greenApproved);
-    drawBounded("SAMPLE / DEMO — NOT AN OFFICIAL SIGNATURE OR SEAL", 320, hodY - 11, fontRegular, 6.5, slateMuted);
+    drawBounded("REMARKS BY HEAD OF DEPARTMENT (HOD)", 40, hodY - 11, fontBold, 8.0, primaryNavy);
+    drawBounded("[ HOD APPROVED ]", 456, hodY - 11, fontBold, 7.5, greenApproved);
 
-    const wrappedHod = wrapTextToWidth(`Remarks: ${hodRemarks}`, 510, fontOblique, 7.5);
-    drawBounded(wrappedHod[0] || `Remarks: ${hodRemarks}`, 40, hodY - 24, fontOblique, 7.5, slateDark, 510);
+    const hodRemarksDisplay = hodRemarks ? `Remarks: ${hodRemarks}` : 'Remarks: -';
+    const wrappedHod = wrapTextToWidth(hodRemarksDisplay, 510, fontOblique, 7.5);
+    drawBounded(wrappedHod[0] || hodRemarksDisplay, 40, hodY - 24, fontOblique, 7.5, slateDark, 510);
 
-    drawBounded(`Reviewer: ${reviewerName}`, 40, hodY - 37, fontBold, 7.5, primaryNavy, 220);
-    drawBounded(`Status: APPROVED (Digital Record)  |  Review Date: ${applicationDate}`, 260, hodY - 37, fontRegular, 7.5, slateDark, 260);
+    drawBounded(`Reviewed By: ${reviewerName}`, 40, hodY - 37, fontBold, 7.5, primaryNavy, 220);
+    drawBounded(`Status: APPROVED  |  Approval Date: ${approvalTimestamp}`, 260, hodY - 37, fontRegular, 7.5, slateDark, 260);
   } else {
     page.drawRectangle({ x: 32, y: hodY - hodBoxH, width: 531, height: hodBoxH, borderColor: borderLight, borderWidth: 0.5, color: white });
-    drawBounded("REMARKS BY HOD", 40, hodY - 11, fontBold, 7.5, slateDark);
+    drawBounded("REMARKS BY HEAD OF DEPARTMENT (HOD)", 40, hodY - 11, fontBold, 7.5, slateDark);
     drawBounded("Department Head Review Remarks: ____________________________________________________", 40, hodY - 26, fontRegular, 7.5, slateMuted);
     drawBounded("Signature of HOD: ___________________________  Date: ___________", 260, hodY - 39, fontRegular, 7.0, slateMuted);
   }
@@ -532,7 +534,7 @@ export const generateLeaveNoteDocument = async (
   // --- 9. DOCUMENT FOOTER ---
   const footerY = 32;
   drawBounded(
-    `AIET-UniSphere Document Id: ${leave.id || 'N/A'} | ${provenanceLabel} | Demonstration Copy | Page 1 of 1`,
+    `AIET-UniSphere Document Id: ${leave.id || 'N/A'} | ${provenanceLabel} | Page 1 of 1`,
     40,
     footerY,
     fontRegular,

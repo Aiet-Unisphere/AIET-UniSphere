@@ -8,6 +8,7 @@ import {
   downloadApprovedLeaveNote,
   downloadStudentApplicationPdf,
   downloadLeavePdf,
+  isLeaveApproved,
   getStudentLeaveProfileDefaults 
 } from '../services/leaveService';
 import type { LeaveRequest } from '../data/leaveRequests';
@@ -232,7 +233,7 @@ export const LeaveRequestsPage: React.FC = () => {
                       {l.reviewedBy || 'Pending Review'}
                     </td>
                     <td style={{ padding: '1rem' }}>
-                      {l.status === 'Approved' ? (
+                      {isLeaveApproved(l.status) ? (
                         <button
                           onClick={() => handleDownloadLeaveNote(l)}
                           className="btn font-sans"

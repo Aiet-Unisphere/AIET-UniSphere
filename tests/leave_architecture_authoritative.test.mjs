@@ -268,7 +268,7 @@ describe('Mission 10.6 — Final Leave Management Authoritative Architecture Tes
     assert.strictEqual(doc.getNumberOfPages(), 1);
 
     const pdfOutput = doc.output();
-    assert.ok(pdfOutput.includes('HOD APPROVED — DEMONSTRATION COPY'));
+    assert.ok(pdfOutput.includes('HOD APPROVED'));
     assert.ok(pdfOutput.includes('Sanctioned under AIET VTU event guidelines.'));
     assert.ok(pdfOutput.includes('Provenance: Verified Submission Snapshot'));
     assert.ok(pdfOutput.includes('Dr. K. R. Sharma'));

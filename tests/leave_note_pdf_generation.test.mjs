@@ -144,12 +144,8 @@ describe('Mission 09.2 — Approved Leave Note PDF Generation & Security Audit',
     const pdfOutput = doc.output();
 
     assert.ok(
-      pdfOutput.includes('HOD APPROVED') && pdfOutput.includes('DEMONSTRATION COPY'),
-      'Approval status demonstration badge must be present'
-    );
-    assert.ok(
-      pdfOutput.includes('SAMPLE / DEMO') && pdfOutput.includes('NOT AN OFFICIAL SIGNATURE OR SEAL'),
-      'HOD endorsement area disclaimer must be present'
+      pdfOutput.includes('HOD APPROVED') || pdfOutput.includes('APPROVED'),
+      'Authoritative approval status must be present'
     );
     assert.ok(pdfOutput.includes('Dr. Ramesh HOD'), 'Reviewer name must be present');
     assert.ok(
@@ -158,7 +154,7 @@ describe('Mission 09.2 — Approved Leave Note PDF Generation & Security Audit',
     );
   });
 
-  it('8. Default approval remarks are rendered when approvalRemarks is omitted', async () => {
+  it('8. Remarks display blank or dash when approvalRemarks is omitted without fabricating text', async () => {
     const leaveWithoutRemarks = {
       ...baseApprovedLeave,
       approvalRemarks: undefined
@@ -166,13 +162,18 @@ describe('Mission 09.2 — Approved Leave Note PDF Generation & Security Audit',
     const doc = await generateLeaveNotePdf(leaveWithoutRemarks);
     const pdfOutput = doc.output();
 
-    assert.ok(
+    assert.strictEqual(
       pdfOutput.includes('Leave request sanctioned and approved for academic records.'),
-      'Default approval remark must be rendered when custom remarks are absent'
+      false,
+      'Must NOT fabricate default remarks when approvalRemarks is omitted'
+    );
+    assert.ok(
+      pdfOutput.includes('Remarks: -') || pdfOutput.includes('Remarks:'),
+      'Must show empty remarks or dash'
     );
   });
 
-  it('9. Authenticity integrity: No fabricated signatures, stamps, seals, or artificial approval marks appear', async () => {
+  it('9. Authenticity integrity: No fabricated signatures, stamps, seals, or demonstration text appear', async () => {
     const doc = await generateLeaveNotePdf(baseApprovedLeave);
     const pdfOutput = doc.output();
 
@@ -186,6 +187,21 @@ describe('Mission 09.2 — Approved Leave Note PDF Generation & Security Audit',
       pdfOutput.includes('SAMPLE / DEMO SEAL'),
       false,
       'Must NOT invent fake seals'
+    );
+    assert.strictEqual(
+      pdfOutput.includes('Signed Electronically'),
+      false,
+      'Must NOT fabricate electronic signature claim'
+    );
+    assert.strictEqual(
+      pdfOutput.includes('Demonstration Copy'),
+      false,
+      'Must NOT include demonstration copy in production document'
+    );
+    assert.strictEqual(
+      pdfOutput.includes('Demonstration Digital Copy'),
+      false,
+      'Must NOT include demonstration digital copy in production document'
     );
     // Must contain legitimate authoritative approval details
     assert.ok(
