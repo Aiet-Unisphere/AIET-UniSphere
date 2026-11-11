@@ -127,12 +127,12 @@ export const LeaveRequestsPage: React.FC = () => {
     }
   };
 
-  const handleDownloadPdf = async (leave: LeaveRequest) => {
+  const handleDownloadLeaveNote = async (leave: LeaveRequest) => {
     try {
-      await downloadLeavePdf(leave);
+      await downloadApprovedLeaveNote(leave);
     } catch (err: any) {
-      console.error('Failed to download leave PDF:', err);
-      alert(err.message || 'Unable to generate leave PDF.');
+      console.error('Failed to download leave note:', err);
+      alert(err.message || 'Unable to generate leave note PDF.');
     }
   };
 
@@ -232,35 +232,30 @@ export const LeaveRequestsPage: React.FC = () => {
                       {l.reviewedBy || 'Pending Review'}
                     </td>
                     <td style={{ padding: '1rem' }}>
-                      <button
-                        onClick={() => handleDownloadPdf(l)}
-                        className={`btn font-sans ${l.status === 'Approved' ? '' : 'btn-secondary'}`}
-                        style={{
-                          width: 'auto',
-                          padding: '0.35rem 0.65rem',
-                          fontSize: '0.75rem',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '0.35rem',
-                          cursor: 'pointer',
-                          ...(l.status === 'Approved' ? {
+                      {l.status === 'Approved' ? (
+                        <button
+                          onClick={() => handleDownloadLeaveNote(l)}
+                          className="btn font-sans"
+                          style={{
+                            width: 'auto',
+                            padding: '0.35rem 0.65rem',
+                            fontSize: '0.75rem',
+                            fontWeight: 700,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.35rem',
                             backgroundColor: '#16A34A',
                             borderColor: '#16A34A',
                             color: '#FFFFFF',
-                            fontWeight: 700
-                          } : {
-                            fontWeight: 600
-                          })
-                        }}
-                        title={
-                          l.status === 'Approved'
-                            ? 'Download official single-page approved leave note PDF'
-                            : 'Download filled AIET leave application form PDF'
-                        }
-                      >
-                        <Download size={13} />
-                        <span>Download PDF</span>
-                      </button>
+                            borderRadius: 'var(--border-radius)',
+                            cursor: 'pointer'
+                          }}
+                          title="Download official single-page approved leave note PDF"
+                        >
+                          <Download size={13} />
+                          <span>Download Note</span>
+                        </button>
+                      ) : null}
                     </td>
                   </tr>
                 ))}

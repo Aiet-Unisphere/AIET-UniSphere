@@ -172,21 +172,29 @@ describe('Mission 09.2 — Approved Leave Note PDF Generation & Security Audit',
     );
   });
 
-  it('9. Prominent fictional watermark and sample labels are present in the PDF output', async () => {
+  it('9. Authenticity integrity: No fabricated signatures, stamps, seals, or artificial approval marks appear', async () => {
     const doc = await generateLeaveNotePdf(baseApprovedLeave);
     const pdfOutput = doc.output();
 
-    assert.ok(
-      pdfOutput.includes('SYSTEM-GENERATED SAMPLE') && pdfOutput.includes('NOT VALID AS AN OFFICIAL SIGNED FORM'),
-      'Watermark must be present'
-    );
-    assert.ok(
+    // Must never invent signatures, stamps, or seals
+    assert.strictEqual(
       pdfOutput.includes('[SAMPLE / DEMO SIGNATURE]'),
-      'Sample signature tag must be present'
+      false,
+      'Must NOT invent fake signatures'
+    );
+    assert.strictEqual(
+      pdfOutput.includes('SAMPLE / DEMO SEAL'),
+      false,
+      'Must NOT invent fake seals'
+    );
+    // Must contain legitimate authoritative approval details
+    assert.ok(
+      pdfOutput.includes('HOD APPROVED') || pdfOutput.includes('APPROVED'),
+      'Authoritative approval status must be present'
     );
     assert.ok(
-      pdfOutput.includes('SAMPLE / DEMO SEAL'),
-      'Sample seal tag must be present'
+      pdfOutput.includes('Dr. Ramesh HOD'),
+      'Authoritative reviewer identity must be present'
     );
   });
 
@@ -275,9 +283,9 @@ describe('Mission 09.2 — Approved Leave Note PDF Generation & Security Audit',
     const studentContent = fs.readFileSync(studentPagePath, 'utf-8');
 
     assert.ok(studentContent.includes('downloadApprovedLeaveNote'), 'LeaveRequestsPage must import downloadApprovedLeaveNote');
-    assert.ok(studentContent.includes('Download PDF'), 'LeaveRequestsPage must have unified Download PDF button');
-    assert.ok(!studentContent.includes('<span>Download Note</span>'), 'LeaveRequestsPage must not have separate Download Note button');
-    assert.ok(!studentContent.includes('<span>Application PDF</span>'), 'LeaveRequestsPage must not have separate Application PDF button');
+    assert.ok(studentContent.includes('Download Note'), 'LeaveRequestsPage must have Download Note button');
+    assert.ok(!studentContent.includes('Download PDF'), 'LeaveRequestsPage must not have Download PDF button');
+    assert.ok(!studentContent.includes('<span>Application PDF</span>'), 'LeaveRequestsPage must not have Application PDF button');
     assert.ok(studentContent.includes('Section'), 'LeaveRequestsPage modal must have Section field');
 
     const hodPagePath = path.join(rootDir, 'src', 'hod', 'pages', 'HODLeaveDetail.tsx');
