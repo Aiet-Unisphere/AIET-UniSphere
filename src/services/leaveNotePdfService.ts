@@ -356,6 +356,18 @@ export const generateStudentApplicationPdf = async (leave: LeaveRequest): Promis
 };
 
 /**
+ * Generates the appropriate Leave Note document based on status:
+ * - APPROVED: generates approved leave note with authorized HOD endorsement
+ * - PENDING / REJECTED: generates original student application PDF without approval details
+ */
+export const generateLeavePdf = async (leave: LeaveRequest): Promise<LeaveNoteDocument> => {
+  if (isLeaveApproved(leave.status)) {
+    return generateLeaveNotePdf(leave);
+  }
+  return generateStudentApplicationPdf(leave);
+};
+
+/**
  * Generates and triggers browser download for the approved leave note PDF.
  */
 export const downloadApprovedLeaveNote = async (
@@ -403,4 +415,20 @@ export const downloadStudentApplicationPdf = async (
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
   }
+};
+
+/**
+ * Generates and triggers browser download for the appropriate leave PDF based on status:
+ * - APPROVED: downloads the approved leave note with authorized HOD endorsement
+ * - PENDING: downloads the student application PDF without approval details
+ * - REJECTED: downloads the original student application PDF without fabricated approval details
+ */
+export const downloadLeavePdf = async (
+  leave: LeaveRequest,
+  filename?: string
+): Promise<void> => {
+  if (isLeaveApproved(leave.status)) {
+    return downloadApprovedLeaveNote(leave, filename);
+  }
+  return downloadStudentApplicationPdf(leave, filename);
 };

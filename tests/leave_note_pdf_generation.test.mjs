@@ -275,7 +275,9 @@ describe('Mission 09.2 — Approved Leave Note PDF Generation & Security Audit',
     const studentContent = fs.readFileSync(studentPagePath, 'utf-8');
 
     assert.ok(studentContent.includes('downloadApprovedLeaveNote'), 'LeaveRequestsPage must import downloadApprovedLeaveNote');
-    assert.ok(studentContent.includes('Download Note'), 'LeaveRequestsPage must have Download Note button');
+    assert.ok(studentContent.includes('Download PDF'), 'LeaveRequestsPage must have unified Download PDF button');
+    assert.ok(!studentContent.includes('<span>Download Note</span>'), 'LeaveRequestsPage must not have separate Download Note button');
+    assert.ok(!studentContent.includes('<span>Application PDF</span>'), 'LeaveRequestsPage must not have separate Application PDF button');
     assert.ok(studentContent.includes('Section'), 'LeaveRequestsPage modal must have Section field');
 
     const hodPagePath = path.join(rootDir, 'src', 'hod', 'pages', 'HODLeaveDetail.tsx');
@@ -460,6 +462,32 @@ describe('Mission 09.2 — Approved Leave Note PDF Generation & Security Audit',
       serviceContent.includes("Authoritative 4-parameter 'review_leave_request' RPC is not registered"),
       'approveLeaveRequest must require the authoritative 4-parameter RPC'
     );
+  });
+
+  it('21. Status-based PDF selection: generateLeavePdf routes approved vs pending/rejected correctly', async () => {
+    const { generateLeavePdf } = await import('../src/services/leaveNotePdfService.ts');
+
+    // 1. APPROVED -> renders approved leave note with HOD endorsement
+    const approvedDoc = await generateLeavePdf(baseApprovedLeave);
+    const approvedText = approvedDoc.output();
+    assert.ok(approvedText.includes('HOD APPROVED'), 'Approved leave must include HOD endorsement');
+    assert.ok(approvedText.includes('Provenance: Verified Submission Snapshot'), 'Approved leave must include snapshot badge');
+
+    // 2. PENDING -> renders clean application form without approval details
+    const pendingLeave = { ...baseApprovedLeave, status: 'Pending', approvalRemarks: 'Should Not Appear' };
+    const pendingDoc = await generateLeavePdf(pendingLeave);
+    const pendingText = pendingDoc.output();
+    assert.ok(!pendingText.includes('HOD APPROVED'), 'Pending leave must NOT include HOD endorsement');
+    assert.ok(!pendingText.includes('Should Not Appear'), 'Pending leave must NOT include approval remarks');
+    assert.ok(pendingText.includes('Student Leave Application Form'), 'Pending leave must be student application form');
+
+    // 3. REJECTED -> renders clean application form without fabricated approval details
+    const rejectedLeave = { ...baseApprovedLeave, status: 'Rejected', approvalRemarks: 'Rejection reason' };
+    const rejectedDoc = await generateLeavePdf(rejectedLeave);
+    const rejectedText = rejectedDoc.output();
+    assert.ok(!rejectedText.includes('HOD APPROVED'), 'Rejected leave must NOT include HOD endorsement');
+    assert.ok(!rejectedText.includes('Rejection reason'), 'Rejected leave must NOT include remarks in HOD area');
+    assert.ok(rejectedText.includes('Student Leave Application Form'), 'Rejected leave must be original student application form');
   });
 
 });

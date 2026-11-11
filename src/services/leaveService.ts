@@ -683,8 +683,10 @@ export const getLeaveDocumentUrl = async (storagePath: string): Promise<string |
 export { 
   generateLeaveNotePdf, 
   generateStudentApplicationPdf, 
+  generateLeavePdf,
   generateLeaveNoteDocument,
   downloadApprovedLeaveNote, 
   downloadStudentApplicationPdf,
+  downloadLeavePdf,
   isLeaveApproved 
 } from './leaveNotePdfService';
