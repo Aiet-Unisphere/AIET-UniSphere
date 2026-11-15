@@ -16,7 +16,8 @@ import {
   Award,
   BarChart2,
   Paperclip,
-  Download
+  Download,
+  Loader2
 } from 'lucide-react';
 import { HODAppShell } from '../components/HODAppShell';
 import { 
@@ -107,7 +108,11 @@ export const HODLeaveDetail: React.FC = () => {
     if (!id || !leave) return;
     const cleanReason = rejectionReasonInput.trim();
     if (!cleanReason) {
-      setRejectionError("Reason for rejection is required.");
+      setRejectionError("Reason for rejection is required. Please provide a clear explanation for the student.");
+      return;
+    }
+    if (cleanReason.length > 1000) {
+      setRejectionError("Rejection reason cannot exceed 1000 characters.");
       return;
     }
 
@@ -116,7 +121,7 @@ export const HODLeaveDetail: React.FC = () => {
     setErrorMessage(null);
     try {
       await rejectLeaveRequest(leave.dbId || id, undefined, cleanReason);
-      setActionSuccess('Leave Request Rejected successfully. Rejection reason recorded.');
+      setActionSuccess('Leave request rejected successfully. Rejection reason recorded and student notified.');
       setShowRejectModal(false);
       setRejectionReasonInput('');
       await loadLeaveDetail();
@@ -440,14 +445,19 @@ export const HODLeaveDetail: React.FC = () => {
         </div>
 
         {/* If Rejected, display Rejection Reason */}
-        {isRejected && leave.remark && (
+        {isRejected && (
           <div style={{ marginTop: '1.25rem', padding: '1rem 1.25rem', backgroundColor: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: 'var(--border-radius)' }}>
             <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#991B1B', textTransform: 'uppercase', display: 'block', marginBottom: '0.35rem' }}>
               REJECTION REASON RECORDED BY HOD
             </span>
-            <div style={{ fontSize: '0.95rem', color: '#7F1D1D', fontWeight: 600 }}>
-              {leave.remark}
+            <div style={{ fontSize: '0.95rem', color: '#7F1D1D', fontWeight: 600, whiteSpace: 'pre-wrap' }}>
+              {leave.remark || leave.rejectionReason || 'No rejection reason was recorded for this request.'}
             </div>
+            {leave.reviewedBy && (
+              <div style={{ fontSize: '0.8rem', color: '#991B1B', marginTop: '0.5rem' }}>
+                Reviewed by: <strong>{leave.reviewedBy}</strong> {leave.reviewedAt && `on ${leave.reviewedAt}`}
+              </div>
+            )}
           </div>
         )}
 
@@ -639,39 +649,70 @@ export const HODLeaveDetail: React.FC = () => {
 
       {/* REJECT CONFIRMATION MODAL */}
       {showRejectModal && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 9999,
-          padding: '1rem'
-        }}>
-          <div className="dashboard-panel" style={{ width: '100%', maxWidth: '520px', padding: '1.75rem' }}>
-            <h2 className="font-display" style={{ fontSize: '1.35rem', fontWeight: 800, color: '#DC2626', marginTop: 0, marginBottom: '1rem' }}>
-              Reject Leave Request
-            </h2>
+        <div 
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '1rem'
+          }}
+          onClick={() => !actionLoading && setShowRejectModal(false)}
+        >
+          <div 
+            className="dashboard-panel" 
+            style={{ width: '100%', maxWidth: '540px', padding: '1.75rem' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '1rem' }}>
+              <div style={{ width: '38px', height: '38px', borderRadius: '50%', backgroundColor: '#FEE2E2', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#DC2626' }}>
+                <XCircle size={22} />
+              </div>
+              <div>
+                <h2 className="font-display" style={{ fontSize: '1.35rem', fontWeight: 800, color: 'var(--brand-black)', margin: 0 }}>
+                  Reject Leave Request
+                </h2>
+                <span className="font-mono" style={{ fontSize: '0.8rem', color: 'var(--brand-dark-grey)' }}>
+                  Ref: {leave.id}
+                </span>
+              </div>
+            </div>
+
+            {/* Student & Request Summary */}
+            <div style={{ backgroundColor: 'var(--brand-light-grey)', padding: '0.85rem 1rem', borderRadius: 'var(--border-radius)', marginBottom: '1.25rem', fontSize: '0.85rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+              <div><strong>Student:</strong> {leave.requesterName} (<span className="font-mono">{leave.requesterUsnOrEmpId}</span>)</div>
+              <div><strong>Department:</strong> {leave.departmentName || 'Department'}</div>
+              <div><strong>Leave Type:</strong> {leave.leaveType}</div>
+              <div><strong>Dates:</strong> <span className="font-mono">{leave.startDate} → {leave.endDate}</span> ({leave.days} {leave.days === 1 ? 'Day' : 'Days'})</div>
+            </div>
 
             <div style={{ marginBottom: '1.25rem' }}>
-              <label style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--brand-black)', display: 'block', marginBottom: '0.4rem' }}>
-                Reason for rejection *
-              </label>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
+                <label style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--brand-black)' }}>
+                  Reason for Rejection <span style={{ color: '#DC2626' }}>*</span>
+                </label>
+                <span style={{ fontSize: '0.75rem', color: rejectionReasonInput.length > 900 ? '#DC2626' : 'var(--brand-dark-grey)', fontWeight: 600 }}>
+                  {rejectionReasonInput.length}/1000 characters
+                </span>
+              </div>
               <textarea 
                 className="form-input font-sans"
                 style={{ 
                   width: '100%', 
-                  height: '100px', 
+                  height: '110px', 
                   padding: '0.65rem', 
                   fontSize: '0.9rem', 
                   resize: 'vertical',
                   borderColor: rejectionError ? '#EF4444' : undefined
                 }}
-                placeholder="Explain why this leave request is being rejected..."
+                maxLength={1000}
+                placeholder="Explain why this leave request is being rejected. This explanation will be provided to the student..."
                 value={rejectionReasonInput}
                 onChange={(e) => {
                   setRejectionReasonInput(e.target.value);
@@ -679,9 +720,13 @@ export const HODLeaveDetail: React.FC = () => {
                 }}
                 disabled={actionLoading}
               />
+              <p style={{ fontSize: '0.75rem', color: 'var(--brand-dark-grey)', marginTop: '0.35rem', marginBottom: 0 }}>
+                This reason will be visible to the student on their Leave Requests portal and in their notification alert.
+              </p>
               {rejectionError && (
-                <div style={{ fontSize: '0.8rem', color: '#DC2626', fontWeight: 600, marginTop: '0.35rem' }}>
-                  {rejectionError}
+                <div style={{ fontSize: '0.8rem', color: '#DC2626', fontWeight: 600, marginTop: '0.35rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                  <AlertCircle size={14} />
+                  <span>{rejectionError}</span>
                 </div>
               )}
             </div>
@@ -698,9 +743,19 @@ export const HODLeaveDetail: React.FC = () => {
                 onClick={handleConfirmReject}
                 disabled={actionLoading}
                 className="btn font-sans"
-                style={{ backgroundColor: '#DC2626', color: '#FFF', border: '1px solid #DC2626', fontWeight: 700 }}
+                style={{ backgroundColor: '#DC2626', color: '#FFF', border: '1px solid #DC2626', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
               >
-                {actionLoading ? 'Rejecting...' : 'Reject Leave'}
+                {actionLoading ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    <span>Rejecting...</span>
+                  </>
+                ) : (
+                  <>
+                    <XCircle size={16} />
+                    <span>Reject Leave</span>
+                  </>
+                )}
               </button>
             </div>
           </div>

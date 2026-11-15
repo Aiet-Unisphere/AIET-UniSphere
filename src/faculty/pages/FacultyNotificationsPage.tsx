@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { FacultyAppShell } from '../components/FacultyAppShell';
-import { LoadingState } from '../../components/LoadingState';
 import { EmptyState } from '../../components/EmptyState';
 import { ErrorState } from '../../components/ErrorState';
 import type { NotificationItem } from '../../data/notifications';
@@ -13,11 +13,16 @@ import {
   markNotificationAsRead, 
   markAllNotificationsAsRead,
   deleteNotification,
-  clearAllReadNotifications
+  clearAllReadNotifications,
+  subscribeToNotifications
 } from '../../services/notificationService';
+import { useAuth } from '../../app/context/AuthContext';
+import { resolveNotificationRoute } from '../../utils/notificationNavigation';
 import { CheckCheck, Trash2, Bell } from 'lucide-react';
 
 export const FacultyNotificationsPage: React.FC = () => {
+  const navigate = useNavigate();
+  const { user } = useAuth();
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -31,8 +36,8 @@ export const FacultyNotificationsPage: React.FC = () => {
   const [actionStatus, setActionStatus] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const fetchNotifications = async () => {
-    setIsLoading(true);
+  const fetchNotifications = async (showLoading = true) => {
+    if (showLoading) setIsLoading(true);
     setError(null);
     try {
       const data = await getNotifications();
@@ -41,13 +46,25 @@ export const FacultyNotificationsPage: React.FC = () => {
       console.error('[FacultyNotificationsPage] Error fetching notifications:', err);
       setError("Unable to load faculty notifications. Please try again.");
     } finally {
-      setIsLoading(false);
+      if (showLoading) setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchNotifications();
-  }, []);
+    fetchNotifications(true);
+
+    const handleUpdate = () => fetchNotifications(false);
+    window.addEventListener('notifications_updated', handleUpdate);
+
+    const unsubscribe = user?.id 
+      ? subscribeToNotifications(user.id, () => fetchNotifications(false))
+      : () => {};
+
+    return () => {
+      window.removeEventListener('notifications_updated', handleUpdate);
+      unsubscribe();
+    };
+  }, [user?.id]);
 
   const notifyHeaderUpdate = () => {
     if (typeof window !== 'undefined') {
@@ -62,19 +79,22 @@ export const FacultyNotificationsPage: React.FC = () => {
       setNotifications(updated);
       notifyHeaderUpdate();
     } catch (err) {
-      console.error('[FacultyNotificationsPage] Failed to mark read:', err);
+      console.error('[FacultyNotificationsPage] Mark read failed:', err);
     }
   };
 
   const handleMarkAllRead = async () => {
+    setIsProcessing(true);
     try {
       const updated = await markAllNotificationsAsRead();
       setNotifications(updated);
       notifyHeaderUpdate();
       setActionStatus("All notifications marked as read.");
-      setTimeout(() => setActionStatus(null), 4000);
+      setTimeout(() => setActionStatus(null), 3000);
     } catch (err) {
-      console.error('[FacultyNotificationsPage] Failed to mark all read:', err);
+      console.error('[FacultyNotificationsPage] Mark all read failed:', err);
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -85,6 +105,12 @@ export const FacultyNotificationsPage: React.FC = () => {
       notifyHeaderUpdate();
     }
     setSelectedNotification(notif);
+  };
+
+  const handleNavigate = (link: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const target = resolveNotificationRoute(link, 'FACULTY');
+    navigate(target);
   };
 
   const promptDeleteReadNotification = (id: string, e: React.MouseEvent) => {
@@ -126,30 +152,43 @@ export const FacultyNotificationsPage: React.FC = () => {
     }
   };
 
+  // Category counts
+  const categoryCounts = {
+    academic: notifications.filter(n => 
+      n.category === 'Academic' || 
+      n.category === 'Leave' || 
+      n.type === 'Assignment' || 
+      n.type === 'Assessment' || 
+      n.type === 'Attendance'
+    ).length,
+    projects: notifications.filter(n => n.category === 'Projects' || n.type === 'Project').length,
+    system: notifications.filter(n => n.category === 'System' || n.type === 'System').length
+  };
+
   // Filter items
   const filteredNotifications = notifications.filter(n => {
     if (selectedFilter === 'Unread') return !n.isRead;
-    if (selectedFilter === 'Academic') return n.category === 'Academic' || n.category === 'Leave';
-    if (selectedFilter === 'Projects') return n.category === 'Projects';
-    if (selectedFilter === 'System') return n.category === 'System';
+    if (selectedFilter === 'Academic') {
+      return (
+        n.category === 'Academic' || 
+        n.category === 'Leave' || 
+        n.type === 'Assignment' || 
+        n.type === 'Assessment' || 
+        n.type === 'Attendance'
+      );
+    }
+    if (selectedFilter === 'Projects') return n.category === 'Projects' || n.type === 'Project';
+    if (selectedFilter === 'System') return n.category === 'System' || n.type === 'System';
     return true;
   });
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
   const readCount = notifications.filter(n => n.isRead).length;
 
-  if (isLoading) {
-    return (
-      <FacultyAppShell>
-        <LoadingState message="Loading faculty notifications..." />
-      </FacultyAppShell>
-    );
-  }
-
   if (error) {
     return (
       <FacultyAppShell>
-        <ErrorState message={error} onRetry={fetchNotifications} />
+        <ErrorState message={error} onRetry={() => fetchNotifications(true)} />
       </FacultyAppShell>
     );
   }
@@ -157,55 +196,53 @@ export const FacultyNotificationsPage: React.FC = () => {
   return (
     <FacultyAppShell>
       {/* Header */}
-      <div style={{ marginBottom: '1.25rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
-              <span className="badge badge-active font-mono" style={{ fontSize: '0.7rem' }}>FACULTY NOTIFICATIONS</span>
-              {unreadCount > 0 && (
-                <span className="badge badge-pending font-mono" style={{ fontSize: '0.7rem' }}>
-                  {unreadCount} UNREAD
-                </span>
-              )}
-            </div>
-            <h1 className="font-display" style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--brand-black)', margin: 0 }}>
-              Notifications &amp; Alerts
-            </h1>
-            <p style={{ fontSize: '0.875rem', color: 'var(--brand-dark-grey)', marginTop: '0.2rem' }}>
-              Stay informed on departmental announcements, course updates, student submissions, and system alerts.
-            </p>
+      <div className="page-header-container" style={{ marginBottom: '1.5rem' }}>
+        <div>
+          <div className="breadcrumbs">
+            <span>Faculty</span>
+            <span className="breadcrumbs-separator">/</span>
+            <span style={{ fontWeight: 600, color: 'var(--brand-black)' }}>Notifications</span>
           </div>
+          <h1 style={{ fontSize: '1.75rem', fontWeight: 700, margin: '0.25rem 0' }}>Faculty Notifications</h1>
+          <p style={{ fontSize: '0.85rem', color: 'var(--brand-dark-grey)', margin: 0 }}>
+            Stay updated with course announcements, departmental memos, student submissions, and milestones.
+          </p>
+        </div>
 
-          {/* Top Actions */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-            {unreadCount > 0 && (
-              <button
-                type="button"
-                onClick={handleMarkAllRead}
-                className="btn btn-secondary"
-                style={{ fontSize: '0.825rem', padding: '0.5rem 0.85rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
-              >
-                <CheckCheck size={16} />
-                <span>Mark All Read</span>
-              </button>
-            )}
+        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+          {unreadCount > 0 && (
+            <button
+              className="btn btn-secondary"
+              style={{ width: 'auto' }}
+              onClick={handleMarkAllRead}
+              disabled={isProcessing}
+            >
+              <CheckCheck size={16} />
+              Mark all as read
+            </button>
+          )}
 
-            {readCount > 0 && (
-              <button
-                type="button"
-                onClick={() => setShowClearAllModal(true)}
-                className="btn btn-secondary"
-                style={{ fontSize: '0.825rem', padding: '0.5rem 0.85rem', display: 'flex', alignItems: 'center', gap: '0.35rem', color: '#dc2626' }}
-              >
-                <Trash2 size={16} />
-                <span>Clear Read</span>
-              </button>
-            )}
-          </div>
+          {readCount > 0 && (
+            <button
+              className="btn"
+              style={{ 
+                width: 'auto', 
+                backgroundColor: '#FEF2F2', 
+                color: '#DC2626', 
+                border: '1px solid #FCA5A5',
+                opacity: isProcessing ? 0.6 : 1 
+              }}
+              onClick={() => setShowClearAllModal(true)}
+              disabled={isProcessing}
+            >
+              <Trash2 size={16} />
+              Clear Read Notifications
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Action Toast Feedback */}
+      {/* Action Notification Status Banner */}
       {actionStatus && (
         <div 
           className="alert-banner success" 
@@ -217,28 +254,50 @@ export const FacultyNotificationsPage: React.FC = () => {
       )}
 
       {/* Filter Tabs */}
-      <div style={{ marginBottom: '1.25rem' }}>
-        <NotificationFilter
-          selectedFilter={selectedFilter}
-          onSelectFilter={setSelectedFilter}
-          unreadCount={unreadCount}
-          totalCount={notifications.length}
-        />
-      </div>
+      <NotificationFilter
+        selectedFilter={selectedFilter}
+        onSelectFilter={setSelectedFilter}
+        unreadCount={unreadCount}
+        totalCount={notifications.length}
+        categoryCounts={categoryCounts}
+      />
 
-      {/* Main Notification Content */}
-      {filteredNotifications.length === 0 ? (
+      {/* Loading Skeleton */}
+      {isLoading ? (
+        <div className="notifications-list-wrapper">
+          {[1, 2, 3, 4].map(idx => (
+            <div 
+              key={idx} 
+              className="notification-item-card" 
+              style={{ pointerEvents: 'none', minHeight: '88px' }}
+            >
+              <div className="notification-card-icon-col">
+                <div className="notification-skeleton" style={{ width: '40px', height: '40px', borderRadius: '50%' }} />
+              </div>
+              <div className="notification-card-content" style={{ gap: '0.5rem', width: '100%' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+                  <div className="notification-skeleton" style={{ width: '80px', height: '14px' }} />
+                  <div className="notification-skeleton" style={{ width: '60px', height: '14px' }} />
+                </div>
+                <div className="notification-skeleton" style={{ width: '55%', height: '18px' }} />
+                <div className="notification-skeleton" style={{ width: '85%', height: '14px' }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : filteredNotifications.length === 0 ? (
         <EmptyState
-          icon={Bell}
-          title={selectedFilter === 'Unread' ? "No Unread Notifications" : "No Notifications"}
-          description={
+          title={selectedFilter === 'Unread' ? "All notifications read" : "No notifications found"}
+          message={
             selectedFilter === 'Unread'
               ? "You're all caught up! There are no unread notifications right now."
-              : "You have no notifications matching this filter."
+              : `No notifications found in the ${selectedFilter} category.`
           }
+          actionLabel={selectedFilter !== 'All' ? 'View All Notifications' : undefined}
+          onAction={() => setSelectedFilter('All')}
         />
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+        <div className="notifications-list-wrapper">
           {filteredNotifications.map((notif) => (
             <NotificationCard
               key={notif.id}
@@ -246,45 +305,36 @@ export const FacultyNotificationsPage: React.FC = () => {
               onClick={handleNotificationClick}
               onMarkRead={handleMarkRead}
               onDeleteRead={promptDeleteReadNotification}
+              onNavigate={handleNavigate}
             />
           ))}
         </div>
       )}
 
       {/* Detail Modal */}
-      {selectedNotification && (
-        <NotificationDetailModal
-          notification={selectedNotification}
-          onClose={() => setSelectedNotification(null)}
-        />
-      )}
+      <NotificationDetailModal
+        notification={selectedNotification}
+        onClose={() => setSelectedNotification(null)}
+        userRole="FACULTY"
+      />
 
-      {/* Single Item Delete Confirmation Modal */}
+      {/* Single Read Notification Delete Modal */}
       {deleteTargetId && (
-        <div className="modal-overlay" onClick={() => !isProcessing && setDeleteTargetId(null)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '420px', padding: '1.5rem' }}>
-            <h3 style={{ margin: '0 0 0.5rem', fontSize: '1.1rem', color: 'var(--brand-black)' }}>
-              Delete Notification?
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1rem' }}>
+          <div className="dashboard-panel" style={{ width: '100%', maxWidth: '420px', padding: '1.5rem' }}>
+            <h3 className="font-display" style={{ fontSize: '1.15rem', fontWeight: 700, marginTop: 0, marginBottom: '0.5rem', color: '#DC2626' }}>
+              Delete notification?
             </h3>
-            <p style={{ fontSize: '0.875rem', color: 'var(--brand-dark-grey)', marginBottom: '1.25rem' }}>
-              Are you sure you want to remove this read notification?
+            <p style={{ fontSize: '0.9rem', color: 'var(--brand-dark-grey)', lineHeight: 1.5 }}>
+              Are you sure you want to delete this notification? It will be permanently removed.
             </p>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setDeleteTargetId(null)}
-                disabled={isProcessing}
-                style={{ fontSize: '0.85rem' }}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary"
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.25rem' }}>
+              <button className="btn btn-secondary" onClick={() => setDeleteTargetId(null)} disabled={isProcessing}>Cancel</button>
+              <button 
+                className="btn" 
+                style={{ backgroundColor: '#DC2626', color: '#FFF', border: '1px solid #DC2626', opacity: isProcessing ? 0.6 : 1 }}
                 onClick={confirmDeleteReadNotification}
                 disabled={isProcessing}
-                style={{ backgroundColor: '#dc2626', color: '#fff', fontSize: '0.85rem' }}
               >
                 {isProcessing ? 'Deleting...' : 'Delete'}
               </button>
@@ -293,34 +343,25 @@ export const FacultyNotificationsPage: React.FC = () => {
         </div>
       )}
 
-      {/* Clear All Read Confirmation Modal */}
+      {/* Clear All Read Notifications Modal */}
       {showClearAllModal && (
-        <div className="modal-overlay" onClick={() => !isProcessing && setShowClearAllModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '440px', padding: '1.5rem' }}>
-            <h3 style={{ margin: '0 0 0.5rem', fontSize: '1.1rem', color: 'var(--brand-black)' }}>
-              Clear All Read Notifications?
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1rem' }}>
+          <div className="dashboard-panel" style={{ width: '100%', maxWidth: '440px', padding: '1.5rem' }}>
+            <h3 className="font-display" style={{ fontSize: '1.15rem', fontWeight: 700, marginTop: 0, marginBottom: '0.5rem', color: '#DC2626' }}>
+              Clear all read notifications?
             </h3>
-            <p style={{ fontSize: '0.875rem', color: 'var(--brand-dark-grey)', marginBottom: '1.25rem' }}>
-              This will permanently delete all read notifications from your list. Unread notifications will not be affected.
+            <p style={{ fontSize: '0.9rem', color: 'var(--brand-dark-grey)', lineHeight: 1.5 }}>
+              This will permanently clear your read notifications. Unread notifications will remain.
             </p>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setShowClearAllModal(false)}
-                disabled={isProcessing}
-                style={{ fontSize: '0.85rem' }}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary"
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.25rem' }}>
+              <button className="btn btn-secondary" onClick={() => setShowClearAllModal(false)} disabled={isProcessing}>Cancel</button>
+              <button 
+                className="btn" 
+                style={{ backgroundColor: '#DC2626', color: '#FFF', border: '1px solid #DC2626', opacity: isProcessing ? 0.6 : 1 }}
                 onClick={confirmClearAllReadNotifications}
                 disabled={isProcessing}
-                style={{ backgroundColor: '#dc2626', color: '#fff', fontSize: '0.85rem' }}
               >
-                {isProcessing ? 'Clearing...' : 'Clear All Read'}
+                {isProcessing ? 'Clearing...' : 'Clear Read'}
               </button>
             </div>
           </div>

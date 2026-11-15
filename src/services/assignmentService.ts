@@ -130,16 +130,35 @@ export const getFacultyAssignments = async (): Promise<ExtendedAssignment[]> => 
 
     const { data: profile } = await (supabase as any)
       .from('profiles')
-      .select('department_id')
+      .select('department_id, role')
       .eq('id', user.id)
       .single();
 
-    if (!profile?.department_id) return [];
+    if (!profile) return [];
 
-    const { data: assignmentsData, error } = await (supabase as any)
+    const role = (profile.role || '').toUpperCase();
+
+    // Query builder: enforce ownership and role boundaries
+    // Faculty: only assignments created by this authenticated user
+    // HOD: assignments created in their department
+    // ADMIN: all assignments
+    let query = (supabase as any)
       .from('assignments')
-      .select('*')
-      .or(`department_id.eq.${profile.department_id},created_by.eq.${user.id}`)
+      .select('*');
+
+    if (role === 'FACULTY') {
+      query = query.eq('created_by', user.id);
+    } else if (role === 'HOD') {
+      if (!profile.department_id) return [];
+      query = query.eq('department_id', profile.department_id);
+    } else if (role === 'ADMIN') {
+      // Admin can view all assignments across departments
+    } else {
+      // Fallback for any other faculty role: strictly own assignments
+      query = query.eq('created_by', user.id);
+    }
+
+    const { data: assignmentsData, error } = await query
       .order('created_at', { ascending: false });
 
     if (error || !assignmentsData || assignmentsData.length === 0) return [];
@@ -162,12 +181,17 @@ export const getFacultyAssignments = async (): Promise<ExtendedAssignment[]> => 
       }
     });
 
-    // Fetch department student count for enrollment totals
-    const { count: deptStudentCount } = await (supabase as any)
-      .from('profiles')
-      .select('id', { count: 'exact', head: true })
-      .eq('department_id', profile.department_id)
-      .eq('role', 'STUDENT');
+    // Fetch unique course IDs to resolve real eligible student counts per course
+    const uniqueCourseIds: string[] = Array.from(new Set(assignmentsData.map((a: any) => String(a.course_id || '')).filter(Boolean)));
+    const courseEnrollmentCountMap = new Map<string, number>();
+
+    const { getEligibleStudentCountForCourse } = await import('./studentStatisticsService');
+    await Promise.all(
+      uniqueCourseIds.map(async (cid: string) => {
+        const count = await getEligibleStudentCountForCourse(cid);
+        courseEnrollmentCountMap.set(cid, count);
+      })
+    );
 
     const now = new Date();
 
@@ -204,7 +228,7 @@ export const getFacultyAssignments = async (): Promise<ExtendedAssignment[]> => 
         fileSize: a.file_size ? Number(a.file_size) : undefined,
         mimeType: a.mime_type || undefined,
         submittedCount: subCount,
-        totalEnrolledCount: deptStudentCount || 0,
+        totalEnrolledCount: courseEnrollmentCountMap.get(a.course_id) || 0,
         effectiveStatus
       };
     });
@@ -227,6 +251,20 @@ export const getAssignmentById = async (id: string): Promise<Assignment | undefi
     const { data: { user } } = await (supabase as any).auth.getUser();
     let sub: any = null;
     if (user) {
+      // Check user role: if FACULTY, verify ownership before allowing faculty-level views
+      const { data: profile } = await (supabase as any)
+        .from('profiles')
+        .select('role, department_id')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      const role = (profile?.role || '').toUpperCase();
+      if (role === 'FACULTY' && a.created_by && a.created_by !== user.id) {
+        // Faculty member trying to view an assignment they did not create
+        console.warn(`[getAssignmentById] Unauthorized access: User ${user.id} does not own assignment ${id}`);
+        return undefined;
+      }
+
       const { data } = await (supabase as any)
         .from('assignment_submissions')
         .select('*')
@@ -448,6 +486,11 @@ export const createAssignment = async (payload: CreateAssignmentPayload): Promis
     throw new Error(error?.message || "Failed to create assignment.");
   }
 
+  // Notifications are handled server-authoritatively by database trigger trg_notify_on_assignment_published
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('notifications_updated'));
+  }
+
   return {
     id: data.id,
     title: data.title,
@@ -468,6 +511,39 @@ export const createAssignment = async (payload: CreateAssignmentPayload): Promis
 
 export const getSubmissionsForAssignment = async (assignmentId: string): Promise<FacultyAssignmentSubmission[]> => {
   try {
+    const { data: { user } } = await (supabase as any).auth.getUser();
+    if (!user) {
+      throw new Error("Authenticated session required to view submissions.");
+    }
+
+    // Verify ownership: fetch the assignment and check created_by
+    const { data: assignment, error: aErr } = await (supabase as any)
+      .from('assignments')
+      .select('id, created_by, department_id')
+      .eq('id', assignmentId)
+      .single();
+
+    if (aErr || !assignment) {
+      throw new Error("Assignment not found or inaccessible.");
+    }
+
+    // Check user profile and role
+    const { data: profile } = await (supabase as any)
+      .from('profiles')
+      .select('role, department_id')
+      .eq('id', user.id)
+      .single();
+
+    const role = (profile?.role || '').toUpperCase();
+    const isOwner = assignment.created_by === user.id;
+    const isHodOfDept = role === 'HOD' && assignment.department_id === profile?.department_id;
+    const isAdmin = role === 'ADMIN';
+
+    if (!isOwner && !isHodOfDept && !isAdmin) {
+      console.warn(`[getSubmissionsForAssignment] Unauthorized access: User ${user.id} does not own assignment ${assignmentId}`);
+      throw new Error("Unauthorized: You do not have permission to view submissions for this assignment.");
+    }
+
     const { data: subsData, error: subsError } = await (supabase as any)
       .from('assignment_submissions')
       .select('*')
@@ -533,6 +609,34 @@ export const gradeSubmission = async (
   gradedBy: string = "Faculty Evaluator"
 ): Promise<FacultyAssignmentSubmission> => {
   const { data: { user } } = await (supabase as any).auth.getUser();
+  if (!user) throw new Error("Authenticated session required.");
+
+  // Verify ownership before allowing grading
+  const { data: assignment, error: aErr } = await (supabase as any)
+    .from('assignments')
+    .select('id, created_by, department_id')
+    .eq('id', assignmentId)
+    .single();
+
+  if (aErr || !assignment) {
+    throw new Error("Assignment not found or inaccessible.");
+  }
+
+  const { data: profile } = await (supabase as any)
+    .from('profiles')
+    .select('role, department_id')
+    .eq('id', user.id)
+    .single();
+
+  const role = (profile?.role || '').toUpperCase();
+  const isOwner = assignment.created_by === user.id;
+  const isHodOfDept = role === 'HOD' && assignment.department_id === profile?.department_id;
+  const isAdmin = role === 'ADMIN';
+
+  if (!isOwner && !isHodOfDept && !isAdmin) {
+    console.warn(`[gradeSubmission] Unauthorized grading attempt: User ${user.id} does not own assignment ${assignmentId}`);
+    throw new Error("Unauthorized: You do not have permission to grade submissions for this assignment.");
+  }
 
   const { data: updatedSub, error } = await (supabase as any)
     .from('assignment_submissions')

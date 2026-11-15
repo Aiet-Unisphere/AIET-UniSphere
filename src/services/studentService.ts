@@ -15,7 +15,7 @@ const mapProfileToStudent = (profile: any, studentProf?: any): ExtendedStudent =
   return {
     id: profile.id,
     name: profile.full_name || profile.email.split('@')[0],
-    usn: profile.usn_or_employee_id || 'N/A',
+    usn: profile.usn || profile.usn_or_employee_id || 'N/A',
     email: profile.email,
     phone: studentProf?.phone || null,
     department: deptName,
@@ -34,6 +34,8 @@ const mapProfileToStudent = (profile: any, studentProf?: any): ExtendedStudent =
     assignmentsCompleted: null,
     assignmentsTotal: null,
     academicStatus: 'Good Standing',
+    isUsnConflict: Boolean(profile.isUsnConflict),
+    conflictDetails: profile.conflictDetails || undefined,
     coursePerformance: []
   };
 };
@@ -213,7 +215,69 @@ export const updateStudentProfile = async (payload: {
   return savedRecord;
 };
 
-export const getAllStudents = async (): Promise<ExtendedStudent[]> => {
+/**
+ * Canonical student deduplication helper:
+ * 1. Normalizes USNs for comparison.
+ * 2. Deduplicates repeated references to the same UUID.
+ * 3. If different UUIDs share the same normalized USN, flags a conflict rather than merging
+ *    their identities or attendance histories, and without modifying/deleting records.
+ */
+export const deduplicateStudents = <T extends {
+  id: string;
+  usn?: string | null;
+  usn_or_employee_id?: string | null;
+  isUsnConflict?: boolean;
+  conflictDetails?: string;
+}>(students: T[]): T[] => {
+  // 1. Deduplicate repeated references to the exact same UUID
+  const seenIds = new Set<string>();
+  const uniqueByUuid: T[] = [];
+
+  for (const s of students) {
+    if (!s || !s.id) continue;
+    if (seenIds.has(s.id)) continue;
+    seenIds.add(s.id);
+    uniqueByUuid.push(s);
+  }
+
+  // 2. Map normalized USNs to set of distinct UUIDs claiming that USN
+  const usnToIds = new Map<string, Set<string>>();
+  for (const s of uniqueByUuid) {
+    const rawUsn = s.usn || s.usn_or_employee_id || '';
+    const normUsn = rawUsn.trim().toUpperCase();
+    if (normUsn && normUsn !== 'N/A' && normUsn !== 'NOT RECORDED') {
+      const set = usnToIds.get(normUsn) || new Set<string>();
+      set.add(s.id);
+      usnToIds.set(normUsn, set);
+    }
+  }
+
+  // 3. Flag conflicts for distinct UUIDs sharing the same USN without merging or discarding them
+  return uniqueByUuid.map((s) => {
+    const rawUsn = s.usn || s.usn_or_employee_id || '';
+    const normUsn = rawUsn.trim().toUpperCase();
+    const sharingIds = (normUsn && normUsn !== 'N/A' && normUsn !== 'NOT RECORDED')
+      ? usnToIds.get(normUsn)
+      : undefined;
+
+    if (sharingIds && sharingIds.size > 1) {
+      return {
+        ...s,
+        usn: normUsn || s.usn || 'N/A',
+        isUsnConflict: true,
+        conflictDetails: `Identity conflict: Normalized USN "${normUsn}" is shared by ${sharingIds.size} distinct student accounts (${Array.from(sharingIds).join(', ')}). Records kept separate to preserve audit history.`
+      };
+    }
+
+    return {
+      ...s,
+      usn: normUsn || s.usn || 'N/A',
+      isUsnConflict: false
+    };
+  });
+};
+
+export const getAllStudents = async (includeInactive = false): Promise<ExtendedStudent[]> => {
   try {
     const { data: { user } } = await (supabase as any).auth.getUser();
     if (!user) return [];
@@ -236,8 +300,11 @@ export const getAllStudents = async (): Promise<ExtendedStudent[]> => {
           code
         )
       `)
-      .eq('role', 'STUDENT')
-      .eq('account_status', 'ACTIVE');
+      .eq('role', 'STUDENT');
+
+    if (!includeInactive) {
+      query = query.or('account_status.is.null,account_status.eq.ACTIVE,account_status.eq.active');
+    }
 
     if (callerProfile.role === 'FACULTY' || callerProfile.role === 'HOD') {
       if (!callerProfile.department_id) {
@@ -246,10 +313,13 @@ export const getAllStudents = async (): Promise<ExtendedStudent[]> => {
       query = query.eq('department_id', callerProfile.department_id);
     }
 
-    const { data: studentsData, error } = await query;
-    if (error || !studentsData || studentsData.length === 0) {
+    const { data: rawStudentsData, error } = await query;
+    if (error || !rawStudentsData || rawStudentsData.length === 0) {
       return [];
     }
+
+    // Deduplicate canonically by ID and normalized USN
+    const studentsData = deduplicateStudents(rawStudentsData);
 
     const studentIds = studentsData.map((s: any) => s.id);
     const { data: extendedProfiles } = await (supabase as any)
@@ -280,13 +350,28 @@ export const getStudentsByCourse = async (courseId: string): Promise<ExtendedStu
   if (!courseId) return [];
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) throw new Error('Authenticated faculty session required.');
+
+  const rawTrimmed = courseId.trim();
+  const parenMatch = rawTrimmed.match(/\(([^)]+)\)/);
+  const cleanCode = (parenMatch ? parenMatch[1].trim() : (rawTrimmed.split(' ')[0] || rawTrimmed)).trim();
+  const normCode = cleanCode.replace(/[^a-zA-Z0-9]/g, '');
+
   const { data: enrollments, error: enrollmentError } = await (supabase as any)
     .from('course_enrollments')
     .select('student_id')
-    .eq('course_id', courseId)
-    .eq('status', 'Active');
+    .or(`course_id.ilike.${cleanCode},course_code.ilike.${cleanCode},course_id.ilike.%${normCode}%,course_code.ilike.%${normCode}%`)
+    .in('status', ['Active', 'ACTIVE']);
+
   if (enrollmentError) throw new Error(`Unable to load course enrollments: ${enrollmentError.message}`);
-  const studentIds = [...new Set((enrollments || []).map((row: any) => row.student_id))];
+  let studentIds = [...new Set((enrollments || []).map((row: any) => row.student_id))].filter(Boolean);
+
+  // If no direct course_enrollments, check student_profiles via academic eligibility
+  if (!studentIds.length) {
+    const { getEligibleStudentRoster } = await import('./studentRosterService');
+    const eligibleStudents = await getEligibleStudentRoster({ courseCode: cleanCode });
+    studentIds = eligibleStudents.map(s => s.id);
+  }
+
   if (!studentIds.length) return [];
 
   const [profilesResult, studentProfilesResult] = await Promise.all([
@@ -294,13 +379,14 @@ export const getStudentsByCourse = async (courseId: string): Promise<ExtendedStu
       .select('*, department:departments(id,name,code)')
       .in('id', studentIds)
       .eq('role', 'STUDENT')
-      .eq('account_status', 'ACTIVE'),
+      .or('account_status.eq.ACTIVE,account_status.eq.active,account_status.is.null'),
     (supabase as any).from('student_profiles').select('*').in('profile_id', studentIds),
   ]);
   if (profilesResult.error) throw new Error(`Unable to load enrolled students: ${profilesResult.error.message}`);
   if (studentProfilesResult.error) throw new Error(`Unable to load student details: ${studentProfilesResult.error.message}`);
   const studentProfileById = new Map<string, any>((studentProfilesResult.data || []).map((row: any) => [row.profile_id, row]));
-  return (profilesResult.data || []).map((profile: any) => mapProfileToStudent(profile, studentProfileById.get(profile.id)));
+  const deduplicatedProfiles = deduplicateStudents(profilesResult.data || []);
+  return deduplicatedProfiles.map((profile: any) => mapProfileToStudent(profile, studentProfileById.get(profile.id)));
 };
 
 export const getAvailableServices = async (): Promise<ServiceTypeItem[]> => {

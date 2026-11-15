@@ -4,6 +4,7 @@
  */
 import { supabase } from '../lib/supabase';
 import { STORAGE_BUCKETS } from './storageService';
+import { createBatchNotificationsIdempotent } from './notificationService';
 
 const sb = supabase as any;
 
@@ -312,6 +313,70 @@ export const getProjectMilestones = async (projectId: string): Promise<ProjectMi
   return (data || []) as ProjectMilestone[];
 };
 
+const notifyProjectMembers = async (
+  projectId: string,
+  title: string,
+  shortMessage: string,
+  fullMessage?: string
+) => {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    // 1. Preferred: Authorized server-side RPC (verifies project membership)
+    try {
+      const { error: rpcErr } = await (supabase.rpc as any)('notify_project_members', {
+        p_project_id: projectId,
+        p_title: title,
+        p_short_message: shortMessage,
+        p_full_message: fullMessage || shortMessage
+      });
+      if (!rpcErr) {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('notifications_updated'));
+        }
+        return;
+      }
+    } catch (e) {
+      // Fallback to client resolution if migration not yet applied
+    }
+
+    const { data: project } = await sb
+      .from('user_projects')
+      .select('name, owner_id, team_members')
+      .eq('id', projectId)
+      .single();
+
+    if (!project) return;
+
+    const recipientIds = new Set<string>();
+    if (project.owner_id && project.owner_id !== user?.id) {
+      recipientIds.add(project.owner_id);
+    }
+
+    if (Array.isArray(project.team_members)) {
+      project.team_members.forEach((m: any) => {
+        if (m.userId && m.userId !== user?.id) {
+          recipientIds.add(m.userId);
+        }
+      });
+    }
+
+    const idsToNotify = Array.from(recipientIds);
+    if (idsToNotify.length > 0) {
+      await createBatchNotificationsIdempotent(idsToNotify, {
+        title,
+        shortMessage,
+        fullMessage: fullMessage || shortMessage,
+        source: 'Projects',
+        category: 'Projects',
+        type: 'Project',
+        relatedLink: `/student/projects/${projectId}`
+      });
+    }
+  } catch (e) {
+    console.warn('[projectService] notifyProjectMembers error:', e);
+  }
+};
+
 export const createMilestone = async (
   projectId: string,
   milestone: { title: string; description?: string; dueDate?: string }
@@ -339,6 +404,14 @@ export const createMilestone = async (
     .single();
 
   if (error) throw new Error(`Failed to create milestone: ${error.message}`);
+
+  notifyProjectMembers(
+    projectId,
+    `New Milestone: ${milestone.title}`,
+    `Milestone "${milestone.title}" was added to your project.`,
+    `A new milestone "${milestone.title}" has been created in your project.${milestone.dueDate ? `\nDue Date: ${milestone.dueDate}` : ''}${milestone.description ? `\nDescription: ${milestone.description}` : ''}`
+  );
+
   return data as ProjectMilestone;
 };
 
@@ -358,6 +431,16 @@ export const updateMilestoneStatus = async (
     .single();
 
   if (error) throw new Error(`Failed to update milestone: ${error.message}`);
+
+  if (data?.project_id) {
+    notifyProjectMembers(
+      data.project_id,
+      `Milestone ${status}: ${data.title}`,
+      `Milestone "${data.title}" was updated to ${status}.`,
+      `Milestone "${data.title}" has been marked as ${status}.${data.due_date ? `\nDue Date: ${data.due_date}` : ''}`
+    );
+  }
+
   return data as ProjectMilestone;
 };
 

@@ -24,6 +24,8 @@ export interface ExtendedStudent extends StudentProfile {
   assignmentsCompleted?: number | null;
   assignmentsTotal?: number | null;
   academicStatus: 'Good Standing' | 'Warning' | 'At Risk';
+  isUsnConflict?: boolean;
+  conflictDetails?: string;
   coursePerformance: {
     courseCode: string;
     courseName: string;

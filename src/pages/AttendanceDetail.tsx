@@ -369,7 +369,7 @@ export const AttendanceDetail: React.FC = () => {
           {/* Right Column: Session History Logs */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', textAlign: 'left' }}>
             
-            <div className="dashboard-panel">
+            <div className="dashboard-panel attendance-history-panel">
               <div className="panel-header-row">
                 <h3 className="panel-title">Session History Logs</h3>
                 <span style={{ fontSize: '0.75rem', color: 'var(--brand-dark-grey)', fontWeight: 600 }}>

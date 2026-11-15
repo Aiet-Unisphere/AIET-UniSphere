@@ -7,27 +7,51 @@ interface NotificationFilterProps {
   onSelectFilter: (category: FilterCategory) => void;
   unreadCount: number;
   totalCount: number;
+  categoryCounts?: {
+    academic?: number;
+    projects?: number;
+    system?: number;
+  };
 }
 
 export const NotificationFilter: React.FC<NotificationFilterProps> = ({
   selectedFilter,
   onSelectFilter,
   unreadCount,
-  totalCount
+  totalCount,
+  categoryCounts
 }) => {
   const filterOptions: FilterCategory[] = ['All', 'Unread', 'Academic', 'Projects', 'System'];
 
+  const getBadgeValue = (filter: FilterCategory): number | null => {
+    switch (filter) {
+      case 'All':
+        return totalCount;
+      case 'Unread':
+        return unreadCount;
+      case 'Academic':
+        return categoryCounts?.academic ?? null;
+      case 'Projects':
+        return categoryCounts?.projects ?? null;
+      case 'System':
+        return categoryCounts?.system ?? null;
+      default:
+        return null;
+    }
+  };
+
   return (
-    <div className="tab-filters-container">
+    <div className="tab-filters-container" role="tablist" aria-label="Notification categories">
       {filterOptions.map((filter) => {
-        let badgeValue: number | null = null;
-        if (filter === 'All') badgeValue = totalCount;
-        if (filter === 'Unread') badgeValue = unreadCount;
+        const badgeValue = getBadgeValue(filter);
+        const isActive = selectedFilter === filter;
 
         return (
           <button
             key={filter}
-            className={`tab-filter-btn ${selectedFilter === filter ? 'active' : ''}`}
+            role="tab"
+            aria-selected={isActive}
+            className={`tab-filter-btn ${isActive ? 'active' : ''}`}
             onClick={() => onSelectFilter(filter)}
           >
             <span>{filter}</span>

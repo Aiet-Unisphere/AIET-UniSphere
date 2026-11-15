@@ -69,6 +69,17 @@ WHERE query ILIKE '%leave_requests%' AND pid <> pg_backend_pid();
 Migrations `00041` and `00042` must be executed within a **single unified transaction** with explicit lock and statement timeouts.
 
 > [!WARNING]
+> **Lock Dynamics, Table Blocking & Timeout Semantics:**
+> - **Timeout Semantics (`lock_timeout` vs. `statement_timeout`):**
+>   - `lock_timeout = '5s'` limits the time PostgreSQL waits for an individual lock acquisition. If that wait exceeds five seconds, the lock acquisition fails and cancels the statement.
+>   - `statement_timeout = '30s'` limits the total duration of an individual SQL statement, including time spent waiting for locks.
+>   - Whichever timeout threshold is reached first cancels the statement. (`statement_timeout` measures total statement duration from beginning to end; it does not begin only after locks are acquired, nor does `lock_timeout` guarantee prevention of lock starvation under heavy concurrent traffic.)
+> - **Lock Levels & Table Blocking:** The `ALTER TABLE public.leave_requests ADD COLUMN ...`, `ADD CONSTRAINT ...`, and policy replacement statements acquire `ACCESS EXCLUSIVE` table-level locks on `public.leave_requests`. While adding nullable columns is metadata-only in modern PostgreSQL, `ACCESS EXCLUSIVE` locks block all concurrent reads (`SELECT`) and writes (`INSERT`, `UPDATE`, `DELETE`) on `leave_requests` until transaction completion (`COMMIT` or `ROLLBACK`). The historical backfill `UPDATE public.leave_requests lr SET ... FROM profiles ...` acquires a `ROW EXCLUSIVE` table-level lock on `public.leave_requests` as well as row-level tuple locks on each updated row in `leave_requests`, along with `ACCESS SHARE` locks on referenced tables (`profiles`, `departments`, `student_profiles`).
+> - **Transaction Failure & Abort Semantics:** A statement error inside an explicit PostgreSQL transaction block normally leaves the transaction in an aborted state. Subsequent statements cannot successfully execute within that aborted transaction. The transaction must be rolled back; depending on the execution environment (e.g. Supabase web SQL Editor vs. interactive psql), the SQL runner may or may not issue the rollback automatically.
+> - **CRITICAL OPERATOR RULE ON MIGRATION REPAIR:** A failed or aborted transaction must **NEVER** be followed by `supabase migration repair`. Migration repair marks migrations as applied in the ledger and is permitted **only after independently verifying** that both migration SQL files completed and committed successfully.
+> - **Maintenance Window:** Execution must be scheduled during low-traffic maintenance windows.
+
+> [!WARNING]
 > Do NOT use abbreviated, reconstructed, or inline summaries. Execute the **complete, unabbreviated contents** of both files in order:
 
 ```sql
@@ -286,6 +297,9 @@ COMMIT;
 
 Reconcile the migration ledger using the official Supabase CLI v3 command. This step is **strictly separate from SQL execution**.
 
+> [!CAUTION]
+> **PRE-CONDITION & FAILURE GUARD:** Phase 3 (`supabase migration repair`) is permitted ONLY after independently verifying that both migration SQL files completed and committed successfully in Phase 2. If any statement error occurred, the transaction was left in an aborted state or rolled back; operators must **NEVER** run migration repair against a failed or aborted execution.
+
 ### 4.1 Execute Migration Repair
 Run in PowerShell:
 ```powershell
@@ -303,11 +317,22 @@ npx supabase migration list --remote
 ```
 Verify output shows `00041` and `00042` with remote status `applied`.
 
+### 4.4 Subsequent Application of Older Pending Migrations (00037–00040)
+- **Out-of-Order Migration Ledger State:** Marking `00041` and `00042` applied while `00037`–`00040` remain unapplied leaves older migrations pending behind a newer applied version in the remote ledger.
+- **Requirement to Use `--include-all`:** When subsequently deploying older pending migrations (`00037`–`00040`), standard `supabase db push` will detect unapplied migrations older than the remote version head (`00042`) and halt or warn. Operators must use:
+  ```powershell
+  npx supabase db push --include-all --remote
+  ```
+  This must be executed only after reviewing their dependency matrix and execution plan to ensure safe, ordered application.
+
 ---
 
 ## 5. Phase 4: Post-Deployment Validation
 
-Execute immediately after Phase 3. **STOP if any validation query fails.**
+Execute immediately after Phase 3.
+
+> [!CAUTION]
+> **STOP CONDITION:** If any query in Phase 4 returns unexpected results (e.g., missing columns, unverified provenance classifications, or invalid RPC arguments/ACLs), **DO NOT PROCEED TO PHASE 5 (APPLICATION RELEASE)**. Halt deployment immediately and investigate within the database without dropping columns.
 
 ### 5.1 PostgREST Schema Cache Reload
 Execute in SQL Editor:
@@ -368,14 +393,19 @@ Deploy the frontend client build (commit `8c9f5c0`). Execute the smoke test prot
 - **NEVER DROP SNAPSHOT COLUMNS:** Under no circumstances should `student_name_snapshot`, `approval_remarks`, or any snapshot columns be dropped during rollback. Dropping columns permanently destroys newly submitted leave data.
 - **NEVER DELETE MIGRATION LEDGER ENTRIES:** Applied migration rows in `supabase_migrations.schema_migrations` must NOT be deleted as a routine rollback. Deleting ledger rows causes future `supabase db push` commands to attempt re-executing skipped migrations.
 
-### 7.2 Application-First Rollback (Zero Database Downtime)
+### 7.2 Application-First Rollback (Non-Destructive Database Preservation)
 If an application defect is discovered in the frontend UI or PDF rendering:
 1. **Revert Frontend Code:** Revert the frontend deployment to the previous Git release.
-2. **Empirically Proven Compatibility:**
-   - In PostgreSQL, the 4-parameter `review_leave_request(UUID, TEXT, TEXT, TEXT)` declares `DEFAULT NULL` for both `p_rejection_reason` and `p_approval_remarks`.
-   - PostgREST uses named-parameter dispatch. An older client calling the 3-argument signature `{ p_leave_id, p_status, p_rejection_reason }` resolves directly to the 4-parameter function without ambiguity.
-   - Older clients submitting leave without snapshot fields succeed because all snapshot columns are nullable and `snapshot_provenance` defaults to `'SUBMISSION'`.
-3. **Outcome:** Application functionality is fully restored; newly submitted leave requests and approval records remain safely preserved in the database.
+   *(Note: Application rollback must not be described or assumed as guaranteed zero-downtime or instant. While the database schema remains non-destructively preserved and backward-compatible, CDN edge propagation delays, client-side browser caching, and in-flight user sessions introduce a transient transition window during which some clients may still execute old or cached bundles.)*
+2. **Backward-Compatibility Evidence & Status:**
+   - **PostgreSQL Engine Level:** **VERIFIED.** In PostgreSQL, the 4-parameter `review_leave_request(UUID, TEXT, TEXT, TEXT)` declares `DEFAULT NULL` for both `p_rejection_reason` and `p_approval_remarks`. Direct named-argument invocation with 3 arguments resolves to the 4-parameter function without ambiguity.
+   - **PostgREST HTTP Server RPC Endpoint:** **VERIFIED.** Tested against real PostgREST 16.5 HTTP daemon on `127.0.0.1:54334`. Old frontend 3-argument payload `{ p_leave_id, p_status: 'APPROVED', p_rejection_reason: null }` resolves directly to the 4-parameter function, successfully returning HTTP 200 `{"status": "APPROVED", "success": true, ...}`, transitioning the database record, and generating student notifications. 4-argument approvals, rejections, unauthorized calls, cross-department reviews, and double-review guards were all verified.
+   - **Old Frontend Submission Compatibility:** **VERIFIED.** Tested via `tests/old_frontend_submission_compatibility.test.mjs`. Submissions omitting all snapshot fields succeed with status `PENDING`, receive default `snapshot_provenance = 'SUBMISSION'`, and store snapshot columns as `NULL`. Forgery attempts (setting `status = 'APPROVED'`, `reviewed_by`, or `approval_remarks`) are strictly blocked by RLS.
+3. **RPC Function Resolution & Overload Caution:**
+   - The unified 4-parameter `review_leave_request(p_leave_id UUID, p_status TEXT, p_rejection_reason TEXT DEFAULT NULL, p_approval_remarks TEXT DEFAULT NULL)` natively covers calls with 2, 3, or 4 arguments via PostgreSQL parameter defaults.
+   - **Do NOT deploy a concurrent 3-parameter overload with defaults:** Creating a separate `review_leave_request(UUID, TEXT, TEXT DEFAULT NULL)` in parallel creates function resolution ambiguity (`ERROR: function review_leave_request(uuid, text) is not unique`) for 2-parameter calls (e.g. approving without rejection reason).
+   - If PostgREST schema cache needs refreshing after frontend rollback, execute `NOTIFY pgrst, 'reload schema';`.
+4. **Outcome:** Application functionality is restored; newly submitted leave requests and approval records remain safely preserved in the database.
 
 ### 7.3 Catastrophic Disaster Recovery (Full Database Restoration)
 If catastrophic database corruption occurs unrelated to the schema migration:
@@ -389,3 +419,4 @@ If catastrophic database corruption occurs unrelated to the schema migration:
 
 - **Runbook Review Status:** **CORRECTED & AUDITED**
 - **Production Execution Status:** **NOT EXECUTED — AWAITING EXPLICIT OPERATOR AUTHORIZATION**
+

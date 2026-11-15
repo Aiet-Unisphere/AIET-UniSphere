@@ -99,13 +99,25 @@ export interface DepartmentDetailData extends DepartmentSummary {
 }
 
 export const getDepartmentSummaries = async (): Promise<DepartmentSummary[]> => {
-  const { data: departments, error: departmentError } = await (supabase as any)
-    .from('departments')
-    .select('id, name, code, status, created_at')
-    .order('name', { ascending: true });
-  if (departmentError) throw new Error(`Unable to load departments: ${departmentError.message}`);
+  const [departmentsRes, instMetrics] = await Promise.all([
+    (supabase as any)
+      .from('departments')
+      .select('id, name, code, status, created_at')
+      .order('name', { ascending: true }),
+    (async () => {
+      try {
+        const { getInstitutionStudentMetrics } = await import('./studentStatisticsService');
+        return await getInstitutionStudentMetrics();
+      } catch {
+        return null;
+      }
+    })()
+  ]);
 
-  return Promise.all((departments || []).map(async (department: Department) => {
+  if (departmentsRes.error) throw new Error(`Unable to load departments: ${departmentsRes.error.message}`);
+  const departments = departmentsRes.data || [];
+
+  return Promise.all(departments.map(async (department: Department) => {
     const countFor = async (role: 'STUDENT' | 'FACULTY', status?: string) => {
       let query = (supabase as any)
         .from('profiles')
@@ -117,7 +129,7 @@ export const getDepartmentSummaries = async (): Promise<DepartmentSummary[]> => 
       if (result.error) throw new Error(`Unable to count ${role.toLowerCase()} profiles: ${result.error.message}`);
       return result.count || 0;
     };
-    const [facultyCount, activeFacultyCount, studentCount, activeStudentCount, hodResult] = await Promise.all([
+    const [facultyCount, activeFacultyCount, rawStudentCount, rawActiveStudentCount, hodResult] = await Promise.all([
       countFor('FACULTY'),
       countFor('FACULTY', 'ACTIVE'),
       countFor('STUDENT'),
@@ -125,13 +137,18 @@ export const getDepartmentSummaries = async (): Promise<DepartmentSummary[]> => 
       (supabase as any).from('profiles').select('full_name').eq('department_id', department.id).eq('role', 'HOD').eq('account_status', 'ACTIVE').limit(1).maybeSingle(),
     ]);
     if (hodResult.error) throw new Error(`Unable to load department HOD: ${hodResult.error.message}`);
+
+    const deptMetric = instMetrics?.byDepartment?.find(d => d.departmentId === department.id);
+    const finalStudentCount = deptMetric ? deptMetric.total : rawStudentCount;
+    const finalActiveStudentCount = deptMetric ? deptMetric.active : rawActiveStudentCount;
+
     return {
       ...department,
       hodName: hodResult.data?.full_name || 'Not assigned',
       facultyCount,
       activeFacultyCount,
-      studentCount,
-      activeStudentCount,
+      studentCount: finalStudentCount,
+      activeStudentCount: finalActiveStudentCount,
     };
   }));
 };
@@ -199,6 +216,8 @@ export interface DepartmentOverview {
   activeFacultyToday: number;
   totalStudents: number;
   activeStudents: number;
+  inactiveStudents?: number;
+  incompleteStudents?: number;
   activeCourses: number;
   overallAttendancePercent: number;
   averageCgpa: number | null;
@@ -287,6 +306,16 @@ export const getDepartmentOverview = async (): Promise<DepartmentOverview> => {
     return count || 0;
   };
 
+  const deptMetricsPromise = (async () => {
+    if (!scope.departmentId) return null;
+    try {
+      const { getDepartmentStudentMetrics } = await import('./studentStatisticsService');
+      return await getDepartmentStudentMetrics(scope.departmentId);
+    } catch {
+      return null;
+    }
+  })();
+
   let enrollmentQuery = (supabase as any).from('course_enrollments').select('course_id, student_id, academic_year').eq('status', 'Active');
   enrollmentQuery = departmentFilter(enrollmentQuery, scope.departmentId);
   let sessionQuery = (supabase as any).from('attendance_sessions').select('total_students, present_count, late_count').not('department_id', 'is', null);
@@ -301,7 +330,7 @@ export const getDepartmentOverview = async (): Promise<DepartmentOverview> => {
   let timetableQuery = (supabase as any).from('timetable_entries').select('faculty_id').eq('day_of_week', today);
   timetableQuery = departmentFilter(timetableQuery, scope.departmentId);
 
-  const [facultyCount, activeFacultyCount, studentCount, activeStudentCount, enrollmentResult, sessionsResult, analyticsResult, assignmentsResult, resultsResult, timetableResult] = await Promise.all([
+  const [facultyCount, activeFacultyCount, studentCount, activeStudentCount, enrollmentResult, sessionsResult, analyticsResult, assignmentsResult, resultsResult, timetableResult, deptStudentMetrics] = await Promise.all([
     countProfiles('FACULTY'),
     countProfiles('FACULTY', true),
     countProfiles('STUDENT'),
@@ -312,6 +341,7 @@ export const getDepartmentOverview = async (): Promise<DepartmentOverview> => {
     assignmentsQuery,
     resultsQuery,
     timetableQuery,
+    deptMetricsPromise,
   ]);
   for (const result of [enrollmentResult, sessionsResult, analyticsResult, assignmentsResult, resultsResult, timetableResult]) {
     if (result.error) throw new Error(`Unable to load department analytics: ${result.error.message}`);
@@ -367,8 +397,10 @@ export const getDepartmentOverview = async (): Promise<DepartmentOverview> => {
     totalFaculty: facultyCount,
     activeFacultyCount,
     activeFacultyToday: new Set((timetableResult.data || []).map((row: any) => row.faculty_id).filter(Boolean)).size,
-    totalStudents: studentCount,
-    activeStudents: activeStudentCount,
+    totalStudents: deptStudentMetrics ? deptStudentMetrics.totalStudents : studentCount,
+    activeStudents: deptStudentMetrics ? deptStudentMetrics.activeStudents : activeStudentCount,
+    inactiveStudents: deptStudentMetrics ? deptStudentMetrics.inactiveStudents : (studentCount - activeStudentCount),
+    incompleteStudents: deptStudentMetrics?.incompleteStudents ?? 0,
     activeCourses: courseCount,
     overallAttendancePercent,
     averageCgpa,

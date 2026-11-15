@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  execution-service:
+    build: .
+    container_name: unisphere-execution-service
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      - EXECUTION_SERVICE_PORT=4000
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - BASE_WORKSPACE_DIR=/tmp/unisphere-workspaces
+    volumes:
+      # Connect to host Docker daemon to orchestrate isolated student containers
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /tmp/unisphere-workspaces:/tmp/unisphere-workspaces:rw
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2048M
+

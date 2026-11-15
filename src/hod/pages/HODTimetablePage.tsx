@@ -15,6 +15,7 @@ import { ClockTimePicker } from '../../faculty/components/ClockTimePicker';
 import { useAuth } from '../../app/context/AuthContext';
 import { supabase } from '../../lib/supabase';
 import { TimetableCalendar } from '../../components/TimetableCalendar';
+import { getAvailableDepartmentCourses } from '../../services/courseService';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as const;
 
@@ -36,12 +37,13 @@ export const HODTimetablePage: React.FC = () => {
 
   // Department Dropdown Options
   const [facultyOptionsList, setFacultyOptionsList] = useState<{ id: string; name: string }[]>([]);
+  const [departmentCourses, setDepartmentCourses] = useState<{ code: string; name: string }[]>([]);
 
   // Form Fields
   const [formSemester, setFormSemester] = useState<number>(7);
   const [formSection, setFormSection] = useState<string>('A');
-  const [formCourseCode, setFormCourseCode] = useState<string>('BCS701');
-  const [formCourseName, setFormCourseName] = useState<string>('Distributed Systems');
+  const [formCourseCode, setFormCourseCode] = useState<string>('');
+  const [formCourseName, setFormCourseName] = useState<string>('');
   const [formFacultyId, setFormFacultyId] = useState<string>('');
   const [formFacultyName, setFormFacultyName] = useState<string>('');
   const [formDay, setFormDay] = useState<typeof DAYS[number]>('Monday');
@@ -75,25 +77,31 @@ export const HODTimetablePage: React.FC = () => {
     };
   }, [loadTimetable]);
 
-  // Load Department Faculty Options for Modal
+  // Load Department Faculty Options & Department Courses for Modal
   useEffect(() => {
-    const fetchFaculty = async () => {
+    const fetchFacultyAndCourses = async () => {
       if (!profile?.department_id) return;
       try {
-        const { data } = await (supabase as any)
-          .from('profiles')
-          .select('id, full_name')
-          .eq('department_id', profile.department_id)
-          .in('role', ['FACULTY', 'HOD']);
+        const [{ data: facultyData }, courses] = await Promise.all([
+          (supabase as any)
+            .from('profiles')
+            .select('id, full_name')
+            .eq('department_id', profile.department_id)
+            .in('role', ['FACULTY', 'HOD']),
+          getAvailableDepartmentCourses()
+        ]);
 
-        if (data) {
-          setFacultyOptionsList(data.map((f: any) => ({ id: f.id, name: f.full_name || 'Faculty' })));
+        if (facultyData) {
+          setFacultyOptionsList(facultyData.map((f: any) => ({ id: f.id, name: f.full_name || 'Faculty' })));
+        }
+        if (courses) {
+          setDepartmentCourses(courses);
         }
       } catch (err) {
-        console.error("Error loading faculty for timetable:", err);
+        console.error("Error loading faculty or courses for timetable:", err);
       }
     };
-    fetchFaculty();
+    fetchFacultyAndCourses();
   }, [profile?.department_id]);
 
   const openAddModal = () => {
@@ -101,10 +109,10 @@ export const HODTimetablePage: React.FC = () => {
     setFormError(null);
     setFormSemester(7);
     setFormSection('A');
-    setFormCourseCode('BCS701');
-    setFormCourseName('Distributed Systems');
-    setFormFacultyId(profile?.id || '');
-    setFormFacultyName(profile?.full_name || '');
+    setFormCourseCode('');
+    setFormCourseName('');
+    setFormFacultyId('');
+    setFormFacultyName('');
     setFormDay('Monday');
     setFormTimeSlot('09:00 AM - 10:00 AM');
     setFormRoom('LH-101');
@@ -149,6 +157,11 @@ export const HODTimetablePage: React.FC = () => {
 
     if (!formCourseName.trim()) {
       setFormError("Course name is required.");
+      return;
+    }
+
+    if (!formFacultyId.trim()) {
+      setFormError("Selecting an assigned faculty instructor is required before saving a class slot.");
       return;
     }
 
@@ -495,6 +508,36 @@ export const HODTimetablePage: React.FC = () => {
                 </div>
               </div>
 
+              {/* Course Selection & Inputs */}
+              {departmentCourses.length > 0 && (
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: 'var(--brand-dark-grey)', textTransform: 'uppercase', marginBottom: '0.35rem' }}>
+                    Select Course from Department Curriculum
+                  </label>
+                  <select
+                    className="form-input font-sans"
+                    style={{ width: '100%', padding: '0.55rem', fontSize: '0.85rem', backgroundColor: '#F8FAFC' }}
+                    onChange={(e) => {
+                      const code = e.target.value;
+                      if (!code) return;
+                      const matched = departmentCourses.find(c => c.code.toLowerCase() === code.toLowerCase());
+                      if (matched) {
+                        setFormCourseCode(matched.code);
+                        setFormCourseName(matched.name);
+                      }
+                    }}
+                    value={formCourseCode}
+                  >
+                    <option value="">-- Choose Existing Course (e.g. BCS702) or type below --</option>
+                    {departmentCourses.map(c => (
+                      <option key={c.code} value={c.code}>
+                        {c.code} — {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               {/* Course Code & Name */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '0.75rem' }}>
                 <div>
@@ -506,7 +549,7 @@ export const HODTimetablePage: React.FC = () => {
                     required
                     value={formCourseCode}
                     onChange={(e) => setFormCourseCode(e.target.value)}
-                    placeholder="e.g. BCS701"
+                    placeholder="e.g. BCS702"
                     className="form-input font-sans"
                     style={{ width: '100%', padding: '0.55rem', fontSize: '0.85rem' }}
                   />
@@ -521,7 +564,7 @@ export const HODTimetablePage: React.FC = () => {
                     required
                     value={formCourseName}
                     onChange={(e) => setFormCourseName(e.target.value)}
-                    placeholder="e.g. Distributed Systems"
+                    placeholder="e.g. Machine Learning"
                     className="form-input font-sans"
                     style={{ width: '100%', padding: '0.55rem', fontSize: '0.85rem' }}
                   />
@@ -531,24 +574,28 @@ export const HODTimetablePage: React.FC = () => {
               {/* Faculty Instructor Selection */}
               <div>
                 <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: 'var(--brand-dark-grey)', textTransform: 'uppercase', marginBottom: '0.35rem' }}>
-                  Faculty Instructor
+                  Faculty Instructor *
                 </label>
                 <select
+                  required
                   value={formFacultyId}
                   onChange={(e) => {
                     const fid = e.target.value;
                     setFormFacultyId(fid);
                     const selected = facultyOptionsList.find(f => f.id === fid);
-                    if (selected) setFormFacultyName(selected.name);
+                    setFormFacultyName(selected ? selected.name : '');
                   }}
                   className="form-input font-sans"
                   style={{ width: '100%', padding: '0.55rem', fontSize: '0.85rem' }}
                 >
-                  <option value="">-- Select Faculty --</option>
+                  <option value="">-- Select Faculty Instructor * --</option>
                   {facultyOptionsList.map(f => (
                     <option key={f.id} value={f.id}>{f.name}</option>
                   ))}
                 </select>
+                <span style={{ display: 'block', marginTop: '0.25rem', fontSize: '0.7rem', color: '#64748B' }}>
+                  Assigning a faculty member enables them to view this period in their Timetable and record class attendance.
+                </span>
               </div>
 
               {/* Session Time Selector */}

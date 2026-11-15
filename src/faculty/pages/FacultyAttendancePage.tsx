@@ -1,10 +1,12 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   CalendarCheck, 
   CheckCircle2, 
   XCircle,
   Clock, 
-  AlertTriangle, 
+  AlertTriangle,
+  AlertCircle,
+  Loader2, 
   Save, 
   Search, 
   BookOpen, 
@@ -16,16 +18,21 @@ import {
   Edit3,
   History,
   X,
-  Check
+  Check,
+  MapPin,
+  Download,
+  FileSpreadsheet,
+  FileText
 } from 'lucide-react';
 import { FacultyAppShell } from '../components/FacultyAppShell';
-import { ClockTimePicker } from '../components/ClockTimePicker';
 import { 
   getDepartmentStudentsForAttendance, 
   getFacultyAttendanceLogs, 
   markAttendanceSession,
   getSessionAttendanceDetails,
-  correctStudentAttendance
+  correctStudentAttendance,
+  verifySavedAttendanceSession,
+  checkExistingSessionIdentity
 } from '../../services/attendanceService';
 import type { 
   DepartmentStudent, 
@@ -33,7 +40,26 @@ import type {
   SessionRosterStudent,
   AttendanceCorrectionLogEntry
 } from '../../services/attendanceService';
-import { getAvailableDepartmentCourses } from '../../services/courseService';
+import { 
+  getAvailableDepartmentCourses,
+  getAllocatedCoursesForFaculty
+} from '../../services/courseService';
+import { 
+  getFacultyTimetable, 
+  getDayOfWeekIST,
+  getDateForWeekdayInWeek,
+  normalizeWeekday,
+  resolveScheduledSessions,
+  type TimetableEntry,
+  type TimetableResolutionResult
+} from '../../services/timetableService';
+import { TimetableSlotPicker } from '../components/TimetableSlotPicker';
+import {
+  compileAttendanceReportData,
+  downloadAttendancePDF,
+  downloadAttendanceXLSX,
+  downloadAttendanceCSV
+} from '../../services/attendanceReportService';
 import { useAuth } from '../../app/context/AuthContext';
 
 export const FacultyAttendancePage: React.FC = () => {
@@ -44,11 +70,16 @@ export const FacultyAttendancePage: React.FC = () => {
   const [availableCourses, setAvailableCourses] = useState<{ code: string; name: string }[]>([]);
   const [showCourseSuggestions, setShowCourseSuggestions] = useState<boolean>(false);
 
-  // Session details
+  // Session details & Timetable integration
   const [sessionDate, setSessionDate] = useState<string>(new Date().toISOString().slice(0, 10));
-  const [sessionTime, setSessionTime] = useState<string>('09:00 AM - 10:00 AM');
+  const [sessionTimeSlot, setSessionTimeSlot] = useState<string>('');
   const [section, setSection] = useState<string>('');
   const [semester, setSemester] = useState<number | ''>('');
+  const [facultyTimetable, setFacultyTimetable] = useState<TimetableEntry[]>([]);
+  const [matchingSessions, setMatchingSessions] = useState<TimetableEntry[]>([]);
+  const [selectedTimetableEntry, setSelectedTimetableEntry] = useState<TimetableEntry | null>(null);
+  const [timetableResolution, setTimetableResolution] = useState<TimetableResolutionResult | null>(null);
+  const [isLoadingTimetable, setIsLoadingTimetable] = useState<boolean>(false);
 
   // Students and attendance states
   const [students, setStudents] = useState<DepartmentStudent[]>([]);
@@ -63,9 +94,20 @@ export const FacultyAttendancePage: React.FC = () => {
   // UI state
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [saveStage, setSaveStage] = useState<'Ready' | 'Validating' | 'Saving' | 'Verifying' | 'Success' | 'Failed'>('Ready');
+  const [lastSavedCount, setLastSavedCount] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<'mark' | 'history'>('mark');
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null);
   const [schemaWarning, setSchemaWarning] = useState<string | null>(null);
+  const [missingEnrollmentWarning, setMissingEnrollmentWarning] = useState<string | null>(null);
+  const [hasNoAllocatedCourses, setHasNoAllocatedCourses] = useState<boolean>(false);
+
+  // Download Report Modal State
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [reportFromDate, setReportFromDate] = useState<string>('');
+  const [reportToDate, setReportToDate] = useState<string>('');
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportFormat, setExportFormat] = useState<'PDF' | 'XLSX' | 'CSV'>('PDF');
 
   const showToast = (type: 'success' | 'error' | 'warning', text: string) => {
     setToastMessage({ type, text });
@@ -177,35 +219,236 @@ export const FacultyAttendancePage: React.FC = () => {
     }
   };
 
+  const filteredAvailableCourses = useMemo(() => {
+    if (!courseInput.trim()) return availableCourses;
+    const lower = courseInput.toLowerCase().trim();
+    return availableCourses.filter(c => 
+      c.code.toLowerCase().includes(lower) || 
+      c.name.toLowerCase().includes(lower) ||
+      `${c.name} (${c.code})`.toLowerCase().includes(lower)
+    );
+  }, [availableCourses, courseInput]);
+
+  // Selected course code derivation
+  // Selected course code derivation
+  const parsedCourseCode = useMemo(() => {
+    if (!courseInput.trim()) return '';
+    const trimmed = courseInput.trim();
+    const paren = trimmed.match(/\(([^)]+)\)/);
+    if (paren) return paren[1].trim();
+    if (trimmed.includes('-')) {
+      const parts = trimmed.split('-').map(p => p.trim());
+      const codePart = parts.find(p => /^[A-Za-z0-9]+$/.test(p));
+      if (codePart) return codePart;
+    }
+    return trimmed.split(' ')[0] || trimmed;
+  }, [courseInput]);
+
+  // Selected course name derivation
+  const parsedCourseName = useMemo(() => {
+    const trimmed = courseInput.trim();
+    const parenIndex = trimmed.indexOf('(');
+    if (parenIndex > 0) {
+      return trimmed.slice(0, parenIndex).trim();
+    }
+    return trimmed;
+  }, [courseInput]);
+
+  // Timetable days where this course is scheduled from unified resolution or cached timetable
+  const courseOtherScheduledDays = useMemo(() => {
+    if (timetableResolution?.scheduledDaysForCourse && timetableResolution.scheduledDaysForCourse.length > 0) {
+      return timetableResolution.scheduledDaysForCourse;
+    }
+    if (!parsedCourseCode || !facultyTimetable || facultyTimetable.length === 0) return [];
+    const cleanCode = parsedCourseCode.toLowerCase().trim();
+    const matched = facultyTimetable.filter(entry => {
+      const entryCode = (entry.course_code || entry.course_id || '').toLowerCase().trim();
+      const entryId = (entry.course_id || '').toLowerCase().trim();
+      const entryName = (entry.course_name || '').toLowerCase().trim();
+      return entryCode === cleanCode || entryId === cleanCode || entryCode.includes(cleanCode) || entryName.includes(cleanCode);
+    });
+    return Array.from(new Set(matched.map(e => normalizeWeekday(e.day_of_week)).filter(Boolean)));
+  }, [timetableResolution, parsedCourseCode, facultyTimetable]);
+
+  const applyTimetableAndRoster = useCallback(async (
+    targetDate: string,
+    targetCourseInput: string,
+    targetSection: string,
+    targetSemester: number | '',
+    customTimetableList?: TimetableEntry[]
+  ) => {
+    setIsLoadingTimetable(true);
+    try {
+      // 1. Resolve timetable sessions
+      const res = await resolveScheduledSessions({
+        date: targetDate,
+        courseIdentifier: targetCourseInput,
+        section: targetSection || undefined,
+        semester: targetSemester !== '' ? Number(targetSemester) : undefined,
+        preloadedEntries: customTimetableList || facultyTimetable
+      });
+
+      setTimetableResolution(res);
+      setMatchingSessions(res.matchingSessions);
+
+      let chosenSlot: TimetableEntry | null = null;
+      if (res.matchingSessions.length > 0) {
+        // Auto-select session: keep previous if still valid in filtered list, else pick top match
+        chosenSlot = (selectedTimetableEntry && res.matchingSessions.some(m => m.id === selectedTimetableEntry.id))
+          ? selectedTimetableEntry
+          : res.matchingSessions[0];
+        
+        setSelectedTimetableEntry(chosenSlot);
+        setSessionTimeSlot(`${chosenSlot.start_time} - ${chosenSlot.end_time}`);
+        if (chosenSlot.section) setSection(chosenSlot.section);
+        if (chosenSlot.semester) setSemester(chosenSlot.semester);
+      } else {
+        setSelectedTimetableEntry(null);
+        setSessionTimeSlot('');
+      }
+
+      // 2. Resolve verified student roster IMMEDIATELY based on Course/Section/Semester
+      // (Requirement C: "The roster must NOT depend on whether a timetable slot has already been selected.")
+      const rawTrimmed = (targetCourseInput || '').trim();
+      const parenMatch = rawTrimmed.match(/\(([^)]+)\)/);
+      const cleanCode = parenMatch ? parenMatch[1].trim() : (rawTrimmed.split(' ')[0] || rawTrimmed).trim();
+
+      const effSection = chosenSlot?.section || targetSection || undefined;
+      const effSemester = chosenSlot?.semester || (targetSemester !== '' ? Number(targetSemester) : undefined);
+
+      if (cleanCode) {
+        const stds = await getDepartmentStudentsForAttendance(
+          profile?.department_id || undefined,
+          cleanCode,
+          effSection,
+          effSemester
+        );
+        setStudents(stds);
+        if (stds.length === 0) {
+          setMissingEnrollmentWarning(
+            `No verified student enrollment mapping found for "${targetCourseInput}" Section ${effSection || 'N/A'}, Semester ${effSemester || 'N/A'}. Attendance requires verified course/section enrollments; unverified department-wide fallback is prohibited.`
+          );
+          setAttendanceMap({});
+          setInitialAttendanceMap({});
+        } else {
+          setMissingEnrollmentWarning(null);
+          const newMap: { [studentId: string]: 'Present' | 'Absent' | 'Late' } = {};
+          stds.forEach(s => { newMap[s.id] = 'Present'; });
+          setAttendanceMap(newMap);
+          setInitialAttendanceMap(newMap);
+        }
+      } else {
+        setStudents([]);
+        setAttendanceMap({});
+        setInitialAttendanceMap({});
+      }
+    } catch (err: any) {
+      console.warn('[applyTimetableAndRoster] Error:', err);
+    } finally {
+      setIsLoadingTimetable(false);
+    }
+  }, [facultyTimetable, profile?.department_id, selectedTimetableEntry]);
+
+  const handleSelectCourse = async (courseCode: string, courseName: string) => {
+    const fullInput = `${courseName} (${courseCode})`;
+    setCourseInput(fullInput);
+    setShowCourseSuggestions(false);
+    await applyTimetableAndRoster(sessionDate, fullInput, section, semester, facultyTimetable);
+  };
+
+  const handleSelectScheduledSession = async (entry: TimetableEntry) => {
+    setSelectedTimetableEntry(entry);
+    setSessionTimeSlot(`${entry.start_time} - ${entry.end_time}`);
+    
+    // Auto-align section and semester from scheduled timetable entry
+    const entrySection = entry.section || '';
+    const entrySemester = entry.semester;
+    setSection(entrySection);
+    setSemester(entrySemester);
+
+    // If course input wasn't populated, populate it
+    const entryCode = entry.course_code || entry.course_id;
+    const entryName = entry.course_name;
+    if (entryCode && (!courseInput || !courseInput.includes(entryCode))) {
+      setCourseInput(`${entryName} (${entryCode})`);
+    }
+
+    // Resolve verified student roster strictly for this course, section, and semester
+    try {
+      const stds = await getDepartmentStudentsForAttendance(
+        profile?.department_id || undefined,
+        entryCode,
+        entrySection || undefined,
+        entrySemester
+      );
+      setStudents(stds);
+
+      if (stds.length === 0) {
+        setMissingEnrollmentWarning(
+          `No verified student enrollment mapping found for "${entryName} (${entryCode})" Section ${entrySection || 'N/A'}, Semester ${entrySemester}. Attendance requires verified course/section enrollments; unverified department-wide fallback is prohibited.`
+        );
+        setAttendanceMap({});
+        setInitialAttendanceMap({});
+      } else {
+        setMissingEnrollmentWarning(null);
+        const newMap: { [studentId: string]: 'Present' | 'Absent' | 'Late' } = {};
+        stds.forEach(s => {
+          newMap[s.id] = 'Present';
+        });
+        setAttendanceMap(newMap);
+        setInitialAttendanceMap(newMap);
+      }
+    } catch (err: any) {
+      console.warn('Failed to load roster for timetable session:', err?.message);
+    }
+  };
+
   const loadData = async () => {
     setIsLoading(true);
     setSchemaWarning(null);
+    setMissingEnrollmentWarning(null);
+    setHasNoAllocatedCourses(false);
     try {
-      const [stds, logs, courses] = await Promise.all([
-        getDepartmentStudentsForAttendance(profile?.department_id || undefined),
+      // Load subjects specifically allocated to this authenticated faculty
+      const [allocatedCourses, logs, timetable] = await Promise.all([
+        getAllocatedCoursesForFaculty(),
         getFacultyAttendanceLogs(),
-        getAvailableDepartmentCourses()
+        getFacultyTimetable()
       ]);
 
-      setStudents(stds);
+      setFacultyTimetable(timetable);
       setHistoryLogs(logs);
-      setAvailableCourses(courses);
 
-      // Default course if available
-      if (courses.length > 0 && !courseInput) {
-        setCourseInput(`${courses[0].name} (${courses[0].code})`);
+      if (allocatedCourses.length === 0) {
+        // Faculty has no subjects allocated by HOD/Admin
+        setAvailableCourses([]);
+        setHasNoAllocatedCourses(true);
+        setCourseInput('');
+        setStudents([]);
+        setAttendanceMap({});
+        setInitialAttendanceMap({});
+      } else {
+        setAvailableCourses(allocatedCourses.map(c => ({ code: c.code, name: c.name })));
+        setHasNoAllocatedCourses(false);
+
+        let initialCourse = '';
+        if (!courseInput) {
+          initialCourse = `${allocatedCourses[0].name} (${allocatedCourses[0].code})`;
+          setCourseInput(initialCourse);
+          if (allocatedCourses[0].section && !section) setSection(allocatedCourses[0].section);
+          if (allocatedCourses[0].semester && !semester) setSemester(allocatedCourses[0].semester);
+        } else {
+          initialCourse = courseInput;
+        }
+
+        await applyTimetableAndRoster(
+          sessionDate,
+          initialCourse,
+          section || (allocatedCourses[0]?.section || ''),
+          semester || (allocatedCourses[0]?.semester || ''),
+          timetable
+        );
       }
-
-      // Detect semester from students if available
-      if (stds.length > 0 && stds[0].semester) {
-        setSemester(stds[0].semester);
-      }
-
-      // Default all students to 'Present'
-      const initialMap: { [studentId: string]: 'Present' | 'Absent' | 'Late' } = {};
-      stds.forEach(s => { initialMap[s.id] = 'Present'; });
-      setAttendanceMap(initialMap);
-      setInitialAttendanceMap(initialMap);
     } catch (err: any) {
       console.error('Failed to load attendance initial data:', err);
       if (err?.message?.includes('schema cache') || err?.message?.includes('attendance_sessions')) {
@@ -246,7 +489,41 @@ export const FacultyAttendancePage: React.FC = () => {
     }));
   };
 
-  // Check for unsaved changes
+  const handleExportReport = async () => {
+    if (!parsedCourseCode) {
+      showToast('error', 'Please select a subject to generate an attendance report.');
+      return;
+    }
+
+    setIsExporting(true);
+    try {
+      const reportData = await compileAttendanceReportData({
+        courseCode: parsedCourseCode,
+        courseName: parsedCourseName,
+        facultyName: profile?.full_name || undefined,
+        section: section || undefined,
+        semester: semester !== '' ? Number(semester) : undefined,
+        fromDate: reportFromDate || undefined,
+        toDate: reportToDate || undefined
+      });
+
+      if (exportFormat === 'PDF') {
+        downloadAttendancePDF(reportData);
+      } else if (exportFormat === 'XLSX') {
+        downloadAttendanceXLSX(reportData);
+      } else {
+        downloadAttendanceCSV(reportData);
+      }
+
+      showToast('success', `Attendance report generated and downloaded successfully (${exportFormat}).`);
+      setIsReportModalOpen(false);
+    } catch (err: any) {
+      console.error('Failed to export report:', err);
+      showToast('error', err?.message || 'Failed to generate attendance report.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
   const hasUnsavedChanges = useMemo(() => {
     for (const s of students) {
       if (attendanceMap[s.id] !== initialAttendanceMap[s.id]) {
@@ -257,24 +534,45 @@ export const FacultyAttendancePage: React.FC = () => {
   }, [students, attendanceMap, initialAttendanceMap]);
 
   const handleSaveAttendance = async () => {
+    if (isSaving) return; // Prevent duplicate clicks during in-flight operation
+
+    if (!profile || !profile.id) {
+      showToast('error', 'Authentication required. Please sign in to record attendance.');
+      return;
+    }
+
     if (!courseInput.trim()) {
       showToast('error', 'Please enter or select a course name or code.');
       return;
     }
 
-    if (students.length === 0) {
-      showToast('error', 'No students registered in this department to record attendance for.');
+    if (!selectedTimetableEntry) {
+      showToast('error', 'Cannot save attendance: A scheduled timetable class time slot must be selected.');
       return;
     }
 
-    setIsSaving(true);
-    setToastMessage(null);
+    // Authorization check: Regular faculty can only mark attendance for their own assigned sessions
+    if (profile.role === 'FACULTY' && selectedTimetableEntry.faculty_id) {
+      if (selectedTimetableEntry.faculty_id !== profile.id) {
+        showToast('error', 'Unauthorized: You are not authorized to record attendance for another faculty member\'s timetable session.');
+        return;
+      }
+    }
 
     // Derive code and name safely
     const trimmedCourse = courseInput.trim();
     const parenMatch = trimmedCourse.match(/\(([^)]+)\)/);
     const courseCode = parenMatch && parenMatch[1] ? parenMatch[1].trim() : (trimmedCourse.split(' ')[0] || 'COURSE');
     const courseName = trimmedCourse;
+
+    if (students.length === 0) {
+      showToast('error', `Cannot save attendance: No verified student enrollment mapping exists for ${courseCode}. Course enrollment mapping is required.`);
+      return;
+    }
+
+    setIsSaving(true);
+    setSaveStage('Validating');
+    setToastMessage(null);
 
     // IMPORTANT: Include ALL authorized students in submission regardless of search or status filter
     const records = students.map(s => ({
@@ -284,34 +582,199 @@ export const FacultyAttendancePage: React.FC = () => {
       status: attendanceMap[s.id] || 'Present'
     }));
 
+    // The authoritative time slot comes from the selected timetable entry
+    const sessionTimeSlot = selectedTimetableEntry 
+      ? `${selectedTimetableEntry.start_time} - ${selectedTimetableEntry.end_time}`
+      : '09:00 AM - 10:00 AM';
+
+    const startTime = sessionTimeSlot.split(' - ')[0]?.trim() || '09:00 AM';
+
+    // Check in local cache for duplicate attendance session on the same date and time slot for this course
+    const isDuplicateSession = historyLogs.some(log => 
+      log.date === sessionDate &&
+      log.courseCode.toLowerCase() === courseCode.toLowerCase() &&
+      log.timeSlot === sessionTimeSlot &&
+      (log.section || null) === (section ? section.trim() : null)
+    );
+
+    if (isDuplicateSession) {
+      showToast('warning', `An attendance session for ${courseCode} on ${sessionDate} at ${sessionTimeSlot} has already been recorded. Historical sessions can be reviewed in Session History Logs.`);
+      setIsSaving(false);
+      setSaveStage('Ready');
+      return;
+    }
+
+    // Server-level duplicate pre-check: verify against database directly to catch sessions saved elsewhere or delayed commits
     try {
-      await markAttendanceSession(
+      const dbExisting = await checkExistingSessionIdentity(
+        courseCode,
+        sessionDate,
+        startTime,
+        section ? section.trim() : null,
+        4000
+      );
+      if (dbExisting) {
+        showToast('warning', `An attendance session for ${courseCode} on ${sessionDate} at ${sessionTimeSlot} was already committed in the database. Duplicate submission blocked.`);
+        setHistoryLogs(prev => {
+          if (prev.some(l => l.id === dbExisting.id)) return prev;
+          return [dbExisting, ...prev];
+        });
+        setIsSaving(false);
+        setSaveStage('Ready');
+        return;
+      }
+    } catch (preCheckErr: any) {
+      console.warn('Pre-check for existing session identity non-critical error:', preCheckErr?.message);
+    }
+
+    let savedSessionResult: AttendanceSessionLog | null = null;
+
+    try {
+      // 1. Stage: Saving (atomic PostgreSQL RPC call with cached profile & 15s timeout protection)
+      setSaveStage('Saving');
+      const savedSession = await markAttendanceSession(
         courseCode,
         courseName,
         sessionDate,
-        sessionTime,
+        sessionTimeSlot,
         records,
         section ? section.trim() : null,
-        semester !== '' ? Number(semester) : null
+        semester !== '' ? Number(semester) : null,
+        profile,
+        15000
       );
 
-      setIsSaving(false);
-      // Synchronize initial baseline map to current so unsaved flag clears
-      setInitialAttendanceMap({ ...attendanceMap });
-      showToast('success', `Attendance recorded successfully for ${courseCode} (${records.length} students marked).`);
+      savedSessionResult = savedSession;
 
-      // Refresh logs
-      const updatedLogs = await getFacultyAttendanceLogs();
-      setHistoryLogs(updatedLogs);
+      if (!savedSession || !savedSession.id) {
+        throw new Error('Database transaction failed: No session ID returned by Supabase.');
+      }
+
+      // 2. Stage: Verifying (deep verification of session header and actual attendance records)
+      setSaveStage('Verifying');
+      
+      // Calculate expected counts from submitted records
+      let expPresent = 0;
+      let expAbsent = 0;
+      let expLate = 0;
+      records.forEach(r => {
+        if (r.status === 'Present') expPresent++;
+        else if (r.status === 'Absent') expAbsent++;
+        else if (r.status === 'Late') expLate++;
+      });
+      const expectedCounts = {
+        total: records.length,
+        present: expPresent,
+        absent: expAbsent,
+        late: expLate
+      };
+
+      let isVerified = false;
+      let verificationDiscrepancy: string | null = null;
+      try {
+        const verifiedResult = await verifySavedAttendanceSession(savedSession.id, expectedCounts, 8000);
+        if (verifiedResult && verifiedResult.isRecordsVerified) {
+          isVerified = true;
+        }
+      } catch (verifyErr: any) {
+        console.warn('Attendance verification check encountered an issue:', verifyErr?.message);
+        if (verifyErr?.message?.includes('Database integrity verification failed')) {
+          // A session exists but records are missing or counts mismatched!
+          verificationDiscrepancy = verifyErr.message;
+        }
+        // If it was just a timeout, isVerified remains false
+      }
+
+      if (verificationDiscrepancy) {
+        // Integrity issue: Do not claim full success!
+        setSaveStage('Failed');
+        showToast('error', `Attendance Save Warning: ${verificationDiscrepancy}. Please review Session History Logs.`);
+        return;
+      }
+
+      // 3. Stage: Success
+      setSaveStage('Success');
+      setLastSavedCount(savedSession.totalStudents);
+      setInitialAttendanceMap({ ...attendanceMap }); // Clear unsaved changes indicator
+
+      const verifiedMsg = isVerified
+        ? `Attendance verified & saved successfully for ${courseCode} (${savedSession.presentCount} Present, ${savedSession.lateCount} Late, ${savedSession.absentCount} Absent — ${savedSession.totalStudents} records confirmed).`
+        : `Attendance session saved for ${courseCode} (${savedSession.totalStudents} students recorded). Verification check is pending.`;
+
+      showToast('success', verifiedMsg);
+
+      // 4. Update session history without blocking UI responsiveness
+      setHistoryLogs(prev => {
+        const alreadyInHistory = prev.some(l => l.id === savedSession.id);
+        if (alreadyInHistory) return prev;
+        return [savedSession, ...prev];
+      });
+
+      // Background sync fresh history logs from Supabase
+      getFacultyAttendanceLogs()
+        .then(updatedLogs => setHistoryLogs(updatedLogs))
+        .catch(e => console.warn('Background log refresh non-critical error:', e?.message));
+
+      setTimeout(() => {
+        setSaveStage('Ready');
+      }, 4000);
+
     } catch (err: any) {
       console.error('Failed to save attendance session:', err);
-      setIsSaving(false);
+      const isTimeout = err?.isTimeout || err?.message?.includes('timed out');
+      
+      // If error was uncertain / timeout, check existing session identity to see if the RPC committed
+      if (isTimeout) {
+        try {
+          const existingSession = await checkExistingSessionIdentity(
+            courseCode,
+            sessionDate,
+            startTime,
+            section ? section.trim() : null,
+            5000
+          );
+
+          if (existingSession) {
+            // Verify actual records for this existing session before claiming success
+            try {
+              const verifyExisting = await verifySavedAttendanceSession(existingSession.id, undefined, 5000);
+              if (verifyExisting && verifyExisting.isRecordsVerified) {
+                setSaveStage('Success');
+                setLastSavedCount(existingSession.totalStudents);
+                setInitialAttendanceMap({ ...attendanceMap });
+                showToast('success', `Attendance session confirmed in database for ${courseCode} (${existingSession.totalStudents} student records verified).`);
+                setHistoryLogs(prev => [existingSession, ...prev.filter(l => l.id !== existingSession.id)]);
+                setTimeout(() => setSaveStage('Ready'), 4000);
+                return;
+              }
+            } catch (vErr: any) {
+              console.warn('Verification of timed-out session failed:', vErr?.message);
+            }
+          }
+        } catch {
+          // Fall through to uncertain outcome error
+        }
+
+        setSaveStage('Failed');
+        showToast('error', `Save status is unresolved: Request timed out after 15s. The database transaction may still be in progress. Submissions for ${courseCode} at ${sessionTimeSlot} are temporarily blocked to prevent duplicate sessions. Please check Session History or wait a moment.`);
+        return;
+      }
+
+      setSaveStage('Failed');
       const msg = err?.message || '';
       if (msg.includes('schema cache') || msg.includes('attendance_sessions')) {
         showToast('error', 'Database tables not yet created. Please run migration 00014 in Supabase SQL Editor.');
+      } else if (msg.includes('Authentication required') || msg.includes('User profile not found')) {
+        showToast('error', 'Your session has expired. Please log in again to save attendance.');
+      } else if (msg.includes('Unauthorized') || msg.includes('not authorized')) {
+        showToast('error', msg);
+      } else if (msg.includes('Duplicate') || msg.includes('unique_session_student')) {
+        showToast('error', `Save failed: Duplicate record found. ${msg}`);
       } else {
-        showToast('error', msg || 'Unable to save attendance session. Please try again.');
+        showToast('error', msg || 'Unable to save attendance session. Your student selections have been preserved.');
       }
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -347,12 +810,7 @@ export const FacultyAttendancePage: React.FC = () => {
   const absentCount = useMemo(() => Object.values(attendanceMap).filter(v => v === 'Absent').length, [attendanceMap]);
   const lateCount = useMemo(() => Object.values(attendanceMap).filter(v => v === 'Late').length, [attendanceMap]);
   const unmarkedCount = totalStudentsCount - (presentCount + absentCount + lateCount);
-
-  // Selected course details preview
-  const parsedCourseCode = useMemo(() => {
-    const paren = courseInput.match(/\(([^)]+)\)/);
-    return paren ? paren[1].trim() : courseInput.trim().split(' ')[0] || 'COURSE';
-  }, [courseInput]);
+  const usnConflictCount = useMemo(() => students.filter(s => s.isUsnConflict).length, [students]);
 
   return (
     <FacultyAppShell>
@@ -385,6 +843,110 @@ export const FacultyAttendancePage: React.FC = () => {
           >
             ✕
           </button>
+        </div>
+      )}
+
+      {/* No Allocated Courses Warning Banner */}
+      {hasNoAllocatedCourses && (
+        <div
+          style={{
+            padding: '1rem 1.25rem',
+            marginBottom: '1.25rem',
+            borderRadius: '10px',
+            backgroundColor: '#EFF6FF',
+            border: '1px solid #BFDBFE',
+            color: '#1E40AF',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '0.75rem',
+            fontSize: '0.875rem'
+          }}
+        >
+          <Info size={20} style={{ flexShrink: 0, marginTop: '2px', color: '#2563EB' }} />
+          <div>
+            <strong style={{ display: 'block', fontWeight: 700, marginBottom: '0.2rem' }}>
+              No Subjects Allocated to Your Faculty Account
+            </strong>
+            <span>
+              Your Department Head (HOD) or Academic Administrator has not yet allocated any teaching subjects or timetable periods to your faculty profile ({profile?.full_name || 'Faculty'}). Once courses are assigned in the HOD portal, they will automatically appear here.
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Timetable Session Warning Banner when Roster is loaded but no slot scheduled */}
+      {students.length > 0 && !selectedTimetableEntry && (
+        <div
+          style={{
+            padding: '0.85rem 1.25rem',
+            marginBottom: '1.25rem',
+            borderRadius: '10px',
+            backgroundColor: '#FFFBEB',
+            border: '1px solid #FCD34D',
+            color: '#92400E',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.65rem',
+            fontSize: '0.85rem'
+          }}
+        >
+          <Clock size={18} style={{ flexShrink: 0, color: '#D97706' }} />
+          <div>
+            <strong style={{ fontWeight: 700 }}>Active Student Roster Loaded ({totalStudentsCount} Students)</strong>
+            <span style={{ marginLeft: '0.4rem' }}>
+              Select a scheduled Class Time Slot above to record and save attendance for this session.
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Missing Course Enrollment Warning Banner */}
+      {missingEnrollmentWarning && (
+        <div
+          style={{
+            padding: '0.85rem 1.25rem',
+            marginBottom: '1.25rem',
+            borderRadius: '10px',
+            backgroundColor: '#FFFBEB',
+            border: '1px solid #FCD34D',
+            color: '#92400E',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '0.65rem',
+            fontSize: '0.85rem'
+          }}
+        >
+          <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: '2px', color: '#D97706' }} />
+          <div>
+            <strong style={{ display: 'block', fontWeight: 700 }}>Course Enrollment Mapping Required</strong>
+            <span>{missingEnrollmentWarning}</span>
+          </div>
+        </div>
+      )}
+
+      {/* USN Identity Conflict Warning Banner */}
+      {usnConflictCount > 0 && (
+        <div
+          style={{
+            padding: '0.85rem 1.25rem',
+            marginBottom: '1.25rem',
+            borderRadius: '10px',
+            backgroundColor: '#FEF2F2',
+            border: '1px solid #FECACA',
+            color: '#991B1B',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '0.65rem',
+            fontSize: '0.85rem'
+          }}
+        >
+          <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: '2px', color: '#DC2626' }} />
+          <div>
+            <strong style={{ display: 'block', fontWeight: 700 }}>USN Identity Conflict Detected</strong>
+            <span>
+              {usnConflictCount} student record(s) share a normalized USN with another account. Records and attendance histories are maintained separately to prevent cross-account corruption.
+            </span>
+          </div>
         </div>
       )}
 
@@ -428,8 +990,33 @@ export const FacultyAttendancePage: React.FC = () => {
           </p>
         </div>
 
-        {/* Unsaved changes indicator */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+        {/* Action Buttons: Download Report & Save Attendance */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          {/* Download Attendance Report Button */}
+          <button
+            type="button"
+            className="btn btn-secondary font-sans"
+            onClick={() => setIsReportModalOpen(true)}
+            disabled={!parsedCourseCode}
+            style={{
+              fontSize: '0.875rem',
+              padding: '0.6rem 1.15rem',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              backgroundColor: '#FFFFFF',
+              borderColor: '#CBD5E1',
+              color: '#1E293B',
+              fontWeight: 600,
+              boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+              cursor: !parsedCourseCode ? 'not-allowed' : 'pointer',
+              opacity: !parsedCourseCode ? 0.6 : 1
+            }}
+          >
+            <Download size={16} style={{ color: 'var(--brand-blue)' }} />
+            <span>Download Attendance</span>
+          </button>
+
           {hasUnsavedChanges && (
             <span style={{
               display: 'inline-flex',
@@ -449,20 +1036,65 @@ export const FacultyAttendancePage: React.FC = () => {
           )}
 
           <button 
+            type="button"
             className="btn btn-primary" 
             onClick={handleSaveAttendance} 
-            disabled={isSaving || students.length === 0} 
+            disabled={isSaving || students.length === 0 || !selectedTimetableEntry} 
+            title={
+              !selectedTimetableEntry
+                ? 'A scheduled timetable class time slot must be selected'
+                : students.length === 0
+                  ? 'Verified student enrollment is required to save attendance'
+                  : 'Save attendance records'
+            }
             style={{ 
               fontSize: '0.875rem', 
               padding: '0.6rem 1.25rem', 
-              boxShadow: '0 4px 12px rgba(249, 115, 22, 0.25)',
+              boxShadow: saveStage === 'Failed' 
+                ? '0 4px 12px rgba(239, 68, 68, 0.25)' 
+                : saveStage === 'Success' 
+                  ? '0 4px 12px rgba(16, 185, 129, 0.25)' 
+                  : '0 4px 12px rgba(249, 115, 22, 0.25)',
               display: 'inline-flex',
               alignItems: 'center',
-              gap: '0.5rem'
+              gap: '0.5rem',
+              backgroundColor: saveStage === 'Failed' 
+                ? '#EF4444' 
+                : saveStage === 'Success' 
+                  ? '#10B981' 
+                  : undefined,
+              borderColor: saveStage === 'Failed' 
+                ? '#DC2626' 
+                : saveStage === 'Success' 
+                  ? '#059669' 
+                  : undefined,
+              opacity: (isSaving || students.length === 0 || !selectedTimetableEntry) ? 0.6 : 1,
+              cursor: (isSaving || students.length === 0 || !selectedTimetableEntry) ? 'not-allowed' : 'pointer',
+              transition: 'all 0.2s ease-in-out'
             }}
           >
-            <Save size={16} />
-            <span>{isSaving ? 'Saving Attendance...' : `Save Attendance (${totalStudentsCount})`}</span>
+            {isSaving ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : saveStage === 'Success' ? (
+              <CheckCircle2 size={16} />
+            ) : saveStage === 'Failed' ? (
+              <AlertCircle size={16} />
+            ) : (
+              <Save size={16} />
+            )}
+            <span>
+              {saveStage === 'Validating'
+                ? 'Validating Roster...'
+                : saveStage === 'Saving'
+                  ? 'Saving Attendance...'
+                  : saveStage === 'Verifying'
+                    ? 'Verifying Saved Records...'
+                    : saveStage === 'Success'
+                      ? `Attendance Saved Successfully (${lastSavedCount ?? totalStudentsCount})`
+                      : saveStage === 'Failed'
+                        ? 'Save Failed — Retry'
+                        : `Save Attendance (${totalStudentsCount})`}
+            </span>
           </button>
         </div>
       </div>
@@ -513,7 +1145,7 @@ export const FacultyAttendancePage: React.FC = () => {
             </div>
 
             {/* Course Suggestions Dropdown */}
-            {showCourseSuggestions && availableCourses.length > 0 && (
+            {showCourseSuggestions && filteredAvailableCourses.length > 0 && (
               <div
                 style={{
                   position: 'absolute',
@@ -529,12 +1161,11 @@ export const FacultyAttendancePage: React.FC = () => {
                   overflowY: 'auto'
                 }}
               >
-                {availableCourses.map((c) => (
+                {filteredAvailableCourses.map((c) => (
                   <div
                     key={c.code}
                     onClick={() => {
-                      setCourseInput(`${c.name} (${c.code})`);
-                      setShowCourseSuggestions(false);
+                      handleSelectCourse(c.code, c.name);
                     }}
                     style={{
                       padding: '0.65rem 0.85rem',
@@ -562,7 +1193,7 @@ export const FacultyAttendancePage: React.FC = () => {
           {/* Session Date */}
           <div>
             <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: 'var(--brand-dark-grey)', textTransform: 'uppercase', marginBottom: '0.4rem', letterSpacing: '0.03em' }}>
-              Attendance Date *
+              Attendance Date * ({getDayOfWeekIST(sessionDate)})
             </label>
             <div style={{ position: 'relative' }}>
               <input 
@@ -570,20 +1201,32 @@ export const FacultyAttendancePage: React.FC = () => {
                 className="form-input font-sans"
                 style={{ width: '100%', padding: '0.6rem 0.75rem 0.6rem 2.2rem', fontSize: '0.875rem', borderRadius: '8px', border: '1px solid #CBD5E1', backgroundColor: '#FFFFFF', fontWeight: 500 }}
                 value={sessionDate}
-                onChange={(e) => setSessionDate(e.target.value)}
+                onChange={(e) => {
+                  const newDate = e.target.value;
+                  setSessionDate(newDate);
+                  applyTimetableAndRoster(newDate, courseInput, section, semester, facultyTimetable);
+                }}
               />
               <Calendar size={16} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: '#94A3B8' }} />
             </div>
           </div>
 
-          {/* Session Time Slot */}
+          {/* Class Time Slot — Timetable-Driven Selector with Popover */}
           <div>
             <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: 'var(--brand-dark-grey)', textTransform: 'uppercase', marginBottom: '0.4rem', letterSpacing: '0.03em' }}>
               Class Time Slot *
             </label>
-            <ClockTimePicker 
-              value={sessionTime}
-              onChange={(val) => setSessionTime(val)}
+            <TimetableSlotPicker
+              value={sessionTimeSlot}
+              selectedEntry={selectedTimetableEntry}
+              availableEntries={matchingSessions}
+              emptyReasonMessage={timetableResolution?.detailedMessage}
+              onChange={(timeStr, entry) => {
+                setSessionTimeSlot(timeStr);
+                if (entry) {
+                  handleSelectScheduledSession(entry);
+                }
+              }}
             />
           </div>
 
@@ -599,7 +1242,11 @@ export const FacultyAttendancePage: React.FC = () => {
                 placeholder="e.g. A, B"
                 style={{ width: '100%', padding: '0.6rem 0.6rem', fontSize: '0.85rem', borderRadius: '8px', border: '1px solid #CBD5E1', backgroundColor: '#FFFFFF' }}
                 value={section}
-                onChange={(e) => setSection(e.target.value)}
+                onChange={(e) => {
+                  const newSec = e.target.value;
+                  setSection(newSec);
+                  applyTimetableAndRoster(sessionDate, courseInput, newSec, semester, facultyTimetable);
+                }}
               />
             </div>
             <div>
@@ -610,7 +1257,11 @@ export const FacultyAttendancePage: React.FC = () => {
                 className="form-input font-sans"
                 style={{ width: '100%', padding: '0.6rem 0.5rem', fontSize: '0.85rem', borderRadius: '8px', border: '1px solid #CBD5E1', backgroundColor: '#FFFFFF' }}
                 value={semester}
-                onChange={(e) => setSemester(e.target.value ? Number(e.target.value) : '')}
+                onChange={(e) => {
+                  const val = e.target.value ? Number(e.target.value) : '';
+                  setSemester(val);
+                  applyTimetableAndRoster(sessionDate, courseInput, section, val, facultyTimetable);
+                }}
               >
                 <option value="">All Semesters</option>
                 {[1, 2, 3, 4, 5, 6, 7, 8].map(s => (
@@ -621,6 +1272,7 @@ export const FacultyAttendancePage: React.FC = () => {
           </div>
 
         </div>
+
       </div>
 
       {/* SECTION 3: ATTENDANCE SUMMARY STATS CARDS */}
@@ -813,7 +1465,7 @@ export const FacultyAttendancePage: React.FC = () => {
                 Student Attendance Roster
               </h3>
               <p style={{ fontSize: '0.825rem', color: 'var(--brand-dark-grey)', marginTop: '0.15rem', marginBottom: 0 }}>
-                {courseInput ? `${courseInput} — ` : ''}Date: <strong style={{ fontFamily: 'monospace' }}>{sessionDate}</strong> ({sessionTime})
+                {courseInput ? `${courseInput} — ` : ''}Date: <strong style={{ fontFamily: 'monospace' }}>{sessionDate}</strong> ({selectedTimetableEntry ? `${selectedTimetableEntry.start_time} - ${selectedTimetableEntry.end_time}` : getDayOfWeekIST(sessionDate)})
                 {statusFilter !== 'ALL' && <span style={{ color: 'var(--brand-orange)', marginLeft: '0.5rem', fontWeight: 700 }}>[Filtered: {statusFilter}]</span>}
               </p>
             </div>
@@ -947,10 +1599,12 @@ export const FacultyAttendancePage: React.FC = () => {
             </div>
           ) : students.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '3.5rem 1.5rem', color: 'var(--brand-dark-grey)' }}>
-              <Users size={48} style={{ margin: '0 auto 0.75rem', opacity: 0.35, color: 'var(--brand-black)' }} />
-              <h4 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--brand-black)' }}>No Department Students Found</h4>
-              <p style={{ fontSize: '0.85rem', marginTop: '0.25rem', maxWidth: '420px', marginInline: 'auto' }}>
-                There are currently no active students registered under your assigned department in the database.
+              <AlertTriangle size={48} style={{ margin: '0 auto 0.75rem', opacity: 0.6, color: '#D97706' }} />
+              <h4 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--brand-black)' }}>
+                {missingEnrollmentWarning ? 'Course Enrollment Mapping Missing' : 'No Students Found'}
+              </h4>
+              <p style={{ fontSize: '0.85rem', marginTop: '0.25rem', maxWidth: '480px', marginInline: 'auto', color: '#475569' }}>
+                {missingEnrollmentWarning || 'No students are registered for this course roster.'}
               </p>
             </div>
           ) : filteredStudents.length === 0 ? (
@@ -970,154 +1624,351 @@ export const FacultyAttendancePage: React.FC = () => {
               </button>
             </div>
           ) : (
-            <div className="table-responsive" style={{ border: '1px solid #E2E8F0', borderRadius: '8px', overflow: 'hidden' }}>
-              <table className="table font-sans" style={{ margin: 0 }}>
-                <thead style={{ backgroundColor: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
-                  <tr>
-                    <th style={{ width: '45px', textAlign: 'center', fontSize: '0.75rem', color: '#64748B' }}>#</th>
-                    <th style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#64748B', letterSpacing: '0.04em' }}>Student Name</th>
-                    <th style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#64748B', letterSpacing: '0.04em' }}>USN</th>
-                    <th style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#64748B', letterSpacing: '0.04em' }}>Section / Sem</th>
-                    <th style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#64748B', letterSpacing: '0.04em', textAlign: 'center', minWidth: '320px' }}>
-                      Attendance Status Selection
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredStudents.map((std, idx) => {
-                    const currentStatus = attendanceMap[std.id] || 'Present';
-                    return (
-                      <tr 
-                        key={std.id}
-                        style={{ 
-                          borderBottom: '1px solid #F1F5F9',
-                          backgroundColor: currentStatus === 'Absent' ? 'rgba(254, 242, 242, 0.4)' : currentStatus === 'Late' ? 'rgba(255, 251, 235, 0.4)' : '#FFFFFF',
-                          transition: 'background-color 0.15s ease'
-                        }}
-                      >
-                        <td style={{ textAlign: 'center', fontSize: '0.8rem', color: '#94A3B8', fontWeight: 600 }}>
-                          {idx + 1}
-                        </td>
-                        <td>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-                            <div style={{
-                              width: '32px',
-                              height: '32px',
-                              borderRadius: '50%',
-                              backgroundColor: '#E2E8F0',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              fontWeight: 700,
-                              fontSize: '0.75rem',
-                              color: '#334155'
+            <>
+              {/* Responsive Roster Styles */}
+              <style>{`
+                .attendance-desktop-view {
+                  display: block;
+                }
+                .attendance-mobile-cards {
+                  display: none;
+                }
+                @media (max-width: 768px) {
+                  .attendance-desktop-view {
+                    display: none;
+                  }
+                  .attendance-mobile-cards {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 0.75rem;
+                  }
+                }
+              `}</style>
+
+              {/* Desktop Roster Table */}
+              <div className="attendance-desktop-view table-responsive" style={{ border: '1px solid #E2E8F0', borderRadius: '8px', overflow: 'hidden' }}>
+                <table className="table font-sans" style={{ margin: 0 }}>
+                  <thead style={{ backgroundColor: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
+                    <tr>
+                      <th style={{ width: '45px', textAlign: 'center', fontSize: '0.75rem', color: '#64748B' }}>#</th>
+                      <th style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#64748B', letterSpacing: '0.04em' }}>Student Name</th>
+                      <th style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#64748B', letterSpacing: '0.04em' }}>USN</th>
+                      <th style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#64748B', letterSpacing: '0.04em' }}>Section / Sem</th>
+                      <th style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#64748B', letterSpacing: '0.04em', textAlign: 'center', minWidth: '320px' }}>
+                        Attendance Status Selection
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredStudents.map((std, idx) => {
+                      const currentStatus = attendanceMap[std.id] || 'Present';
+                      return (
+                        <tr 
+                          key={std.id}
+                          style={{ 
+                            borderBottom: '1px solid #F1F5F9',
+                            backgroundColor: currentStatus === 'Absent' ? 'rgba(254, 242, 242, 0.4)' : currentStatus === 'Late' ? 'rgba(255, 251, 235, 0.4)' : '#FFFFFF',
+                            transition: 'background-color 0.15s ease'
+                          }}
+                        >
+                          <td style={{ textAlign: 'center', fontSize: '0.8rem', color: '#94A3B8', fontWeight: 600 }}>
+                            {idx + 1}
+                          </td>
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                              <div style={{
+                                width: '32px',
+                                height: '32px',
+                                borderRadius: '50%',
+                                backgroundColor: '#E2E8F0',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontWeight: 700,
+                                fontSize: '0.75rem',
+                                color: '#334155'
+                              }}>
+                                {std.name.charAt(0).toUpperCase()}
+                              </div>
+                              <div>
+                                <div style={{ fontWeight: 600, color: 'var(--brand-black)', fontSize: '0.875rem' }}>{std.name}</div>
+                                <div style={{ fontSize: '0.75rem', color: '#64748B' }}>Student</div>
+                              </div>
+                            </div>
+                          </td>
+                          <td style={{ fontSize: '0.85rem', fontFamily: 'monospace', fontWeight: 600, color: '#334155' }}>
+                            <span style={{
+                              padding: '0.2rem 0.5rem',
+                              backgroundColor: std.isUsnConflict ? '#FEF2F2' : '#F1F5F9',
+                              border: std.isUsnConflict ? '1px solid #FECACA' : 'none',
+                              color: std.isUsnConflict ? '#991B1B' : '#334155',
+                              borderRadius: '4px'
                             }}>
-                              {std.name.charAt(0).toUpperCase()}
+                              {std.usn}
+                            </span>
+                            {std.isUsnConflict && (
+                              <span 
+                                className="badge badge-overdue font-sans" 
+                                style={{ fontSize: '0.625rem', padding: '0.1rem 0.35rem', marginLeft: '0.35rem', cursor: 'help' }}
+                                title={std.conflictDetails || 'USN conflict with another student record'}
+                              >
+                                CONFLICT
+                              </span>
+                            )}
+                          </td>
+                          <td style={{ fontSize: '0.825rem', color: '#64748B' }}>
+                            <span style={{ padding: '0.15rem 0.5rem', backgroundColor: '#F1F5F9', borderRadius: '4px', fontWeight: 600 }}>
+                              {std.section || section || 'Sec A'}
+                            </span>
+                            {std.semester ? ` • Sem ${std.semester}` : semester ? ` • Sem ${semester}` : ''}
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            {/* Standardized Status Controls */}
+                            <div style={{ 
+                              display: 'inline-flex', 
+                              gap: '0.4rem', 
+                              padding: '4px', 
+                              backgroundColor: '#F8FAFC', 
+                              borderRadius: '8px', 
+                              border: '1px solid #E2E8F0' 
+                            }}>
+                              {/* Present Button */}
+                              <button
+                                type="button"
+                                onClick={() => handleStatusToggle(std.id, 'Present')}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '0.4rem',
+                                  padding: '6px 16px',
+                                  minWidth: '92px',
+                                  justifyContent: 'center',
+                                  fontSize: '0.825rem',
+                                  fontWeight: currentStatus === 'Present' ? 700 : 500,
+                                  borderRadius: '6px',
+                                  border: currentStatus === 'Present' ? '1px solid #059669' : '1px solid transparent',
+                                  backgroundColor: currentStatus === 'Present' ? '#10B981' : '#FFFFFF',
+                                  color: currentStatus === 'Present' ? '#FFFFFF' : '#475569',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.15s ease',
+                                  boxShadow: currentStatus === 'Present' ? '0 2px 4px rgba(16, 185, 129, 0.25)' : 'none'
+                                }}
+                              >
+                                <CheckCircle2 size={15} style={{ color: currentStatus === 'Present' ? '#FFFFFF' : '#059669' }} />
+                                <span>Present</span>
+                              </button>
+
+                              {/* Absent Button */}
+                              <button
+                                type="button"
+                                onClick={() => handleStatusToggle(std.id, 'Absent')}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '0.4rem',
+                                  padding: '6px 16px',
+                                  minWidth: '92px',
+                                  justifyContent: 'center',
+                                  fontSize: '0.825rem',
+                                  fontWeight: currentStatus === 'Absent' ? 700 : 500,
+                                  borderRadius: '6px',
+                                  border: currentStatus === 'Absent' ? '1px solid #DC2626' : '1px solid transparent',
+                                  backgroundColor: currentStatus === 'Absent' ? '#EF4444' : '#FFFFFF',
+                                  color: currentStatus === 'Absent' ? '#FFFFFF' : '#475569',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.15s ease',
+                                  boxShadow: currentStatus === 'Absent' ? '0 2px 4px rgba(239, 68, 68, 0.25)' : 'none'
+                                }}
+                              >
+                                <XCircle size={15} style={{ color: currentStatus === 'Absent' ? '#FFFFFF' : '#DC2626' }} />
+                                <span>Absent</span>
+                              </button>
+
+                              {/* Late Button */}
+                              <button
+                                type="button"
+                                onClick={() => handleStatusToggle(std.id, 'Late')}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '0.4rem',
+                                  padding: '6px 16px',
+                                  minWidth: '92px',
+                                  justifyContent: 'center',
+                                  fontSize: '0.825rem',
+                                  fontWeight: currentStatus === 'Late' ? 700 : 500,
+                                  borderRadius: '6px',
+                                  border: currentStatus === 'Late' ? '1px solid #D97706' : '1px solid transparent',
+                                  backgroundColor: currentStatus === 'Late' ? '#F59E0B' : '#FFFFFF',
+                                  color: currentStatus === 'Late' ? '#FFFFFF' : '#475569',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.15s ease',
+                                  boxShadow: currentStatus === 'Late' ? '0 2px 4px rgba(245, 158, 11, 0.25)' : 'none'
+                                }}
+                              >
+                                <Clock size={15} style={{ color: currentStatus === 'Late' ? '#FFFFFF' : '#D97706' }} />
+                                <span>Late</span>
+                              </button>
                             </div>
-                            <div>
-                              <div style={{ fontWeight: 600, color: 'var(--brand-black)', fontSize: '0.875rem' }}>{std.name}</div>
-                              <div style={{ fontSize: '0.75rem', color: '#64748B' }}>Student</div>
-                            </div>
-                          </div>
-                        </td>
-                        <td style={{ fontSize: '0.85rem', fontFamily: 'monospace', fontWeight: 600, color: '#334155' }}>
-                          {std.usn}
-                        </td>
-                        <td style={{ fontSize: '0.825rem', color: '#64748B' }}>
-                          <span style={{ padding: '0.15rem 0.5rem', backgroundColor: '#F1F5F9', borderRadius: '4px', fontWeight: 600 }}>
-                            {std.section || section || 'Sec A'}
-                          </span>
-                          {std.semester ? ` • Sem ${std.semester}` : semester ? ` • Sem ${semester}` : ''}
-                        </td>
-                        <td style={{ textAlign: 'center' }}>
-                          {/* Prominent, Accessible Status Controls */}
-                          <div style={{ 
-                            display: 'inline-flex', 
-                            gap: '0.4rem', 
-                            padding: '4px', 
-                            backgroundColor: '#F8FAFC', 
-                            borderRadius: '8px', 
-                            border: '1px solid #E2E8F0' 
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Mobile & Tablet Stacked Cards Roster */}
+              <div className="attendance-mobile-cards">
+                {filteredStudents.map((std, idx) => {
+                  const currentStatus = attendanceMap[std.id] || 'Present';
+                  return (
+                    <div
+                      key={std.id}
+                      style={{
+                        padding: '1rem',
+                        backgroundColor: '#FFFFFF',
+                        borderRadius: '10px',
+                        border: currentStatus === 'Absent'
+                          ? '1px solid #FECACA'
+                          : currentStatus === 'Late'
+                          ? '1px solid #FDE68A'
+                          : '1px solid #E2E8F0',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                          <div style={{
+                            width: '36px',
+                            height: '36px',
+                            borderRadius: '50%',
+                            backgroundColor: '#E2E8F0',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontWeight: 700,
+                            fontSize: '0.85rem',
+                            color: '#334155'
                           }}>
-                            {/* Present Button */}
-                            <button
-                              type="button"
-                              onClick={() => handleStatusToggle(std.id, 'Present')}
-                              style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '0.4rem',
-                                padding: '6px 16px',
-                                fontSize: '0.825rem',
-                                fontWeight: currentStatus === 'Present' ? 700 : 500,
-                                borderRadius: '6px',
-                                border: currentStatus === 'Present' ? '1px solid #059669' : '1px solid transparent',
-                                backgroundColor: currentStatus === 'Present' ? '#10B981' : '#FFFFFF',
-                                color: currentStatus === 'Present' ? '#FFFFFF' : '#475569',
-                                cursor: 'pointer',
-                                transition: 'all 0.15s ease',
-                                boxShadow: currentStatus === 'Present' ? '0 2px 4px rgba(16, 185, 129, 0.25)' : 'none'
-                              }}
-                            >
-                              <CheckCircle2 size={15} style={{ color: currentStatus === 'Present' ? '#FFFFFF' : '#059669' }} />
-                              <span>Present</span>
-                            </button>
-
-                            {/* Absent Button */}
-                            <button
-                              type="button"
-                              onClick={() => handleStatusToggle(std.id, 'Absent')}
-                              style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '0.4rem',
-                                padding: '6px 16px',
-                                fontSize: '0.825rem',
-                                fontWeight: currentStatus === 'Absent' ? 700 : 500,
-                                borderRadius: '6px',
-                                border: currentStatus === 'Absent' ? '1px solid #DC2626' : '1px solid transparent',
-                                backgroundColor: currentStatus === 'Absent' ? '#EF4444' : '#FFFFFF',
-                                color: currentStatus === 'Absent' ? '#FFFFFF' : '#475569',
-                                cursor: 'pointer',
-                                transition: 'all 0.15s ease',
-                                boxShadow: currentStatus === 'Absent' ? '0 2px 4px rgba(239, 68, 68, 0.25)' : 'none'
-                              }}
-                            >
-                              <XCircle size={15} style={{ color: currentStatus === 'Absent' ? '#FFFFFF' : '#DC2626' }} />
-                              <span>Absent</span>
-                            </button>
-
-                            {/* Late Button */}
-                            <button
-                              type="button"
-                              onClick={() => handleStatusToggle(std.id, 'Late')}
-                              style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '0.4rem',
-                                padding: '6px 16px',
-                                fontSize: '0.825rem',
-                                fontWeight: currentStatus === 'Late' ? 700 : 500,
-                                borderRadius: '6px',
-                                border: currentStatus === 'Late' ? '1px solid #D97706' : '1px solid transparent',
-                                backgroundColor: currentStatus === 'Late' ? '#F59E0B' : '#FFFFFF',
-                                color: currentStatus === 'Late' ? '#FFFFFF' : '#475569',
-                                cursor: 'pointer',
-                                transition: 'all 0.15s ease',
-                                boxShadow: currentStatus === 'Late' ? '0 2px 4px rgba(245, 158, 11, 0.25)' : 'none'
-                              }}
-                            >
-                              <Clock size={15} style={{ color: currentStatus === 'Late' ? '#FFFFFF' : '#D97706' }} />
-                              <span>Late</span>
-                            </button>
+                            {std.name.charAt(0).toUpperCase()}
                           </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                          <div>
+                            <div style={{ fontWeight: 700, color: '#0F172A', fontSize: '0.9rem' }}>
+                              <span style={{ color: '#94A3B8', marginRight: '0.35rem', fontSize: '0.8rem' }}>#{idx + 1}</span>
+                              {std.name}
+                            </div>
+                            <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', marginTop: '0.15rem' }}>
+                              <span style={{
+                                fontSize: '0.75rem',
+                                fontFamily: 'monospace',
+                                fontWeight: 600,
+                                color: std.isUsnConflict ? '#991B1B' : '#334155',
+                                backgroundColor: std.isUsnConflict ? '#FEF2F2' : '#F1F5F9',
+                                border: std.isUsnConflict ? '1px solid #FECACA' : 'none',
+                                padding: '0.1rem 0.4rem',
+                                borderRadius: '4px'
+                              }}>
+                                {std.usn}
+                              </span>
+                              {std.isUsnConflict && (
+                                <span 
+                                  className="badge badge-overdue font-sans" 
+                                  style={{ fontSize: '0.625rem', padding: '0.05rem 0.3rem' }}
+                                  title={std.conflictDetails || 'USN conflict with another student record'}
+                                >
+                                  CONFLICT
+                                </span>
+                              )}
+                              <span style={{ fontSize: '0.725rem', color: '#64748B' }}>
+                                {std.section || section || 'Sec A'}{std.semester ? ` • Sem ${std.semester}` : ''}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Full-width touch-friendly button group */}
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: '1fr 1fr 1fr',
+                        gap: '0.4rem',
+                        padding: '4px',
+                        backgroundColor: '#F8FAFC',
+                        borderRadius: '8px',
+                        border: '1px solid #E2E8F0'
+                      }}>
+                        <button
+                          type="button"
+                          onClick={() => handleStatusToggle(std.id, 'Present')}
+                          style={{
+                            padding: '0.5rem 0.25rem',
+                            fontSize: '0.8rem',
+                            fontWeight: currentStatus === 'Present' ? 700 : 500,
+                            borderRadius: '6px',
+                            border: currentStatus === 'Present' ? '1px solid #059669' : '1px solid transparent',
+                            backgroundColor: currentStatus === 'Present' ? '#10B981' : '#FFFFFF',
+                            color: currentStatus === 'Present' ? '#FFFFFF' : '#475569',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '0.3rem',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          <CheckCircle2 size={14} style={{ color: currentStatus === 'Present' ? '#FFFFFF' : '#059669' }} />
+                          <span>Present</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleStatusToggle(std.id, 'Absent')}
+                          style={{
+                            padding: '0.5rem 0.25rem',
+                            fontSize: '0.8rem',
+                            fontWeight: currentStatus === 'Absent' ? 700 : 500,
+                            borderRadius: '6px',
+                            border: currentStatus === 'Absent' ? '1px solid #DC2626' : '1px solid transparent',
+                            backgroundColor: currentStatus === 'Absent' ? '#EF4444' : '#FFFFFF',
+                            color: currentStatus === 'Absent' ? '#FFFFFF' : '#475569',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '0.3rem',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          <XCircle size={14} style={{ color: currentStatus === 'Absent' ? '#FFFFFF' : '#DC2626' }} />
+                          <span>Absent</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleStatusToggle(std.id, 'Late')}
+                          style={{
+                            padding: '0.5rem 0.25rem',
+                            fontSize: '0.8rem',
+                            fontWeight: currentStatus === 'Late' ? 700 : 500,
+                            borderRadius: '6px',
+                            border: currentStatus === 'Late' ? '1px solid #D97706' : '1px solid transparent',
+                            backgroundColor: currentStatus === 'Late' ? '#F59E0B' : '#FFFFFF',
+                            color: currentStatus === 'Late' ? '#FFFFFF' : '#475569',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '0.3rem',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          <Clock size={14} style={{ color: currentStatus === 'Late' ? '#FFFFFF' : '#D97706' }} />
+                          <span>Late</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
           )}
 
           {/* Footer Save Summary Bar */}
@@ -1135,26 +1986,21 @@ export const FacultyAttendancePage: React.FC = () => {
               gap: '1rem'
             }}>
               <div style={{ fontSize: '0.85rem', color: '#475569' }}>
-                Showing <strong style={{ color: '#0F172A' }}>{filteredStudents.length}</strong> of <strong style={{ color: '#0F172A' }}>{totalStudentsCount}</strong> students registered in department.
+                Showing <strong style={{ color: '#0F172A' }}>{filteredStudents.length}</strong> of <strong style={{ color: '#0F172A' }}>{totalStudentsCount}</strong> eligible registered students for this subject.
                 {hasUnsavedChanges && <span style={{ color: '#B45309', marginLeft: '0.5rem', fontWeight: 600 }}>• Unsaved modifications detected</span>}
               </div>
 
-              <button 
-                type="button"
-                className="btn btn-primary" 
-                onClick={handleSaveAttendance} 
-                disabled={isSaving || students.length === 0} 
-                style={{ 
-                  fontSize: '0.875rem', 
-                  padding: '0.6rem 1.5rem',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.5rem'
-                }}
-              >
-                <Save size={16} />
-                <span>{isSaving ? 'Saving to Database...' : `Save Attendance (${totalStudentsCount} Students)`}</span>
-              </button>
+              <div style={{ fontSize: '0.85rem', color: '#64748B', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
+                {hasUnsavedChanges ? (
+                  <span style={{ color: '#B45309', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <AlertCircle size={14} /> Review roster above and click primary Save Attendance to commit.
+                  </span>
+                ) : (
+                  <span style={{ color: '#16A34A', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <CheckCircle2 size={14} /> Attendance records up to date.
+                  </span>
+                )}
+              </div>
             </div>
           )}
 
@@ -1697,6 +2543,239 @@ export const FacultyAttendancePage: React.FC = () => {
                 style={{ fontSize: '0.85rem', padding: '0.5rem 1.25rem' }}
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DOWNLOAD ATTENDANCE REPORT MODAL */}
+      {isReportModalOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.65)',
+            backdropFilter: 'blur(3px)',
+            zIndex: 1100,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1.25rem'
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !isExporting) setIsReportModalOpen(false);
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: '#FFFFFF',
+              borderRadius: '12px',
+              maxWidth: '520px',
+              width: '100%',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.1)',
+              border: '1px solid #E2E8F0',
+              overflow: 'hidden'
+            }}
+          >
+            {/* Modal Header */}
+            <div
+              style={{
+                padding: '1.25rem 1.5rem',
+                borderBottom: '1px solid #E2E8F0',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                backgroundColor: '#F8FAFC'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <Download size={20} style={{ color: 'var(--brand-blue)' }} />
+                <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, color: 'var(--brand-black)' }}>
+                  Download Attendance Report
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => !isExporting && setIsReportModalOpen(false)}
+                disabled={isExporting}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: isExporting ? 'not-allowed' : 'pointer',
+                  color: '#64748B',
+                  padding: '0.25rem',
+                  display: 'flex',
+                  alignItems: 'center'
+                }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: '1.5rem' }}>
+              <p style={{ fontSize: '0.875rem', color: '#475569', margin: '0 0 1.25rem 0' }}>
+                Generate and download an official attendance report for <strong>{parsedCourseName || parsedCourseCode}</strong>.
+              </p>
+
+              {/* Format Selection */}
+              <div style={{ marginBottom: '1.25rem' }}>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', marginBottom: '0.5rem', letterSpacing: '0.03em' }}>
+                  Export Format *
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => setExportFormat('PDF')}
+                    style={{
+                      padding: '0.85rem 0.5rem',
+                      borderRadius: '8px',
+                      border: exportFormat === 'PDF' ? '2px solid var(--brand-blue)' : '1px solid #E2E8F0',
+                      backgroundColor: exportFormat === 'PDF' ? '#EFF6FF' : '#FFFFFF',
+                      color: exportFormat === 'PDF' ? 'var(--brand-blue)' : '#334155',
+                      fontWeight: exportFormat === 'PDF' ? 700 : 500,
+                      fontSize: '0.85rem',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: '0.4rem',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <FileText size={20} style={{ color: exportFormat === 'PDF' ? 'var(--brand-blue)' : '#64748B' }} />
+                    <span>PDF Document</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setExportFormat('XLSX')}
+                    style={{
+                      padding: '0.85rem 0.5rem',
+                      borderRadius: '8px',
+                      border: exportFormat === 'XLSX' ? '2px solid #16A34A' : '1px solid #E2E8F0',
+                      backgroundColor: exportFormat === 'XLSX' ? '#F0FDF4' : '#FFFFFF',
+                      color: exportFormat === 'XLSX' ? '#16A34A' : '#334155',
+                      fontWeight: exportFormat === 'XLSX' ? 700 : 500,
+                      fontSize: '0.85rem',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: '0.4rem',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <FileSpreadsheet size={20} style={{ color: exportFormat === 'XLSX' ? '#16A34A' : '#64748B' }} />
+                    <span>Excel (.xlsx)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setExportFormat('CSV')}
+                    style={{
+                      padding: '0.85rem 0.5rem',
+                      borderRadius: '8px',
+                      border: exportFormat === 'CSV' ? '2px solid #D97706' : '1px solid #E2E8F0',
+                      backgroundColor: exportFormat === 'CSV' ? '#FFFBEB' : '#FFFFFF',
+                      color: exportFormat === 'CSV' ? '#B45309' : '#334155',
+                      fontWeight: exportFormat === 'CSV' ? 700 : 500,
+                      fontSize: '0.85rem',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: '0.4rem',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <Download size={20} style={{ color: exportFormat === 'CSV' ? '#D97706' : '#64748B' }} />
+                    <span>CSV Format</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Date Filters */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '1.25rem' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', marginBottom: '0.4rem' }}>
+                    From Date (Optional)
+                  </label>
+                  <input
+                    type="date"
+                    className="form-input"
+                    value={reportFromDate}
+                    onChange={(e) => setReportFromDate(e.target.value)}
+                    style={{ width: '100%', fontSize: '0.85rem', padding: '0.55rem' }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', marginBottom: '0.4rem' }}>
+                    To Date (Optional)
+                  </label>
+                  <input
+                    type="date"
+                    className="form-input"
+                    value={reportToDate}
+                    onChange={(e) => setReportToDate(e.target.value)}
+                    style={{ width: '100%', fontSize: '0.85rem', padding: '0.55rem' }}
+                  />
+                </div>
+              </div>
+
+              {/* Parameters Summary */}
+              <div style={{ backgroundColor: '#F8FAFC', padding: '0.85rem', borderRadius: '8px', border: '1px solid #E2E8F0', fontSize: '0.8rem', color: '#64748B' }}>
+                <div>• Course: <strong style={{ color: '#0F172A' }}>{parsedCourseCode}</strong> {section ? `(Section ${section})` : ''}</div>
+                <div>• Semester: <strong style={{ color: '#0F172A' }}>{semester ? `Sem ${semester}` : 'All'}</strong></div>
+                <div>• Records Scope: <strong style={{ color: '#0F172A' }}>Verified Database Attendance Records Only</strong></div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div
+              style={{
+                padding: '1rem 1.5rem',
+                borderTop: '1px solid #E2E8F0',
+                backgroundColor: '#F8FAFC',
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: '0.75rem'
+              }}
+            >
+              <button
+                type="button"
+                className="btn btn-secondary font-sans"
+                onClick={() => setIsReportModalOpen(false)}
+                disabled={isExporting}
+                style={{ fontSize: '0.85rem', padding: '0.55rem 1.25rem' }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleExportReport}
+                disabled={isExporting}
+                style={{
+                  fontSize: '0.85rem',
+                  padding: '0.55rem 1.5rem',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.5rem'
+                }}
+              >
+                {isExporting ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    <span>Generating {exportFormat}...</span>
+                  </>
+                ) : (
+                  <>
+                    <Download size={16} />
+                    <span>Download {exportFormat}</span>
+                  </>
+                )}
               </button>
             </div>
           </div>

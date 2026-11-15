@@ -61,7 +61,11 @@ export const HODStudentList: React.FC = () => {
           </p>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <div style={{ backgroundColor: '#F8FAFC', padding: '0.5rem 0.85rem', borderRadius: 'var(--border-radius)', border: '1px solid #E2E8F0', fontSize: '0.85rem', fontWeight: 700, color: '#0F172A', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            <GraduationCap size={16} style={{ color: 'var(--brand-blue)' }} />
+            <span>{searchQuery || semesterFilter !== 'All' || statusFilter !== 'All' ? `Showing ${filteredStudents.length} of ${students.length}` : `${students.length} Total Enrolled`}</span>
+          </div>
           <div style={{ backgroundColor: '#FEF2F2', padding: '0.5rem 0.85rem', borderRadius: 'var(--border-radius)', border: '1px solid #FCA5A5', fontSize: '0.85rem', fontWeight: 700, color: '#991B1B', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
             <AlertTriangle size={16} />
             <span>Students Requiring Attention: {atRiskCount}</span>
@@ -166,7 +170,13 @@ export const HODStudentList: React.FC = () => {
                     </td>
 
                     <td style={{ padding: '1rem 1.25rem' }}>
-                      <span style={{ fontWeight: 600 }}>{s.semester ? `Semester ${s.semester}` : 'Semester N/A'}</span>
+                      {s.semester ? (
+                        <span style={{ fontWeight: 600 }}>Semester {s.semester}</span>
+                      ) : (
+                        <span className="badge badge-pending font-mono" style={{ fontSize: '0.7rem' }}>
+                          Incomplete Profile
+                        </span>
+                      )}
                     </td>
 
                     <td style={{ padding: '1rem 1.25rem' }}>

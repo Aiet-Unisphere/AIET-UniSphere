@@ -35,8 +35,29 @@ export const FacultyAssignmentDetail: React.FC = () => {
   const [submissions, setSubmissions] = useState<FacultyAssignmentSubmission[]>([]);
   const [selectedSubmission, setSelectedSubmission] = useState<FacultyAssignmentSubmission | null>(null);
   const [enrolledCount, setEnrolledCount] = useState<number>(0);
+  const [isEnrollmentMissing, setIsEnrollmentMissing] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState(true);
   const [downloadMsg, setDownloadMsg] = useState<{ text: string; error?: boolean } | null>(null);
+
+  // Detect USN identity conflicts across submissions
+  const usnConflictMap = React.useMemo(() => {
+    const usnToIds = new Map<string, Set<string>>();
+    for (const sub of submissions) {
+      const normUsn = (sub.usn || '').trim().toUpperCase();
+      if (normUsn && normUsn !== 'N/A') {
+        const set = usnToIds.get(normUsn) || new Set<string>();
+        set.add(sub.studentId);
+        usnToIds.set(normUsn, set);
+      }
+    }
+    const map = new Map<string, boolean>();
+    for (const [usn, ids] of usnToIds.entries()) {
+      if (ids.size > 1) {
+        map.set(usn, true);
+      }
+    }
+    return map;
+  }, [submissions]);
 
   const loadData = async () => {
     if (!id) {
@@ -53,21 +74,22 @@ export const FacultyAssignmentDetail: React.FC = () => {
       setAssignment(assg || null);
       setSubmissions(subs);
 
-      // Query enrolled students in the department for total count
+      // Query enrolled students strictly within the assignment's verified course enrollment scope
+      let resolvedCount = 0;
+      let missingMapping = false;
+
       if (assg?.courseId) {
-        const { count } = await (supabase as any)
-          .from('course_enrollments')
-          .select('student_id', { count: 'exact', head: true })
-          .eq('course_id', assg.courseId)
-          .eq('status', 'Active');
-        setEnrolledCount(count || subs.length);
+        const { getEligibleStudentCountForCourse } = await import('../../services/studentStatisticsService');
+        resolvedCount = await getEligibleStudentCountForCourse(assg.courseId);
+        if (resolvedCount === 0) {
+          missingMapping = true;
+        }
       } else {
-        const { count } = await (supabase as any)
-          .from('profiles')
-          .select('id', { count: 'exact', head: true })
-          .eq('role', 'STUDENT');
-        setEnrolledCount(count || subs.length);
+        missingMapping = true;
       }
+
+      setEnrolledCount(resolvedCount);
+      setIsEnrollmentMissing(missingMapping);
     } catch (err) {
       console.error('Failed to load assignment details:', err);
     } finally {
@@ -236,6 +258,32 @@ export const FacultyAssignmentDetail: React.FC = () => {
         </div>
       )}
 
+      {/* Course Enrollment Scope Missing Warning */}
+      {isEnrollmentMissing && (
+        <div 
+          style={{
+            marginBottom: '1.25rem',
+            padding: '0.85rem 1.25rem',
+            borderRadius: '10px',
+            backgroundColor: '#FFFBEB',
+            border: '1px solid #FCD34D',
+            color: '#92400E',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '0.65rem',
+            fontSize: '0.85rem'
+          }}
+        >
+          <AlertCircle size={18} style={{ flexShrink: 0, marginTop: '2px', color: '#D97706' }} />
+          <div>
+            <strong style={{ display: 'block', fontWeight: 700 }}>Course Enrollment Scope Missing</strong>
+            <span>
+              No student enrollments are mapped to course <strong>{assignment.courseName} ({assignment.courseId})</strong>. Enrollment counts are strictly scoped to the assignment's course; unverified department-wide fallback is prohibited.
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Submission Statistics Cards */}
       <div className="stat-cards-grid" style={{ gap: '0.85rem', marginBottom: '1.25rem' }}>
         <StatCard 
@@ -332,119 +380,333 @@ export const FacultyAssignmentDetail: React.FC = () => {
             <p style={{ fontSize: '0.825rem', marginTop: '0.2rem' }}>Submissions turned in by enrolled students will appear here for grading.</p>
           </div>
         ) : (
-          <div className="table-responsive">
-            <table className="table font-sans" style={{ marginBottom: 0 }}>
-              <thead>
-                <tr>
-                  <th style={{ minWidth: '160px' }}>Student Name</th>
-                  <th style={{ minWidth: '110px' }}>USN</th>
-                  <th style={{ minWidth: '140px' }}>Submitted Date</th>
-                  <th style={{ minWidth: '180px' }}>Deliverable</th>
-                  <th style={{ minWidth: '110px' }}>Status</th>
-                  <th style={{ minWidth: '100px', textAlign: 'center' }}>Score</th>
-                  <th style={{ minWidth: '180px' }}>Feedback</th>
-                  <th style={{ minWidth: '110px', textAlign: 'right' }}>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {submissions.map((sub) => {
-                  const subDate = new Date(sub.submittedAt);
-                  const isLate = subDate > deadlineDate;
+          <>
+            <style>{`
+              .submissions-desktop-view {
+                display: block;
+              }
+              .submissions-mobile-view {
+                display: none;
+              }
+              @media (max-width: 768px) {
+                .submissions-desktop-view {
+                  display: none;
+                }
+                .submissions-mobile-view {
+                  display: flex;
+                  flex-direction: column;
+                  gap: 0.75rem;
+                  padding: 1rem;
+                }
+              }
+            `}</style>
 
-                  return (
-                    <tr key={sub.id}>
-                      <td>
-                        <div style={{ fontWeight: 700, color: 'var(--brand-black)', fontSize: '0.85rem' }}>{sub.studentName}</div>
-                      </td>
+            {/* Desktop Table View */}
+            <div className="submissions-desktop-view table-responsive">
+              <table className="table font-sans" style={{ marginBottom: 0 }}>
+                <thead style={{ backgroundColor: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
+                  <tr>
+                    <th style={{ minWidth: '170px', fontSize: '0.75rem', textTransform: 'uppercase', color: '#64748B', letterSpacing: '0.04em' }}>Student</th>
+                    <th style={{ minWidth: '110px', fontSize: '0.75rem', textTransform: 'uppercase', color: '#64748B', letterSpacing: '0.04em' }}>USN</th>
+                    <th style={{ minWidth: '135px', fontSize: '0.75rem', textTransform: 'uppercase', color: '#64748B', letterSpacing: '0.04em' }}>Submitted Date</th>
+                    <th style={{ minWidth: '180px', fontSize: '0.75rem', textTransform: 'uppercase', color: '#64748B', letterSpacing: '0.04em' }}>Deliverable</th>
+                    <th style={{ minWidth: '110px', fontSize: '0.75rem', textTransform: 'uppercase', color: '#64748B', letterSpacing: '0.04em' }}>Status</th>
+                    <th style={{ minWidth: '95px', textAlign: 'center', fontSize: '0.75rem', textTransform: 'uppercase', color: '#64748B', letterSpacing: '0.04em' }}>Score</th>
+                    <th style={{ minWidth: '180px', fontSize: '0.75rem', textTransform: 'uppercase', color: '#64748B', letterSpacing: '0.04em' }}>Feedback</th>
+                    <th style={{ minWidth: '110px', textAlign: 'right', fontSize: '0.75rem', textTransform: 'uppercase', color: '#64748B', letterSpacing: '0.04em' }}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {submissions.map((sub) => {
+                    const subDate = new Date(sub.submittedAt);
+                    const isLate = subDate > deadlineDate;
 
-                      <td style={{ fontSize: '0.825rem' }} className="font-mono">
-                        {sub.usn}
-                      </td>
-
-                      <td>
-                        <div className="font-mono" style={{ fontSize: '0.8rem', color: 'var(--brand-black)' }}>
-                          {subDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                        </div>
-                        <div className="font-mono" style={{ fontSize: '0.725rem', color: 'var(--brand-dark-grey)' }}>
-                          {subDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
-                        </div>
-                      </td>
-
-                      <td>
-                        {sub.storagePath ? (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                            <button
-                              type="button"
-                              onClick={() => handleViewSubmissionFile(sub)}
-                              title="Preview submission file"
-                              style={{ border: 'none', background: 'none', padding: 0, cursor: 'pointer', color: 'var(--brand-blue)', display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontWeight: 600, fontSize: '0.8rem' }}
-                            >
-                              <FileText size={14} />
-                              <span style={{ maxWidth: '130px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                {sub.fileName}
-                              </span>
-                              <ExternalLink size={12} />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDownloadSubmissionFile(sub)}
-                              title="Download submission file"
-                              style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--brand-dark-grey)', padding: '2px' }}
-                            >
-                              <Download size={13} />
-                            </button>
+                    return (
+                      <tr key={sub.id} style={{ borderBottom: '1px solid #F1F5F9' }}>
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                            <div style={{
+                              width: '32px',
+                              height: '32px',
+                              borderRadius: '50%',
+                              backgroundColor: '#E2E8F0',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontWeight: 700,
+                              fontSize: '0.75rem',
+                              color: '#334155',
+                              flexShrink: 0
+                            }}>
+                              {sub.studentName.charAt(0).toUpperCase()}
+                            </div>
+                            <div style={{ minWidth: 0 }}>
+                              <div 
+                                style={{ fontWeight: 700, color: 'var(--brand-black)', fontSize: '0.85rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '140px' }}
+                                title={sub.studentName}
+                              >
+                                {sub.studentName}
+                              </div>
+                              <div style={{ fontSize: '0.725rem', color: '#64748B' }}>Student</div>
+                            </div>
                           </div>
-                        ) : (
-                          <span style={{ fontSize: '0.8rem', color: 'var(--brand-dark-grey)' }}>{sub.fileName}</span>
-                        )}
-                      </td>
+                        </td>
 
-                      <td>
-                        {sub.status === 'Graded' ? (
-                          <span className="badge badge-graded" style={{ fontSize: '0.7rem' }}>
-                            Graded
+                        <td>
+                          <span style={{
+                            fontSize: '0.8rem',
+                            fontFamily: 'monospace',
+                            fontWeight: 600,
+                            color: usnConflictMap.get(sub.usn.trim().toUpperCase()) ? '#991B1B' : '#334155',
+                            padding: '0.15rem 0.45rem',
+                            backgroundColor: usnConflictMap.get(sub.usn.trim().toUpperCase()) ? '#FEF2F2' : '#F1F5F9',
+                            border: usnConflictMap.get(sub.usn.trim().toUpperCase()) ? '1px solid #FECACA' : 'none',
+                            borderRadius: '4px'
+                          }}>
+                            {sub.usn}
                           </span>
-                        ) : isLate ? (
-                          <span className="badge badge-overdue" style={{ fontSize: '0.7rem' }}>
-                            Submitted (Late)
-                          </span>
-                        ) : (
-                          <span className="badge badge-pending" style={{ fontSize: '0.7rem' }}>
-                            Submitted
-                          </span>
-                        )}
-                      </td>
+                          {usnConflictMap.get(sub.usn.trim().toUpperCase()) && (
+                            <span 
+                              className="badge badge-overdue font-sans" 
+                              style={{ fontSize: '0.625rem', padding: '0.1rem 0.35rem', marginLeft: '0.35rem', cursor: 'help' }}
+                              title="Identity Conflict: Multiple accounts share this USN"
+                            >
+                              CONFLICT
+                            </span>
+                          )}
+                        </td>
 
-                      <td style={{ textAlign: 'center', fontSize: '0.875rem', fontWeight: 700 }} className="font-mono">
-                        {sub.marks !== undefined ? `${sub.marks} / ${assignment.marks}` : '—'}
-                      </td>
+                        <td>
+                          <div className="font-mono" style={{ fontSize: '0.8rem', color: 'var(--brand-black)', fontWeight: 500 }}>
+                            {subDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                          </div>
+                          <div className="font-mono" style={{ fontSize: '0.725rem', color: 'var(--brand-dark-grey)' }}>
+                            {subDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                        </td>
 
-                      <td style={{ fontSize: '0.8rem', color: 'var(--brand-dark-grey)' }}>
-                        {sub.feedback ? (
-                          <span title={sub.feedback} style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                            {sub.feedback}
-                          </span>
-                        ) : (
-                          <span style={{ fontStyle: 'italic', opacity: 0.7 }}>No feedback provided</span>
-                        )}
-                      </td>
+                        <td>
+                          {sub.storagePath ? (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                              <button
+                                type="button"
+                                onClick={() => handleViewSubmissionFile(sub)}
+                                title={`Preview ${sub.fileName}`}
+                                style={{ border: 'none', background: 'none', padding: 0, cursor: 'pointer', color: 'var(--brand-blue)', display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontWeight: 600, fontSize: '0.8rem' }}
+                              >
+                                <FileText size={14} style={{ flexShrink: 0 }} />
+                                <span style={{ maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {sub.fileName}
+                                </span>
+                                <ExternalLink size={12} style={{ flexShrink: 0 }} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadSubmissionFile(sub)}
+                                title="Download submission file"
+                                style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--brand-dark-grey)', padding: '2px', display: 'flex', alignItems: 'center' }}
+                              >
+                                <Download size={13} />
+                              </button>
+                            </div>
+                          ) : sub.fileName ? (
+                            <span style={{ fontSize: '0.8rem', color: 'var(--brand-dark-grey)', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                              <FileText size={14} />
+                              <span style={{ maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sub.fileName}</span>
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: '0.775rem', color: '#94A3B8', fontStyle: 'italic' }}>No file attached</span>
+                          )}
+                        </td>
 
-                      <td style={{ textAlign: 'right' }}>
-                        <button 
-                          className="btn btn-primary"
-                          style={{ width: 'auto', padding: '0.3rem 0.65rem', fontSize: '0.775rem', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}
-                          onClick={() => setSelectedSubmission(sub)}
-                        >
-                          <Award size={13} />
-                          <span>{sub.status === 'Graded' ? 'Edit Grade' : 'Grade'}</span>
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                        <td>
+                          {sub.status === 'Graded' ? (
+                            <span className="badge badge-graded" style={{ fontSize: '0.7rem' }}>
+                              Graded
+                            </span>
+                          ) : isLate ? (
+                            <span className="badge badge-overdue" style={{ fontSize: '0.7rem' }}>
+                              Submitted (Late)
+                            </span>
+                          ) : (
+                            <span className="badge badge-pending" style={{ fontSize: '0.7rem' }}>
+                              Submitted
+                            </span>
+                          )}
+                        </td>
+
+                        <td style={{ textAlign: 'center' }}>
+                          {sub.marks !== undefined ? (
+                            <span style={{ fontWeight: 800, color: '#0F172A', fontFamily: 'monospace', fontSize: '0.875rem' }}>
+                              {sub.marks} <span style={{ color: '#94A3B8', fontWeight: 500, fontSize: '0.775rem' }}>/ {assignment.marks}</span>
+                            </span>
+                          ) : (
+                            <span style={{ color: '#94A3B8', fontFamily: 'monospace', fontWeight: 600 }}>—</span>
+                          )}
+                        </td>
+
+                        <td>
+                          {sub.feedback ? (
+                            <div 
+                              title={sub.feedback} 
+                              style={{ 
+                                fontSize: '0.775rem', 
+                                color: '#475569', 
+                                backgroundColor: '#F8FAFC', 
+                                padding: '0.3rem 0.5rem', 
+                                borderRadius: '4px', 
+                                borderLeft: '3px solid #CBD5E1', 
+                                display: '-webkit-box', 
+                                WebkitLineClamp: 2, 
+                                WebkitBoxOrient: 'vertical', 
+                                overflow: 'hidden',
+                                maxWidth: '200px'
+                              }}
+                            >
+                              "{sub.feedback}"
+                            </div>
+                          ) : (
+                            <span style={{ fontSize: '0.775rem', color: '#94A3B8', fontStyle: 'italic' }}>No feedback</span>
+                          )}
+                        </td>
+
+                        <td style={{ textAlign: 'right' }}>
+                          <button 
+                            className="btn btn-primary"
+                            style={{ width: 'auto', padding: '0.3rem 0.65rem', fontSize: '0.775rem', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}
+                            onClick={() => setSelectedSubmission(sub)}
+                          >
+                            <Award size={13} />
+                            <span>{sub.status === 'Graded' ? 'Edit Grade' : 'Grade'}</span>
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile Cards View */}
+            <div className="submissions-mobile-view">
+              {submissions.map((sub) => {
+                const subDate = new Date(sub.submittedAt);
+                const isLate = subDate > deadlineDate;
+
+                return (
+                  <div
+                    key={sub.id}
+                    style={{
+                      padding: '1rem',
+                      backgroundColor: '#FFFFFF',
+                      borderRadius: '8px',
+                      border: '1px solid #E2E8F0',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <div style={{
+                          width: '32px',
+                          height: '32px',
+                          borderRadius: '50%',
+                          backgroundColor: '#E2E8F0',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontWeight: 700,
+                          fontSize: '0.75rem',
+                          color: '#334155'
+                        }}>
+                          {sub.studentName.charAt(0).toUpperCase()}
+                        </div>
+                        <div>
+                          <div style={{ fontWeight: 700, color: 'var(--brand-black)', fontSize: '0.875rem' }}>{sub.studentName}</div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginTop: '0.15rem' }}>
+                            <span style={{
+                              fontSize: '0.75rem',
+                              fontFamily: 'monospace',
+                              fontWeight: 600,
+                              color: usnConflictMap.get(sub.usn.trim().toUpperCase()) ? '#991B1B' : '#64748B',
+                              backgroundColor: usnConflictMap.get(sub.usn.trim().toUpperCase()) ? '#FEF2F2' : '#F1F5F9',
+                              border: usnConflictMap.get(sub.usn.trim().toUpperCase()) ? '1px solid #FECACA' : 'none',
+                              padding: '0.1rem 0.35rem',
+                              borderRadius: '4px'
+                            }}>
+                              {sub.usn}
+                            </span>
+                            {usnConflictMap.get(sub.usn.trim().toUpperCase()) && (
+                              <span 
+                                className="badge badge-overdue font-sans" 
+                                style={{ fontSize: '0.625rem', padding: '0.05rem 0.3rem' }}
+                                title="Identity Conflict: Multiple accounts share this USN"
+                              >
+                                CONFLICT
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {sub.status === 'Graded' ? (
+                        <span className="badge badge-graded" style={{ fontSize: '0.7rem' }}>Graded</span>
+                      ) : isLate ? (
+                        <span className="badge badge-overdue" style={{ fontSize: '0.7rem' }}>Late</span>
+                      ) : (
+                        <span className="badge badge-pending" style={{ fontSize: '0.7rem' }}>Submitted</span>
+                      )}
+                    </div>
+
+                    <div style={{ fontSize: '0.775rem', color: '#64748B', display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                      <span>Submitted: {subDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} at {subDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</span>
+                      <span style={{ fontWeight: 700, color: '#0F172A', fontFamily: 'monospace' }}>
+                        {sub.marks !== undefined ? `${sub.marks} / ${assignment.marks}` : 'Not graded'}
+                      </span>
+                    </div>
+
+                    {sub.storagePath && (
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.4rem 0.6rem', backgroundColor: '#F8FAFC', borderRadius: '6px', marginBottom: '0.65rem' }}>
+                        <span style={{ fontSize: '0.775rem', color: '#334155', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '200px' }}>
+                          {sub.fileName}
+                        </span>
+                        <div style={{ display: 'flex', gap: '0.35rem' }}>
+                          <button
+                            type="button"
+                            onClick={() => handleViewSubmissionFile(sub)}
+                            style={{ border: 'none', background: 'none', color: 'var(--brand-blue)', fontSize: '0.75rem', cursor: 'pointer', fontWeight: 600 }}
+                          >
+                            View
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadSubmissionFile(sub)}
+                            style={{ border: 'none', background: 'none', color: '#64748B', fontSize: '0.75rem', cursor: 'pointer' }}
+                          >
+                            Download
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {sub.feedback && (
+                      <div style={{ fontSize: '0.75rem', color: '#475569', fontStyle: 'italic', marginBottom: '0.65rem', backgroundColor: '#F1F5F9', padding: '0.35rem 0.5rem', borderRadius: '4px' }}>
+                        "{sub.feedback}"
+                      </div>
+                    )}
+
+                    <button 
+                      className="btn btn-primary"
+                      style={{ width: '100%', padding: '0.45rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.35rem' }}
+                      onClick={() => setSelectedSubmission(sub)}
+                    >
+                      <Award size={14} />
+                      <span>{sub.status === 'Graded' ? 'Edit Grade' : 'Grade Submission'}</span>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </>
         )}
       </div>
 

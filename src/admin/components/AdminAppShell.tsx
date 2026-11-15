@@ -14,6 +14,9 @@ import {
   ChevronDown
 } from 'lucide-react';
 import { AuthLogo } from '../../components/AuthLogo';
+import { getUnreadNotificationsCount, subscribeToNotifications } from '../../services/notificationService';
+import { NotificationDropdown } from '../../components/NotificationDropdown';
+import { NotificationToastContainer } from '../../components/NotificationToastContainer';
 
 import { useAuth } from '../../app/context/AuthContext';
 
@@ -29,7 +32,7 @@ let globalAdminSidebarState: boolean | null = null;
 export const AdminAppShell: React.FC<AdminAppShellProps> = ({ children }) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { profile, signOut } = useAuth();
+  const { profile, signOut, user } = useAuth();
   
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
     if (globalAdminSidebarState !== null) return globalAdminSidebarState;
@@ -40,13 +43,36 @@ export const AdminAppShell: React.FC<AdminAppShellProps> = ({ children }) => {
   });
 
   const [isProfileOpen, setIsProfileOpen] = useState(false);
-  const [unreadNotifications, setUnreadNotifications] = useState(2);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   
   const profileRef = useRef<HTMLDivElement>(null);
 
   const displayName = profile?.full_name || 'System Administrator';
   const displayEmail = profile?.email || 'admin@aiet.edu';
   const initials = displayName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() || 'SA';
+
+  useEffect(() => {
+    let isMounted = true;
+    const updateCount = () => {
+      getUnreadNotificationsCount().then(count => {
+        if (isMounted) setUnreadNotifications(count);
+      });
+    };
+    updateCount();
+
+    window.addEventListener('notifications_updated', updateCount);
+
+    const unsubscribe = user?.id 
+      ? subscribeToNotifications(user.id, updateCount)
+      : () => {};
+
+    return () => {
+      isMounted = false;
+      window.removeEventListener('notifications_updated', updateCount);
+      unsubscribe();
+    };
+  }, [location.pathname, user?.id]);
 
   // Close dropdown on click outside
   useEffect(() => {
@@ -277,15 +303,28 @@ export const AdminAppShell: React.FC<AdminAppShellProps> = ({ children }) => {
               />
             </div>
 
-            {/* Notification Bell */}
-            <button 
-              className="header-action-btn"
-              onClick={() => navigate('/admin/security')}
-              title="Admin Security Alerts"
-            >
-              <Bell size={20} />
-              {unreadNotifications > 0 && <span className="notification-badge"></span>}
-            </button>
+            {/* Notification Bell & Dropdown */}
+            <div className="notifications-dropdown-container">
+              <button 
+                className="header-action-btn"
+                onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
+                title="Notifications"
+                aria-expanded={isNotificationsOpen}
+              >
+                <Bell size={20} />
+                {unreadNotifications > 0 && (
+                  <span className="notification-badge">
+                    {unreadNotifications > 99 ? '99+' : unreadNotifications}
+                  </span>
+                )}
+              </button>
+              <NotificationDropdown 
+                isOpen={isNotificationsOpen}
+                onClose={() => setIsNotificationsOpen(false)}
+                unreadCount={unreadNotifications}
+                userRole="ADMIN"
+              />
+            </div>
 
             {/* Profile Dropdown */}
             <div className="profile-menu-container" ref={profileRef}>
@@ -338,6 +377,9 @@ export const AdminAppShell: React.FC<AdminAppShellProps> = ({ children }) => {
           {children}
         </main>
       </div>
+
+      {/* Real-time Notification Alerts Toast Container */}
+      <NotificationToastContainer userRole="ADMIN" />
     </div>
   );
 };

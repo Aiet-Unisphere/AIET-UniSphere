@@ -3,6 +3,7 @@ import type { Session, User } from '@supabase/supabase-js';
 import type { Profile, UserRole } from '../../types/database.types';
 import { authService } from '../../services/authService';
 import type { SignUpData } from '../../services/authService';
+import { teardownNotificationChannel } from '../../services/notificationService';
 
 interface AuthContextType {
   user: User | null;
@@ -95,6 +96,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signOut = async () => {
     setIsLoading(true);
+    teardownNotificationChannel();
     await authService.signOut();
     setUser(null);
     setSession(null);

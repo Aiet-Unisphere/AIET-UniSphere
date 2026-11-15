@@ -18,6 +18,7 @@ export const LeaveRequestsPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedRejectedLeave, setSelectedRejectedLeave] = useState<LeaveRequest | null>(null);
   const [successMsg, setSuccessMsg] = useState('');
   
   // Form state
@@ -194,7 +195,7 @@ export const LeaveRequestsPage: React.FC = () => {
                   <th style={{ padding: '1rem' }}>Document</th>
                   <th style={{ padding: '1rem' }}>Status</th>
                   <th style={{ padding: '1rem' }}>Reviewed By</th>
-                  <th style={{ padding: '1rem' }}>Leave Note</th>
+                  <th style={{ padding: '1rem' }}>Action / Note</th>
                 </tr>
               </thead>
               <tbody>
@@ -256,7 +257,33 @@ export const LeaveRequestsPage: React.FC = () => {
                           <Download size={13} />
                           <span>Download Note</span>
                         </button>
-                      ) : null}
+                      ) : l.status === 'Rejected' ? (
+                        <button
+                          onClick={() => setSelectedRejectedLeave(l)}
+                          className="btn font-sans"
+                          style={{
+                            width: 'auto',
+                            padding: '0.35rem 0.65rem',
+                            fontSize: '0.75rem',
+                            fontWeight: 700,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.35rem',
+                            backgroundColor: '#FEF2F2',
+                            borderColor: '#FCA5A5',
+                            color: '#DC2626',
+                            border: '1px solid #FCA5A5',
+                            borderRadius: 'var(--border-radius)',
+                            cursor: 'pointer'
+                          }}
+                          title="View HOD rejection explanation and details"
+                        >
+                          <AlertCircle size={13} />
+                          <span>View Reason</span>
+                        </button>
+                      ) : (
+                        <span style={{ fontSize: '0.8rem', color: 'var(--brand-dark-grey)' }}>—</span>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -450,6 +477,160 @@ export const LeaveRequestsPage: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Rejected Leave Detail Modal */}
+      {selectedRejectedLeave && (
+        <div 
+          className="modal-backdrop" 
+          onClick={() => setSelectedRejectedLeave(null)}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '1rem'
+          }}
+        >
+          <div 
+            className="modal-container" 
+            style={{ maxWidth: '560px', width: '100%', backgroundColor: '#FFFFFF', borderRadius: 'var(--border-radius)', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)' }} 
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-header" style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid rgba(156, 163, 175, 0.2)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' }}>
+                  <span className="badge badge-active font-mono" style={{ fontSize: '0.75rem' }}>
+                    {selectedRejectedLeave.id}
+                  </span>
+                  <span className="badge badge-overdue" style={{ fontSize: '0.75rem', fontWeight: 700 }}>
+                    Rejected
+                  </span>
+                </div>
+                <h2 className="modal-title font-display" style={{ margin: 0, fontSize: '1.35rem', fontWeight: 800, color: 'var(--brand-black)' }}>
+                  Leave Request Rejection Details
+                </h2>
+              </div>
+              <button 
+                className="modal-close-btn" 
+                onClick={() => setSelectedRejectedLeave(null)}
+                style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--brand-dark-grey)', padding: '0.25rem' }}
+                aria-label="Close dialog"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="modal-body" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              {/* Prominent HOD Rejection Reason Callout */}
+              <div style={{ 
+                backgroundColor: '#FEF2F2', 
+                border: '1px solid #FCA5A5', 
+                borderRadius: 'var(--border-radius)', 
+                padding: '1.15rem 1.25rem' 
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', marginBottom: '0.5rem', color: '#991B1B' }}>
+                  <AlertCircle size={18} />
+                  <span style={{ fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    HOD Rejection Reason
+                  </span>
+                </div>
+                <div style={{ 
+                  fontSize: '0.95rem', 
+                  color: selectedRejectedLeave.remark || selectedRejectedLeave.rejectionReason ? '#7F1D1D' : '#991B1B', 
+                  fontWeight: selectedRejectedLeave.remark || selectedRejectedLeave.rejectionReason ? 600 : 500,
+                  fontStyle: selectedRejectedLeave.remark || selectedRejectedLeave.rejectionReason ? 'normal' : 'italic',
+                  lineHeight: 1.6,
+                  whiteSpace: 'pre-wrap'
+                }}>
+                  {selectedRejectedLeave.remark || selectedRejectedLeave.rejectionReason || 'No rejection reason was recorded for this request.'}
+                </div>
+              </div>
+
+              {/* Reviewer and Review Date Info */}
+              <div style={{ 
+                display: 'grid', 
+                gridTemplateColumns: '1fr 1fr', 
+                gap: '1rem',
+                backgroundColor: 'var(--brand-light-grey)',
+                padding: '0.85rem 1rem',
+                borderRadius: 'var(--border-radius)',
+                fontSize: '0.85rem'
+              }}>
+                <div>
+                  <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--brand-dark-grey)', textTransform: 'uppercase', display: 'block' }}>
+                    REVIEWED BY
+                  </span>
+                  <div style={{ fontWeight: 700, color: 'var(--brand-black)', marginTop: '0.15rem' }}>
+                    {selectedRejectedLeave.reviewedBy || selectedRejectedLeave.reviewerName || 'Department HOD'}
+                  </div>
+                </div>
+                <div>
+                  <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--brand-dark-grey)', textTransform: 'uppercase', display: 'block' }}>
+                    REVIEW DATE
+                  </span>
+                  <div className="font-mono" style={{ fontWeight: 700, color: 'var(--brand-black)', marginTop: '0.15rem' }}>
+                    {selectedRejectedLeave.reviewedAt || 'N/A'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Original Application Context */}
+              <div style={{ borderTop: '1px solid rgba(156, 163, 175, 0.2)', paddingTop: '1rem' }}>
+                <span style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--brand-dark-grey)', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: '0.75rem' }}>
+                  Original Application Summary
+                </span>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem', marginBottom: '0.85rem', fontSize: '0.85rem' }}>
+                  <div>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--brand-dark-grey)', textTransform: 'uppercase', fontWeight: 600 }}>Leave Type</span>
+                    <div style={{ fontWeight: 600, color: 'var(--brand-black)', marginTop: '0.1rem' }}>{selectedRejectedLeave.leaveType}</div>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--brand-dark-grey)', textTransform: 'uppercase', fontWeight: 600 }}>Requested Dates</span>
+                    <div className="font-mono" style={{ fontWeight: 600, color: 'var(--brand-black)', marginTop: '0.1rem' }}>
+                      {selectedRejectedLeave.startDate} → {selectedRejectedLeave.endDate} ({selectedRejectedLeave.days} {selectedRejectedLeave.days === 1 ? 'day' : 'days'})
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--brand-dark-grey)', textTransform: 'uppercase', fontWeight: 600, display: 'block', marginBottom: '0.25rem' }}>
+                    Student's Submitted Purpose / Reason
+                  </span>
+                  <div style={{ 
+                    padding: '0.75rem 1rem', 
+                    backgroundColor: '#F8FAFC', 
+                    borderRadius: 'var(--border-radius)', 
+                    border: '1px solid #E2E8F0', 
+                    fontSize: '0.85rem', 
+                    color: 'var(--brand-black)', 
+                    lineHeight: 1.5,
+                    whiteSpace: 'pre-wrap'
+                  }}>
+                    {selectedRejectedLeave.reason}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="modal-footer" style={{ padding: '1rem 1.5rem', borderTop: '1px solid rgba(156, 163, 175, 0.2)', display: 'flex', justifyContent: 'flex-end', backgroundColor: 'var(--brand-light-grey)' }}>
+              <button 
+                type="button" 
+                className="btn btn-secondary" 
+                onClick={() => setSelectedRejectedLeave(null)}
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

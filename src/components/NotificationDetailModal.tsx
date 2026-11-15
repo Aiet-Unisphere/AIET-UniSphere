@@ -3,26 +3,37 @@ import { X, Clock, User, ExternalLink, Tag } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import type { NotificationItem } from '../data/notifications';
 import { getNotificationIcon } from './NotificationCard';
+import { resolveNotificationRoute } from '../utils/notificationNavigation';
 
 interface NotificationDetailModalProps {
   notification: NotificationItem | null;
   onClose: () => void;
+  userRole?: string;
 }
 
 export const NotificationDetailModal: React.FC<NotificationDetailModalProps> = ({
   notification,
-  onClose
+  onClose,
+  userRole
 }) => {
   const navigate = useNavigate();
 
   if (!notification) return null;
+
+  const handleOpenRelated = () => {
+    if (notification.relatedLink) {
+      const target = resolveNotificationRoute(notification.relatedLink, userRole);
+      onClose();
+      navigate(target);
+    }
+  };
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-content notification-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <div className={`notification-icon-wrapper ${notification.type.toLowerCase()}`}>
+            <div className={`notification-icon-wrapper ${(notification.type || '').toLowerCase()}`}>
               {getNotificationIcon(notification.type)}
             </div>
             <div>
@@ -76,10 +87,7 @@ export const NotificationDetailModal: React.FC<NotificationDetailModalProps> = (
             <button 
               className="btn btn-primary"
               style={{ width: 'auto' }}
-              onClick={() => {
-                onClose();
-                navigate(notification.relatedLink!);
-              }}
+              onClick={handleOpenRelated}
             >
               <ExternalLink size={16} />
               Open Related Feature

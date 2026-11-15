@@ -31,7 +31,9 @@ import {
   ChevronDown
 } from 'lucide-react';
 import { AuthLogo } from './AuthLogo';
-import { getUnreadNotificationsCount } from '../services/notificationService';
+import { getUnreadNotificationsCount, subscribeToNotifications } from '../services/notificationService';
+import { NotificationDropdown } from './NotificationDropdown';
+import { NotificationToastContainer } from './NotificationToastContainer';
 
 import { useAuth } from '../app/context/AuthContext';
 
@@ -58,21 +60,32 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
   });
 
   const [isProfileOpen, setIsProfileOpen] = useState(false);
-  const [unreadNotifications, setUnreadNotifications] = useState(2);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   
   const profileRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    let isMounted = true;
     const updateCount = () => {
-      getUnreadNotificationsCount().then(count => setUnreadNotifications(count));
+      getUnreadNotificationsCount().then(count => {
+        if (isMounted) setUnreadNotifications(count);
+      });
     };
     updateCount();
 
     window.addEventListener('notifications_updated', updateCount);
+
+    const unsubscribe = user?.id 
+      ? subscribeToNotifications(user.id, updateCount)
+      : () => {};
+
     return () => {
+      isMounted = false;
       window.removeEventListener('notifications_updated', updateCount);
+      unsubscribe();
     };
-  }, [location.pathname]);
+  }, [location.pathname, user?.id]);
 
   // Close dropdown on click outside
   useEffect(() => {
@@ -398,16 +411,29 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
           </div>
 
           <div className="header-right">
-            {/* Notifications button */}
-            <button 
-              className="header-action-btn" 
-              aria-label="View notifications"
-              onClick={() => navigate('/student/notifications')}
-              title="Open Notification Center"
-            >
-              <Bell size={20} />
-              {unreadNotifications > 0 && <span className="notification-badge"></span>}
-            </button>
+            {/* Notifications button & dropdown */}
+            <div className="notifications-dropdown-container">
+              <button 
+                className="header-action-btn" 
+                aria-label="View notifications"
+                onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
+                title="Notifications"
+                aria-expanded={isNotificationsOpen}
+              >
+                <Bell size={20} />
+                {unreadNotifications > 0 && (
+                  <span className="notification-badge">
+                    {unreadNotifications > 99 ? '99+' : unreadNotifications}
+                  </span>
+                )}
+              </button>
+              <NotificationDropdown 
+                isOpen={isNotificationsOpen}
+                onClose={() => setIsNotificationsOpen(false)}
+                unreadCount={unreadNotifications}
+                userRole="STUDENT"
+              />
+            </div>
 
             {/* Profile Dropdown */}
             <div className="profile-menu-container" ref={profileRef}>
@@ -463,6 +489,9 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
           {children}
         </main>
       </div>
+
+      {/* Real-time Notification Alerts Toast Container */}
+      <NotificationToastContainer userRole="STUDENT" />
     </div>
   );
 };

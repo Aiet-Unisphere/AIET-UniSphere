@@ -1,5 +1,7 @@
 import { supabase } from '../../lib/supabase';
 import { getFacultyCourses } from '../../services/courseService';
+import { getFacultyAssignments } from '../../services/assignmentService';
+import type { ExtendedAssignment } from '../../services/assignmentService';
 import type {
   FacultyProfile,
   TodayClass,
@@ -28,11 +30,14 @@ export const getFacultyProfile = async (): Promise<FacultyProfile> => {
   try {
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) throw new Error('Authenticated faculty session required.');
+    
+    // Robust profile lookup with graceful fallback
     const { data, error } = await (supabase as any)
       .from('profiles')
-      .select('id, full_name, email, designation, department:departments(name)')
+      .select('id, full_name, designation, department_id, department:departments(name)')
       .eq('id', user.id)
-      .single();
+      .maybeSingle();
+
     if (error || !data) {
       return {
         id: user.id,
@@ -46,10 +51,10 @@ export const getFacultyProfile = async (): Promise<FacultyProfile> => {
     }
     return {
       id: data.id,
-      name: data.full_name || data.email,
-      title: data.designation || 'Designation not specified',
+      name: data.full_name || user.email?.split('@')[0] || 'Faculty Member',
+      title: data.designation || 'Faculty Member',
       department: data.department?.name || 'Department not assigned',
-      email: data.email,
+      email: user.email || '',
       office: 'Not recorded',
       academicYear: 'Not set',
     };
@@ -74,6 +79,7 @@ export const getFacultyDashboardData = async (): Promise<FacultyDashboardData> =
 
   const profile = await getFacultyProfile();
   
+  // 1. Fetch courses assigned to faculty (from timetable, enrollments, attendance, or department)
   let courses: any[] = [];
   try {
     courses = await getFacultyCourses();
@@ -81,19 +87,45 @@ export const getFacultyDashboardData = async (): Promise<FacultyDashboardData> =
     console.warn('[facultyService] getFacultyCourses error fallback:', err?.message);
   }
 
-  const todayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][new Date().getDay()];
+  const courseIds = courses.map((c: any) => c.id).filter(Boolean);
+  const courseCodes = courses.map((c: any) => c.code).filter(Boolean);
 
-  const [assignmentsRes, timetableRes, enrollmentsRes] = await Promise.all([
-    (async () => {
+  // 2. Resolve distinct unique students taught across all allocated courses using canonical studentStatisticsService
+  let studentsCount = 0;
+  let studentIds: string[] = [];
+  if (courses.length > 0) {
+    try {
+      const { getFacultyUniqueStudentMetrics } = await import('../../services/studentStatisticsService');
+      const stats = await getFacultyUniqueStudentMetrics(user.id, courses);
+      studentsCount = stats.uniqueStudentsCount;
+      studentIds = stats.uniqueStudentIds || [];
+    } catch (err: any) {
+      console.warn('[facultyService] getFacultyUniqueStudentMetrics error:', err?.message);
+    }
+  }
+
+  // 3. Institutional Timetable & Today's Classes using Asia/Kolkata (IST, UTC+5:30)
+  const todayNameIST = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Kolkata',
+    weekday: 'long'
+  }).format(new Date());
+
+  const currentTimeIST = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  }).format(new Date());
+
+  // 4. Fetch assignments, timetable, and attendance alerts concurrently
+  const [facultyAssignments, timetableRes, attendanceRes] = await Promise.all([
+    (async (): Promise<ExtendedAssignment[]> => {
       try {
-        const res = await (supabase as any)
-          .from('assignments')
-          .select('id, title, course_id, course_name, deadline, status')
-          .eq('created_by', user.id)
-          .order('deadline', { ascending: true });
-        return res.error ? { data: [] } : res;
-      } catch {
-        return { data: [] };
+        return await getFacultyAssignments();
+      } catch (err: any) {
+        console.warn('[facultyService] getFacultyAssignments error:', err?.message);
+        return [];
       }
     })(),
     (async () => {
@@ -102,41 +134,11 @@ export const getFacultyDashboardData = async (): Promise<FacultyDashboardData> =
           .from('timetable_entries')
           .select('*')
           .eq('faculty_id', user.id)
-          .eq('day_of_week', todayName)
+          .ilike('day_of_week', todayNameIST)
           .order('start_time', { ascending: true });
         return res.error ? { data: [] } : res;
-      } catch {
-        return { data: [] };
-      }
-    })(),
-    (async () => {
-      try {
-        const res = await (supabase as any)
-          .from('course_enrollments')
-          .select('student_id')
-          .eq('faculty_id', user.id)
-          .eq('status', 'Active');
-        return res.error ? { data: [] } : res;
-      } catch {
-        return { data: [] };
-      }
-    })()
-  ]);
-
-  const assignments = assignmentsRes.data || [];
-  const assignmentIds = assignments.map((assignment: any) => assignment.id);
-  const studentIds = [...new Set((enrollmentsRes.data || []).map((enrollment: any) => enrollment.student_id))];
-
-  const [submissionsRes, attendanceRes] = await Promise.all([
-    (async () => {
-      if (!assignmentIds.length) return { data: [] };
-      try {
-        const res = await (supabase as any)
-          .from('assignment_submissions')
-          .select('assignment_id, status')
-          .in('assignment_id', assignmentIds);
-        return res.error ? { data: [] } : res;
-      } catch {
+      } catch (err: any) {
+        console.warn('[facultyService] timetable query error:', err?.message);
         return { data: [] };
       }
     })(),
@@ -150,45 +152,90 @@ export const getFacultyDashboardData = async (): Promise<FacultyDashboardData> =
           .gt('total_sessions', 0)
           .lt('attendance_percentage', 75);
         return res.error ? { data: [] } : res;
-      } catch {
+      } catch (err: any) {
+        console.warn('[facultyService] student_analytics_view query error:', err?.message);
         return { data: [] };
       }
     })()
   ]);
 
-  const pendingByAssignment = new Map<string, number>();
-  for (const submission of submissionsRes.data || []) {
-    if (submission.status === 'Submitted') {
-      pendingByAssignment.set(submission.assignment_id, (pendingByAssignment.get(submission.assignment_id) || 0) + 1);
-    }
-  }
-  const pendingWork: PendingWorkItem[] = assignments
-    .map((assignment: any) => ({
-      id: assignment.id,
-      title: assignment.title,
-      courseName: assignment.course_name,
-      pendingCount: pendingByAssignment.get(assignment.id) || 0,
-      type: 'assignment' as const,
-      link: `/faculty/assignments/${assignment.id}`,
-    }))
-    .filter((item: PendingWorkItem) => item.pendingCount > 0);
-
+  // Derive today's classes
   const todayClasses: TodayClass[] = (timetableRes.data || []).map((entry: any) => {
-    const now = new Date().toTimeString().slice(0, 8);
-    const status = now < entry.start_time ? 'Upcoming' : now <= entry.end_time ? 'Current' : 'Completed';
+    const status = currentTimeIST < entry.start_time ? 'Upcoming' : currentTimeIST <= entry.end_time ? 'Current' : 'Completed';
     return {
       id: entry.id,
       time: `${entry.start_time} - ${entry.end_time}`,
       courseCode: entry.course_code || entry.course_id,
       courseName: entry.course_name,
       department: profile.department,
-      semester: Number(entry.semester),
+      semester: Number(entry.semester || 0),
       room: entry.room || 'Not assigned',
       status,
     };
   });
 
-  // Strictly filter for genuine attendance alerts: student must have conducted sessions (> 0) and attendance < 75%
+  // Calculate pending evaluations and active assignments from authoritative faculty assignments
+  const pendingWork: PendingWorkItem[] = facultyAssignments
+    .filter((a) => {
+      // Submission counts with pending grading
+      const hasPending = (a as any).submittedCount !== undefined
+        ? ((a as any).effectiveStatus === 'Pending' || ((a as any).submittedCount > 0 && a.status === 'Submitted'))
+        : false;
+      return hasPending;
+    })
+    .map((assignment) => ({
+      id: assignment.id,
+      title: assignment.title,
+      courseName: assignment.courseName,
+      pendingCount: (assignment as any).submittedCount || 1,
+      type: 'assignment' as const,
+      link: `/faculty/assignments/${assignment.id}`,
+    }));
+
+  // Direct check for pending submissions across faculty assignments
+  let totalPendingSubmissions = 0;
+  const assignmentIds = facultyAssignments.map((a) => a.id);
+  if (assignmentIds.length > 0) {
+    try {
+      const { data: subsData } = await (supabase as any)
+        .from('assignment_submissions')
+        .select('assignment_id, status')
+        .in('assignment_id', assignmentIds)
+        .eq('status', 'Submitted');
+      
+      if (subsData) {
+        totalPendingSubmissions = subsData.length;
+        const pendingMap = new Map<string, number>();
+        for (const sub of subsData) {
+          pendingMap.set(sub.assignment_id, (pendingMap.get(sub.assignment_id) || 0) + 1);
+        }
+
+        // Re-align pendingWork with exact submission counts
+        pendingWork.length = 0;
+        for (const asgn of facultyAssignments) {
+          const count = pendingMap.get(asgn.id) || 0;
+          if (count > 0) {
+            pendingWork.push({
+              id: asgn.id,
+              title: asgn.title,
+              courseName: asgn.courseName,
+              pendingCount: count,
+              type: 'assignment',
+              link: `/faculty/assignments/${asgn.id}`,
+            });
+          }
+        }
+      }
+    } catch (err: any) {
+      console.warn('[facultyService] assignment_submissions count error:', err?.message);
+    }
+  }
+
+  const activeAssignmentsCount = facultyAssignments.filter(
+    (a) => a.effectiveStatus === 'Active' || a.effectiveStatus === 'Pending'
+  ).length;
+
+  // Process genuine attendance alerts (< 75% attendance with conducted sessions > 0)
   const lowAttendanceRows = (attendanceRes.data || []).filter((row: any) => {
     const totalSessions = Number(row.total_sessions || 0);
     const percentage = Number(row.attendance_percentage ?? 0);
@@ -200,7 +247,7 @@ export const getFacultyDashboardData = async (): Promise<FacultyDashboardData> =
     try {
       const res = await (supabase as any)
         .from('profiles')
-        .select('id, full_name, email, usn_or_employee_id')
+        .select('id, full_name, usn_or_employee_id')
         .in('id', lowAttendanceIds);
       if (!res.error && res.data) lowAttendanceProfiles = res.data;
     } catch (err: any) {
@@ -218,6 +265,7 @@ export const getFacultyDashboardData = async (): Promise<FacultyDashboardData> =
       }
     ])
   );
+
   const studentAlerts: StudentAlertItem[] = (lowAttendanceProfiles || []).map((student: any) => {
     const attInfo = attendanceByStudent.get(student.id);
     const percentage = attInfo ? attInfo.percentage : 0;
@@ -225,18 +273,18 @@ export const getFacultyDashboardData = async (): Promise<FacultyDashboardData> =
     const presentCount = attInfo ? attInfo.presentCount : 0;
     return {
       id: student.id,
-      studentName: student.full_name || student.email,
+      studentName: student.full_name || 'Student',
       usn: student.usn_or_employee_id || 'Not recorded',
       type: 'Low Attendance',
       details: totalSessions > 0
-        ? `Attendance at ${percentage}% (${presentCount}/${totalSessions} sessions conducted). Below the institutional 75% threshold.`
-        : 'Attendance is below the institutional 75% threshold.',
+        ? `Attendance at ${percentage}% (${presentCount}/${totalSessions} sessions conducted). Below institutional 75% threshold.`
+        : 'Attendance is below institutional 75% threshold.',
       value: `${percentage}%`,
       severity: percentage < 60 ? 'high' : 'medium',
     };
   });
 
-  // Fetch real recent activities for the authenticated faculty member
+  // Fetch recent activities for this faculty member
   const [
     recentAssignmentsRes,
     recentAttendanceRes,
@@ -252,13 +300,8 @@ export const getFacultyDashboardData = async (): Promise<FacultyDashboardData> =
           .eq('created_by', user.id)
           .order('created_at', { ascending: false })
           .limit(5);
-        if (res.error) {
-          console.warn('[facultyService] Error querying assignments activities:', res.error.message);
-          return { data: [] };
-        }
-        return res;
-      } catch (err: any) {
-        console.warn('[facultyService] Unexpected error querying assignments activities:', err?.message);
+        return res.error ? { data: [] } : res;
+      } catch {
         return { data: [] };
       }
     })(),
@@ -270,13 +313,8 @@ export const getFacultyDashboardData = async (): Promise<FacultyDashboardData> =
           .eq('faculty_id', user.id)
           .order('created_at', { ascending: false })
           .limit(5);
-        if (res.error) {
-          console.warn('[facultyService] Error querying attendance activities:', res.error.message);
-          return { data: [] };
-        }
-        return res;
-      } catch (err: any) {
-        console.warn('[facultyService] Unexpected error querying attendance activities:', err?.message);
+        return res.error ? { data: [] } : res;
+      } catch {
         return { data: [] };
       }
     })(),
@@ -288,13 +326,8 @@ export const getFacultyDashboardData = async (): Promise<FacultyDashboardData> =
           .eq('created_by', user.id)
           .order('created_at', { ascending: false })
           .limit(5);
-        if (res.error) {
-          console.warn('[facultyService] Error querying assessments activities:', res.error.message);
-          return { data: [] };
-        }
-        return res;
-      } catch (err: any) {
-        console.warn('[facultyService] Unexpected error querying assessments activities:', err?.message);
+        return res.error ? { data: [] } : res;
+      } catch {
         return { data: [] };
       }
     })(),
@@ -307,13 +340,8 @@ export const getFacultyDashboardData = async (): Promise<FacultyDashboardData> =
           .in('assignment_id', assignmentIds)
           .order('submitted_at', { ascending: false })
           .limit(5);
-        if (res.error) {
-          console.warn('[facultyService] Error querying submissions activities:', res.error.message);
-          return { data: [] };
-        }
-        return res;
-      } catch (err: any) {
-        console.warn('[facultyService] Unexpected error querying submissions activities:', err?.message);
+        return res.error ? { data: [] } : res;
+      } catch {
         return { data: [] };
       }
     })(),
@@ -325,13 +353,8 @@ export const getFacultyDashboardData = async (): Promise<FacultyDashboardData> =
           .eq('created_by', user.id)
           .order('created_at', { ascending: false })
           .limit(5);
-        if (res.error) {
-          console.warn('[facultyService] Error querying announcements activities:', res.error.message);
-          return { data: [] };
-        }
-        return res;
-      } catch (err: any) {
-        console.warn('[facultyService] Unexpected error querying announcements activities:', err?.message);
+        return res.error ? { data: [] } : res;
+      } catch {
         return { data: [] };
       }
     })()
@@ -434,10 +457,10 @@ export const getFacultyDashboardData = async (): Promise<FacultyDashboardData> =
     profile,
     stats: {
       myCoursesCount: courses.length,
-      studentsCount: studentIds.length,
+      studentsCount,
       todaysClassesCount: todayClasses.length,
-      pendingEvaluationsCount: pendingWork.reduce((total, item) => total + item.pendingCount, 0),
-      activeAssignmentsCount: assignments.filter((assignment: any) => !['Completed', 'Closed'].includes(assignment.status)).length,
+      pendingEvaluationsCount: totalPendingSubmissions,
+      activeAssignmentsCount,
       attendanceAlertsCount: studentAlerts.length,
     },
     todaysClasses: todayClasses,

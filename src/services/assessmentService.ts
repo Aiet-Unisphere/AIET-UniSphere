@@ -753,6 +753,13 @@ export const createAssessment = async (payload: CreateAssessmentPayload): Promis
       .insert(questionRows)
       .select('*, assessment_topics(name)');
     if (questionError) throw new Error(`Failed to save assessment questions: ${questionError.message}`);
+
+    // Notify enrolled students about the scheduled assessment
+    // Notifications are handled server-authoritatively by database trigger trg_notify_on_assessment_published
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('notifications_updated'));
+    }
+
     return mapAssessment(assessmentRow, (questions || []).map((question: any) => mapQuestion(question, true)));
   } catch (error) {
     await (supabase as any).from('assessments').delete().eq('id', assessmentId);

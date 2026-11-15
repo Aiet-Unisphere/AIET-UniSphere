@@ -29,60 +29,7 @@ const mapDBRowToAnnouncement = (row: any): Announcement => {
   };
 };
 
-// Helper to send notifications when an announcement is published
-const sendAnnouncementNotifications = async (announcement: any) => {
-  try {
-    const departmentId = announcement.department_id;
-    const target = announcement.target_audience;
-    
-    // Determine roles to notify
-    let rolesToNotify: string[] = [];
-    if (target === 'Students') {
-      rolesToNotify = ['STUDENT'];
-    } else if (target === 'Faculty') {
-      rolesToNotify = ['FACULTY'];
-    } else {
-      rolesToNotify = ['STUDENT', 'FACULTY'];
-    }
 
-    // Fetch all profiles in this department with these roles
-    const { data: targetProfiles, error } = await supabase
-      .from('profiles')
-      .select('id')
-      .eq('department_id', departmentId)
-      .in('role', rolesToNotify);
-
-    if (error) {
-      console.error('Error fetching profiles to notify:', error);
-      return;
-    }
-
-    if (!targetProfiles || targetProfiles.length === 0) return;
-
-    // Create notifications for all these users
-    const notificationsToInsert = targetProfiles.map((p: any) => ({
-      user_id: p.id,
-      title: `New Notice: ${announcement.title}`,
-      short_message: announcement.content.length > 80 ? announcement.content.substring(0, 77) + '...' : announcement.content,
-      full_message: announcement.content,
-      source: 'Announcement',
-      category: 'Academic',
-      type: 'ANNOUNCEMENT',
-      related_link: `/student/announcements/${announcement.id}`,
-      is_read: false
-    }));
-
-    const { error: notifError } = await (supabase as any)
-      .from('notifications')
-      .insert(notificationsToInsert);
-
-    if (notifError) {
-      console.error('Error inserting announcement notifications:', notifError);
-    }
-  } catch (err) {
-    console.error('Failed to send announcement notifications:', err);
-  }
-};
 
 export const getDepartmentAnnouncements = async (departmentId?: string): Promise<Announcement[]> => {
   let query = supabase
@@ -210,8 +157,9 @@ export const createDepartmentAnnouncement = async (data: {
     throw new Error(error.message);
   }
 
-  if (data.status === 'Published' && inserted) {
-    await sendAnnouncementNotifications(inserted);
+  // Notifications are handled server-authoritatively by database trigger trg_notify_on_announcement_published
+  if (data.status === 'Published' && typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('notifications_updated'));
   }
 
   return inserted ? mapDBRowToAnnouncement(inserted) : null;
@@ -242,8 +190,9 @@ export const publishAnnouncement = async (id: string): Promise<Announcement | nu
     throw new Error(error.message);
   }
 
-  if (updated) {
-    await sendAnnouncementNotifications(updated);
+  // Notifications are handled server-authoritatively by database trigger trg_notify_on_announcement_published
+  if (updated && typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('notifications_updated'));
   }
 
   return updated ? mapDBRowToAnnouncement(updated) : null;

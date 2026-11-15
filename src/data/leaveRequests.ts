@@ -19,6 +19,7 @@ export interface LeaveRequest {
   reviewerName?: string;
   reviewedAt?: string | null;
   remark?: string;
+  rejectionReason?: string;
   approvalRemarks?: string | null;
   supportingDocument?: string;
   supportingDocPath?: string;

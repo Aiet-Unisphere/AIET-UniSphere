@@ -205,7 +205,7 @@ export const FacultyStudentList: React.FC = () => {
           <Users size={16} style={{ color: 'var(--brand-blue)' }} />
           <span style={{ fontSize: '0.825rem', color: '#64748B', fontWeight: 600 }}>Enrolled:</span>
           <span style={{ fontSize: '0.95rem', fontWeight: 800, color: '#0F172A', fontFamily: 'monospace' }}>
-            {students.length} Students
+            {hasActiveFilters ? `${filteredStudents.length} / ${students.length}` : `${students.length}`} Students
           </span>
         </div>
       </div>
@@ -484,13 +484,25 @@ export const FacultyStudentList: React.FC = () => {
 
                     {/* Column 4: Semester */}
                     <td style={{ padding: '0.85rem 0.75rem', textAlign: 'center' }}>
-                      <span style={{ 
-                        fontSize: '0.8rem', 
-                        fontWeight: 600, 
-                        color: std.semester != null ? '#0F172A' : '#94A3B8'
-                      }}>
-                        {std.semester != null ? `Sem ${std.semester}` : 'N/A'}
-                      </span>
+                      {std.semester != null ? (
+                        <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#0F172A' }}>
+                          Sem {std.semester}
+                        </span>
+                      ) : (
+                        <span style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          padding: '0.15rem 0.45rem',
+                          fontSize: '0.7rem',
+                          fontWeight: 700,
+                          borderRadius: '4px',
+                          backgroundColor: '#FFFBEB',
+                          color: '#B45309',
+                          border: '1px solid #FDE68A'
+                        }}>
+                          Incomplete
+                        </span>
+                      )}
                     </td>
 
                     {/* Column 5: Attendance */}

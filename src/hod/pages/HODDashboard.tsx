@@ -139,7 +139,7 @@ export const HODDashboard: React.FC = () => {
         <StatCard
           title="TOTAL STUDENTS"
           value={overview.totalStudents}
-          subtitle={`${overview.activeStudents} active accounts`}
+          subtitle={`${overview.activeStudents} Active · ${overview.inactiveStudents ?? (overview.totalStudents - overview.activeStudents)} Inactive · ${overview.incompleteStudents ?? 0} Incomplete Profiles`}
           icon={<GraduationCap size={22} />}
         />
         <StatCard

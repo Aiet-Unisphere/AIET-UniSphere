@@ -21,7 +21,9 @@ import {
 } from 'lucide-react';
 import { AuthLogo } from '../../components/AuthLogo';
 import { useAuth } from '../../app/context/AuthContext';
-import { getUnreadNotificationsCount } from '../../services/notificationService';
+import { getUnreadNotificationsCount, subscribeToNotifications } from '../../services/notificationService';
+import { NotificationDropdown } from '../../components/NotificationDropdown';
+import { NotificationToastContainer } from '../../components/NotificationToastContainer';
 import { getSignedUrl, STORAGE_BUCKETS } from '../../services/storageService';
 
 import { UserAvatar } from '../../components/UserAvatar';
@@ -48,6 +50,7 @@ export const FacultyAppShell: React.FC<FacultyAppShellProps> = ({ children }) =>
 
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [avatarSignedUrl, setAvatarSignedUrl] = useState<string | null>(null);
   
   const profileRef = useRef<HTMLDivElement>(null);
@@ -85,11 +88,17 @@ export const FacultyAppShell: React.FC<FacultyAppShellProps> = ({ children }) =>
 
     const handleUpdate = () => fetchUnread();
     window.addEventListener('notifications_updated', handleUpdate);
+
+    const unsubscribe = user?.id
+      ? subscribeToNotifications(user.id, fetchUnread)
+      : () => {};
+
     return () => {
       isMounted = false;
       window.removeEventListener('notifications_updated', handleUpdate);
+      unsubscribe();
     };
-  }, []);
+  }, [user?.id]);
 
   // Close dropdown on click outside or Escape key
   useEffect(() => {
@@ -315,16 +324,29 @@ export const FacultyAppShell: React.FC<FacultyAppShellProps> = ({ children }) =>
           </div>
 
           <div className="header-right">
-            {/* Notifications button */}
-            <button 
-              className="header-action-btn" 
-              aria-label="View notifications"
-              onClick={() => navigate('/faculty/notifications')}
-              title="Open Notifications"
-            >
-              <Bell size={18} />
-              {unreadNotifications > 0 && <span className="notification-badge"></span>}
-            </button>
+            {/* Notifications button & dropdown */}
+            <div className="notifications-dropdown-container">
+              <button 
+                className="header-action-btn" 
+                aria-label="View notifications"
+                onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
+                title="Open Notifications"
+                aria-expanded={isNotificationsOpen}
+              >
+                <Bell size={18} />
+                {unreadNotifications > 0 && (
+                  <span className="notification-badge">
+                    {unreadNotifications > 99 ? '99+' : unreadNotifications}
+                  </span>
+                )}
+              </button>
+              <NotificationDropdown 
+                isOpen={isNotificationsOpen}
+                onClose={() => setIsNotificationsOpen(false)}
+                unreadCount={unreadNotifications}
+                userRole="FACULTY"
+              />
+            </div>
 
             {/* Profile Dropdown */}
             <div className="profile-menu-container" ref={profileRef}>
@@ -384,6 +406,9 @@ export const FacultyAppShell: React.FC<FacultyAppShellProps> = ({ children }) =>
           {children}
         </main>
       </div>
+
+      {/* Real-time Notification Alerts Toast Container */}
+      <NotificationToastContainer userRole="FACULTY" />
     </div>
   );
 };

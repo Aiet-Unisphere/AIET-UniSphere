@@ -61,6 +61,7 @@ const mapLeaveRow = (l: any): LeaveRequest => {
     reviewerName: reviewerName || undefined,
     reviewedAt: l.reviewed_at ? new Date(l.reviewed_at).toLocaleDateString() : undefined,
     remark: l.rejection_reason || undefined,
+    rejectionReason: l.rejection_reason || undefined,
     approvalRemarks: l.approval_remarks || undefined,
     supportingDocument: docName,
     supportingDocName: docName,
@@ -511,31 +512,10 @@ export const submitLeaveRequest = async (payload: {
     }
   }
 
-  // Send notifications
-  try {
-    await (supabase as any).from('notifications').insert({
-      user_id: hodProfile.id,
-      title: 'New Leave Request Received',
-      short_message: `Leave request from ${studentProfile.full_name || 'Student'} (${data.reference_id || data.id})`,
-      full_message: `${studentProfile.full_name} submitted a ${payload.leaveType} request from ${payload.startDate} to ${payload.endDate}.\nReason: ${payload.reason}`,
-      source: 'Student Portal',
-      category: 'Leave',
-      type: 'Request'
-    });
-  } catch (e) { console.warn('[leaveService] HOD notification failed:', e); }
-
-  try {
-    await (supabase as any).from('notifications').insert({
-      user_id: user.id,
-      title: 'Leave Request Submitted',
-      short_message: `Your ${payload.leaveType} request (${data.reference_id || data.id}) has been submitted and is pending HOD review.`,
-      full_message: `Leave submitted.\nType: ${payload.leaveType}\nDates: ${payload.startDate} to ${payload.endDate}\nStatus: PENDING`,
-      source: 'Student Portal',
-      category: 'Leave',
-      type: 'Request',
-      related_link: '/student/leave-requests'
-    });
-  } catch (e) { console.warn('[leaveService] Student notification failed:', e); }
+  // Notifications are handled server-authoritatively by database trigger trg_notify_on_leave_submission
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('notifications_updated'));
+  }
 
   return mapLeaveRow({ ...data, student_profile: studentProfile });
 };

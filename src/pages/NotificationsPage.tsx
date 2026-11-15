@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
-import { LoadingState } from '../components/LoadingState';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorState } from '../components/ErrorState';
 import type { NotificationItem } from '../data/notifications';
@@ -13,11 +13,16 @@ import {
   markNotificationAsRead, 
   markAllNotificationsAsRead,
   deleteNotification,
-  clearAllReadNotifications
+  clearAllReadNotifications,
+  subscribeToNotifications
 } from '../services/notificationService';
+import { useAuth } from '../app/context/AuthContext';
+import { resolveNotificationRoute } from '../utils/notificationNavigation';
 import { CheckCheck, Trash2 } from 'lucide-react';
 
 export const NotificationsPage: React.FC = () => {
+  const navigate = useNavigate();
+  const { user } = useAuth();
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -29,9 +34,10 @@ export const NotificationsPage: React.FC = () => {
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const [showClearAllModal, setShowClearAllModal] = useState(false);
   const [actionStatus, setActionStatus] = useState<string | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
 
-  const fetchNotifications = async () => {
-    setIsLoading(true);
+  const fetchNotifications = async (showLoading = true) => {
+    if (showLoading) setIsLoading(true);
     setError(null);
     try {
       const data = await getNotifications();
@@ -39,13 +45,25 @@ export const NotificationsPage: React.FC = () => {
     } catch (err) {
       setError("Unable to load notifications. Please try again.");
     } finally {
-      setIsLoading(false);
+      if (showLoading) setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchNotifications();
-  }, []);
+    fetchNotifications(true);
+
+    const handleUpdate = () => fetchNotifications(false);
+    window.addEventListener('notifications_updated', handleUpdate);
+
+    const unsubscribe = user?.id 
+      ? subscribeToNotifications(user.id, () => fetchNotifications(false))
+      : () => {};
+
+    return () => {
+      window.removeEventListener('notifications_updated', handleUpdate);
+      unsubscribe();
+    };
+  }, [user?.id]);
 
   const handleMarkRead = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -66,9 +84,13 @@ export const NotificationsPage: React.FC = () => {
     setSelectedNotification(notif);
   };
 
-  // Delete Single Read Notification
-  const [isProcessing, setIsProcessing] = useState(false);
+  const handleNavigate = (link: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const target = resolveNotificationRoute(link, 'STUDENT');
+    navigate(target);
+  };
 
+  // Delete Single Read Notification
   const promptDeleteReadNotification = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     const target = notifications.find(n => n.id === id);
@@ -113,30 +135,45 @@ export const NotificationsPage: React.FC = () => {
     }
   };
 
+  // Category counts
+  const categoryCounts = {
+    academic: notifications.filter(n => 
+      n.category === 'Academic' || 
+      n.category === 'Leave' || 
+      n.type === 'Assignment' || 
+      n.type === 'Assessment' || 
+      n.type === 'Attendance' ||
+      n.type === 'Leave'
+    ).length,
+    projects: notifications.filter(n => n.category === 'Projects' || n.type === 'Project').length,
+    system: notifications.filter(n => n.category === 'System' || n.type === 'System').length
+  };
+
   // Filtering notifications
   const filteredNotifications = notifications.filter(n => {
     if (selectedFilter === 'Unread') return !n.isRead;
-    if (selectedFilter === 'Academic') return n.category === 'Academic' || n.category === 'Leave';
-    if (selectedFilter === 'Projects') return n.category === 'Projects';
-    if (selectedFilter === 'System') return n.category === 'System';
+    if (selectedFilter === 'Academic') {
+      return (
+        n.category === 'Academic' || 
+        n.category === 'Leave' || 
+        n.type === 'Assignment' || 
+        n.type === 'Assessment' || 
+        n.type === 'Attendance' ||
+        n.type === 'Leave'
+      );
+    }
+    if (selectedFilter === 'Projects') return n.category === 'Projects' || n.type === 'Project';
+    if (selectedFilter === 'System') return n.category === 'System' || n.type === 'System';
     return true;
   });
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
   const readCount = notifications.filter(n => n.isRead).length;
 
-  if (isLoading) {
-    return (
-      <AppShell>
-        <LoadingState message="Loading your notifications..." />
-      </AppShell>
-    );
-  }
-
   if (error) {
     return (
       <AppShell>
-        <ErrorState message={error} onRetry={fetchNotifications} />
+        <ErrorState message={error} onRetry={() => fetchNotifications(true)} />
       </AppShell>
     );
   }
@@ -157,7 +194,7 @@ export const NotificationsPage: React.FC = () => {
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: '0.75rem' }}>
+        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
           {unreadCount > 0 && (
             <button 
               className="btn btn-secondary" 
@@ -206,12 +243,35 @@ export const NotificationsPage: React.FC = () => {
         onSelectFilter={setSelectedFilter}
         unreadCount={unreadCount}
         totalCount={notifications.length}
+        categoryCounts={categoryCounts}
       />
 
-      {/* Notification List or Empty State */}
-      {filteredNotifications.length === 0 ? (
+      {/* Loading Skeleton */}
+      {isLoading ? (
+        <div className="notifications-list-wrapper">
+          {[1, 2, 3, 4].map(idx => (
+            <div 
+              key={idx} 
+              className="notification-item-card" 
+              style={{ pointerEvents: 'none', minHeight: '88px' }}
+            >
+              <div className="notification-card-icon-col">
+                <div className="notification-skeleton" style={{ width: '40px', height: '40px', borderRadius: '50%' }} />
+              </div>
+              <div className="notification-card-content" style={{ gap: '0.5rem', width: '100%' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+                  <div className="notification-skeleton" style={{ width: '80px', height: '14px' }} />
+                  <div className="notification-skeleton" style={{ width: '60px', height: '14px' }} />
+                </div>
+                <div className="notification-skeleton" style={{ width: '55%', height: '18px' }} />
+                <div className="notification-skeleton" style={{ width: '85%', height: '14px' }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : filteredNotifications.length === 0 ? (
         <EmptyState 
-          title="No notifications yet."
+          title={selectedFilter === 'Unread' ? "All notifications read" : "No notifications found"}
           message={
             selectedFilter === 'Unread' 
               ? "You've read all your notifications!" 
@@ -229,6 +289,7 @@ export const NotificationsPage: React.FC = () => {
               onClick={handleNotificationClick}
               onMarkRead={handleMarkRead}
               onDeleteRead={promptDeleteReadNotification}
+              onNavigate={handleNavigate}
             />
           ))}
         </div>
@@ -238,6 +299,7 @@ export const NotificationsPage: React.FC = () => {
       <NotificationDetailModal
         notification={selectedNotification}
         onClose={() => setSelectedNotification(null)}
+        userRole="STUDENT"
       />
 
       {/* Single Read Notification Delete Confirmation Modal */}

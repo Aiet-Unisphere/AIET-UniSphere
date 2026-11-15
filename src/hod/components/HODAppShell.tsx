@@ -23,7 +23,9 @@ import {
 import { AuthLogo } from '../../components/AuthLogo';
 
 import { useAuth } from '../../app/context/AuthContext';
-import { getUnreadNotificationsCount } from '../../services/notificationService';
+import { getUnreadNotificationsCount, subscribeToNotifications } from '../../services/notificationService';
+import { NotificationDropdown } from '../../components/NotificationDropdown';
+import { NotificationToastContainer } from '../../components/NotificationToastContainer';
 import { getSignedUrl, STORAGE_BUCKETS } from '../../services/storageService';
 
 import { UserAvatar } from '../../components/UserAvatar';
@@ -53,6 +55,7 @@ export const HODAppShell: React.FC<HODAppShellProps> = ({ children }) => {
 
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
   const profileRef = useRef<HTMLDivElement>(null);
@@ -85,8 +88,16 @@ export const HODAppShell: React.FC<HODAppShellProps> = ({ children }) => {
     fetchUnreadCount();
     const handleUpdate = () => fetchUnreadCount();
     window.addEventListener('notifications_updated', handleUpdate);
-    return () => window.removeEventListener('notifications_updated', handleUpdate);
-  }, []);
+
+    const unsubscribe = user?.id
+      ? subscribeToNotifications(user.id, fetchUnreadCount)
+      : () => {};
+
+    return () => {
+      window.removeEventListener('notifications_updated', handleUpdate);
+      unsubscribe();
+    };
+  }, [user?.id]);
 
   // Close dropdown on Escape key
   useEffect(() => {
@@ -312,38 +323,28 @@ export const HODAppShell: React.FC<HODAppShellProps> = ({ children }) => {
               />
             </div>
 
-            {/* Notification Bell */}
-            <button 
-              className="header-action-btn"
-              onClick={() => navigate('/hod/notifications')}
-              title="Department Notifications"
-              style={{ position: 'relative' }}
-            >
-              <Bell size={20} />
-              {unreadNotifications > 0 && (
-                <span 
-                  className="notification-badge"
-                  style={{
-                    position: 'absolute',
-                    top: '-2px',
-                    right: '-2px',
-                    backgroundColor: 'var(--brand-orange)',
-                    color: '#ffffff',
-                    fontSize: '0.65rem',
-                    fontWeight: 700,
-                    borderRadius: '50%',
-                    minWidth: '16px',
-                    height: '16px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    padding: '0 2px'
-                  }}
-                >
-                  {unreadNotifications > 99 ? '99+' : unreadNotifications}
-                </span>
-              )}
-            </button>
+            {/* Notification Bell & Dropdown */}
+            <div className="notifications-dropdown-container">
+              <button 
+                className="header-action-btn"
+                onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
+                title="Department Notifications"
+                aria-expanded={isNotificationsOpen}
+              >
+                <Bell size={20} />
+                {unreadNotifications > 0 && (
+                  <span className="notification-badge">
+                    {unreadNotifications > 99 ? '99+' : unreadNotifications}
+                  </span>
+                )}
+              </button>
+              <NotificationDropdown 
+                isOpen={isNotificationsOpen}
+                onClose={() => setIsNotificationsOpen(false)}
+                unreadCount={unreadNotifications}
+                userRole="HOD"
+              />
+            </div>
 
             {/* Profile Dropdown */}
             <div className="profile-menu-container" ref={profileRef}>
@@ -431,6 +432,9 @@ export const HODAppShell: React.FC<HODAppShellProps> = ({ children }) => {
           {children}
         </main>
       </div>
+
+      {/* Real-time Notification Alerts Toast Container */}
+      <NotificationToastContainer userRole="HOD" />
     </div>
   );
 };

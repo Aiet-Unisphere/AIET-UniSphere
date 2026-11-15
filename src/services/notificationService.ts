@@ -2,6 +2,29 @@ import { supabase } from '../lib/supabase';
 import type { NotificationItem } from '../data/notifications';
 export type { NotificationItem };
 
+const mapDBRowToNotificationItem = (n: any): NotificationItem => {
+  const formattedTime = new Date(n.created_at).toLocaleString([], { 
+    month: 'short', 
+    day: 'numeric', 
+    hour: '2-digit', 
+    minute: '2-digit' 
+  });
+
+  return {
+    id: n.id,
+    title: n.title,
+    shortMessage: n.short_message,
+    fullMessage: n.full_message || n.short_message,
+    time: formattedTime,
+    timestamp: formattedTime,
+    isRead: Boolean(n.is_read),
+    source: n.source || 'System',
+    category: (n.category as any) || 'Academic',
+    type: (n.type as any) || 'Notification',
+    relatedLink: n.related_link || undefined
+  };
+};
+
 export const getNotifications = async (): Promise<NotificationItem[]> => {
   try {
     const { data: { user } } = await supabase.auth.getUser();
@@ -15,30 +38,30 @@ export const getNotifications = async (): Promise<NotificationItem[]> => {
 
     if (error || !data) return [];
 
-    return data.map((n: any) => {
-      const formattedTime = new Date(n.created_at).toLocaleString([], { 
-        month: 'short', 
-        day: 'numeric', 
-        hour: '2-digit', 
-        minute: '2-digit' 
-      });
-
-      return {
-        id: n.id,
-        title: n.title,
-        shortMessage: n.short_message,
-        fullMessage: n.full_message || n.short_message,
-        time: formattedTime,
-        timestamp: formattedTime,
-        isRead: Boolean(n.is_read),
-        source: n.source || 'System',
-        category: (n.category as any) || 'Academic',
-        type: (n.type as any) || 'Notification',
-        relatedLink: n.related_link || undefined
-      };
-    });
+    return data.map(mapDBRowToNotificationItem);
   } catch (err) {
     console.error('[notificationService] Failed to get notifications:', err);
+    return [];
+  }
+};
+
+export const getRecentNotifications = async (limit = 6): Promise<NotificationItem[]> => {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return [];
+
+    const { data, error } = await (supabase as any)
+      .from('notifications')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error || !data) return [];
+
+    return data.map(mapDBRowToNotificationItem);
+  } catch (err) {
+    console.error('[notificationService] Failed to get recent notifications:', err);
     return [];
   }
 };
@@ -72,6 +95,10 @@ export const markNotificationAsRead = async (id: string): Promise<NotificationIt
       .eq('id', id)
       .eq('user_id', user.id);
 
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('notifications_updated'));
+    }
+
     return getNotifications();
   } catch (err) {
     return getNotifications();
@@ -88,6 +115,10 @@ export const markAllNotificationsAsRead = async (): Promise<NotificationItem[]> 
       .update({ is_read: true })
       .eq('user_id', user.id)
       .eq('is_read', false);
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('notifications_updated'));
+    }
 
     return getNotifications();
   } catch (err) {
@@ -135,7 +166,7 @@ export const deleteNotification = async (id: string): Promise<NotificationItem[]
 
   // 3. Fallback: If RLS policy blocks direct table DELETE, invoke RPC function delete_notification
   if (!deletedSuccessfully) {
-    console.warn('[notificationService] Direct DELETE returned 0 rows (possible missing RLS policy). Trying RPC delete_notification...');
+    console.warn('[notificationService] Direct DELETE returned 0 rows. Trying RPC delete_notification...');
     try {
       const { data: rpcRes, error: rpcErr } = await (supabase.rpc as any)('delete_notification', {
         p_notification_id: id
@@ -152,7 +183,7 @@ export const deleteNotification = async (id: string): Promise<NotificationItem[]
   if (!deletedSuccessfully) {
     throw new Error(
       deleteError?.message || 
-      "Database deletion failed: No rows were deleted. Please execute migration 00012_fix_notification_deletion.sql in Supabase SQL Editor."
+      "Database deletion failed: No rows were deleted."
     );
   }
 
@@ -161,7 +192,6 @@ export const deleteNotification = async (id: string): Promise<NotificationItem[]
     window.dispatchEvent(new Event('notifications_updated'));
   }
 
-  // 4. Re-fetch fresh notifications list from database to ensure UI is in sync with database
   return getNotifications();
 };
 
@@ -182,8 +212,6 @@ export const clearAllReadNotifications = async (): Promise<NotificationItem[]> =
     .eq('is_read', true)
     .select();
 
-  console.log('[notificationService] Direct Clear Read DELETE result:', { data: deleteData, error: deleteError });
-
   let clearedCount = deleteData ? deleteData.length : 0;
 
   // 2. Fallback: RPC clear_all_read_notifications if direct DELETE returned 0 rows
@@ -191,7 +219,6 @@ export const clearAllReadNotifications = async (): Promise<NotificationItem[]> =
     console.warn('[notificationService] Direct Clear DELETE returned 0 rows. Trying RPC clear_all_read_notifications...');
     try {
       const { data: rpcRes, error: rpcErr } = await (supabase.rpc as any)('clear_all_read_notifications');
-      console.log('[notificationService] RPC clear_all_read_notifications result:', { data: rpcRes, error: rpcErr });
       if (!rpcErr && typeof rpcRes === 'number') {
         clearedCount = rpcRes;
       }
@@ -203,7 +230,7 @@ export const clearAllReadNotifications = async (): Promise<NotificationItem[]> =
   if (deleteError && clearedCount === 0) {
     throw new Error(
       deleteError.message || 
-      "Failed to clear read notifications. Please execute migration 00012_fix_notification_deletion.sql in Supabase SQL Editor."
+      "Failed to clear read notifications."
     );
   }
 
@@ -241,17 +268,291 @@ export const addNotification = async (notif: Omit<NotificationItem, 'id' | 'time
     throw new Error(error?.message || "Failed to create notification.");
   }
 
-  return {
-    id: data.id,
-    title: data.title,
-    shortMessage: data.short_message,
-    fullMessage: data.full_message || data.short_message,
-    time: 'Just now',
-    timestamp: 'Just now',
-    isRead: false,
-    source: data.source,
-    category: data.category,
-    type: data.type,
-    relatedLink: data.related_link
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('notifications_updated'));
+  }
+
+  return mapDBRowToNotificationItem(data);
+};
+
+/**
+ * IDEMPOTENT SINGLE NOTIFICATION CREATION
+ * Skips insertion if an identical notification (userId + title + relatedLink) already exists.
+ */
+export const createNotificationIdempotent = async (params: {
+  userId: string;
+  title: string;
+  shortMessage: string;
+  fullMessage?: string;
+  source?: string;
+  category?: string;
+  type?: string;
+  relatedLink?: string;
+}): Promise<boolean> => {
+  try {
+    if (params.relatedLink) {
+      const { data: existing } = await (supabase as any)
+        .from('notifications')
+        .select('id')
+        .eq('user_id', params.userId)
+        .eq('title', params.title)
+        .eq('related_link', params.relatedLink)
+        .limit(1);
+
+      if (existing && existing.length > 0) {
+        return false;
+      }
+    }
+
+    const { error } = await (supabase as any).from('notifications').insert({
+      user_id: params.userId,
+      title: params.title,
+      short_message: params.shortMessage,
+      full_message: params.fullMessage || params.shortMessage,
+      source: params.source || 'System',
+      category: params.category || 'Academic',
+      type: params.type || 'Notification',
+      related_link: params.relatedLink || null,
+      is_read: false
+    });
+
+    if (error) {
+      console.warn('[notificationService] createNotificationIdempotent insert error:', error.message);
+      return false;
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('notifications_updated'));
+    }
+    return true;
+  } catch (err) {
+    console.warn('[notificationService] createNotificationIdempotent failed:', err);
+    return false;
+  }
+};
+
+/**
+ * IDEMPOTENT BATCH NOTIFICATIONS CREATION
+ * Delivers notifications to multiple recipients safely and prevents duplicate alerts.
+ */
+export const createBatchNotificationsIdempotent = async (
+  recipientUserIds: string[],
+  notificationData: {
+    title: string;
+    shortMessage: string;
+    fullMessage?: string;
+    source?: string;
+    category?: string;
+    type?: string;
+    relatedLink?: string;
+  }
+): Promise<number> => {
+  if (!recipientUserIds || recipientUserIds.length === 0) return 0;
+
+  const uniqueUserIds = Array.from(new Set(recipientUserIds.filter(Boolean)));
+  if (uniqueUserIds.length === 0) return 0;
+
+  try {
+    let usersToNotify = uniqueUserIds;
+    if (notificationData.relatedLink) {
+      const { data: existing } = await (supabase as any)
+        .from('notifications')
+        .select('user_id')
+        .in('user_id', uniqueUserIds)
+        .eq('title', notificationData.title)
+        .eq('related_link', notificationData.relatedLink);
+
+      if (existing && existing.length > 0) {
+        const alreadyNotified = new Set(existing.map((e: any) => e.user_id));
+        usersToNotify = uniqueUserIds.filter(id => !alreadyNotified.has(id));
+      }
+    }
+
+    if (usersToNotify.length === 0) return 0;
+
+    const rows = usersToNotify.map(uid => ({
+      user_id: uid,
+      title: notificationData.title,
+      short_message: notificationData.shortMessage,
+      full_message: notificationData.fullMessage || notificationData.shortMessage,
+      source: notificationData.source || 'System',
+      category: notificationData.category || 'Academic',
+      type: notificationData.type || 'Notification',
+      related_link: notificationData.relatedLink || null,
+      is_read: false
+    }));
+
+    const { error } = await (supabase as any).from('notifications').insert(rows);
+    if (error) {
+      console.warn('[notificationService] Batch insert error:', error.message);
+      return 0;
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('notifications_updated'));
+    }
+    return rows.length;
+  } catch (err) {
+    console.warn('[notificationService] createBatchNotificationsIdempotent error:', err);
+    return 0;
+  }
+};
+
+/**
+ * Plays a subtle, non-intrusive notification chime using the Web Audio API.
+ * Respects user sound preference in localStorage ('notification_sound_enabled' !== 'false').
+ * Zero external audio asset dependencies, 100% offline-ready.
+ */
+export const playNotificationSound = () => {
+  try {
+    if (typeof window === 'undefined') return;
+    const pref = localStorage.getItem('notification_sound_enabled');
+    if (pref === 'false') return;
+
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextClass) return;
+
+    const ctx = new AudioContextClass();
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'sine';
+    // Gentle high-low pleasant chime: 587Hz (D5) -> 880Hz (A5)
+    osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.08);
+
+    gain.gain.setValueAtTime(0.06, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start();
+    osc.stop(ctx.currentTime + 0.3);
+  } catch (e) {
+    // AudioContext blocked or restricted by browser autoplay policy - silently ignore
+  }
+};
+
+// Singleton Realtime Subscription State
+let activeChannel: any = null;
+let activeSubscribedUserId: string | null = null;
+const activeListeners = new Set<(payload?: any) => void>();
+let fallbackIntervalId: any = null;
+
+export const teardownNotificationChannel = () => {
+  if (activeChannel) {
+    try {
+      (supabase as any).removeChannel(activeChannel);
+    } catch (e) {
+      console.warn('[notificationService] Error removing channel:', e);
+    }
+    activeChannel = null;
+    activeSubscribedUserId = null;
+  }
+  if (fallbackIntervalId) {
+    clearInterval(fallbackIntervalId);
+    fallbackIntervalId = null;
+  }
+  activeListeners.clear();
+};
+
+/**
+ * REALTIME NOTIFICATIONS SUBSCRIPTION (SINGLETON)
+ * Maintains exactly one active Supabase channel per authenticated user.
+ * Dispatches 'new_notification_alert' on INSERT and 'notifications_updated' on all mutation events.
+ * Prevents duplicate channel subscriptions, memory leaks, and duplicate toast alerts.
+ */
+export const subscribeToNotifications = (
+  userId: string,
+  onNotificationChange: (payload?: any) => void
+): (() => void) => {
+  if (!userId) return () => {};
+
+  activeListeners.add(onNotificationChange);
+
+  // If already subscribed to this user's channel, register the listener and return unbind
+  if (activeChannel && activeSubscribedUserId === userId) {
+    return () => {
+      activeListeners.delete(onNotificationChange);
+      if (activeListeners.size === 0) {
+        teardownNotificationChannel();
+      }
+    };
+  }
+
+  // If channel is open for a different user, tear down first
+  if (activeChannel && activeSubscribedUserId !== userId) {
+    teardownNotificationChannel();
+  }
+
+  activeSubscribedUserId = userId;
+
+  try {
+    activeChannel = (supabase as any)
+      .channel(`public:notifications:${userId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'notifications',
+          filter: `user_id=eq.${userId}`
+        },
+        (payload: any) => {
+          // If a new notification is inserted, dispatch a toast alert
+          if (payload?.eventType === 'INSERT' && payload.new) {
+            const notif = mapDBRowToNotificationItem(payload.new);
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('new_notification_alert', { detail: notif }));
+            }
+          }
+
+          // Trigger unread counter refresh across all shells
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new Event('notifications_updated'));
+          }
+
+          // Notify all component listeners
+          activeListeners.forEach((listener) => {
+            try {
+              listener(payload);
+            } catch (err) {
+              console.error('[notificationService] Listener callback error:', err);
+            }
+          });
+        }
+      )
+      .subscribe((status: string) => {
+        if (status === 'CHANNEL_ERROR') {
+          console.warn('[notificationService] Realtime channel connection issue, fallback active.');
+        }
+      });
+
+    // Controlled fallback mechanism: check unread count on tab focus and periodic idle interval
+    if (typeof window !== 'undefined' && !fallbackIntervalId) {
+      const handleWindowFocus = () => {
+        window.dispatchEvent(new Event('notifications_updated'));
+      };
+      window.addEventListener('focus', handleWindowFocus);
+
+      // Periodic check every 45s as a fallback when realtime is delayed or unavailable
+      fallbackIntervalId = setInterval(() => {
+        window.dispatchEvent(new Event('notifications_updated'));
+      }, 45000);
+    }
+  } catch (err) {
+    console.error('[notificationService] Subscription failed:', err);
+  }
+
+  return () => {
+    activeListeners.delete(onNotificationChange);
+    if (activeListeners.size === 0) {
+      teardownNotificationChannel();
+    }
   };
 };

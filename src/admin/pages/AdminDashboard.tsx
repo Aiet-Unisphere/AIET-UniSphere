@@ -6,6 +6,7 @@ import { StatCard } from '../../components/StatCard';
 import { getUsers } from '../../services/userService';
 import { getAuditLogs } from '../../services/auditService';
 import { getDepartmentSummaries, type DepartmentSummary } from '../../services/departmentService';
+import { getInstitutionStudentMetrics, type InstitutionStudentMetrics } from '../../services/studentStatisticsService';
 import type { User } from '../../shared/types/user';
 import type { AuditLogEvent } from '../../services/auditService';
 
@@ -14,6 +15,7 @@ export const AdminDashboard: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogEvent[]>([]);
   const [departments, setDepartments] = useState<DepartmentSummary[]>([]);
+  const [studentMetrics, setStudentMetrics] = useState<InstitutionStudentMetrics | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -21,14 +23,16 @@ export const AdminDashboard: React.FC = () => {
     const loadDashboardData = async () => {
       setLoading(true);
       try {
-        const [usersData, logsData, departmentData] = await Promise.all([
+        const [usersData, logsData, departmentData, metricsData] = await Promise.all([
           getUsers(),
           getAuditLogs(),
-          getDepartmentSummaries()
+          getDepartmentSummaries(),
+          getInstitutionStudentMetrics()
         ]);
         setUsers(usersData);
         setAuditLogs(logsData);
         setDepartments(departmentData);
+        setStudentMetrics(metricsData);
       } catch (err) {
         setLoadError(err instanceof Error ? err.message : 'Unable to load admin dashboard data.');
         console.error("Error loading admin dashboard data:", err);
@@ -40,7 +44,10 @@ export const AdminDashboard: React.FC = () => {
   }, []);
 
   const totalCount = users.length;
-  const studentCount = users.filter(u => u.role === 'STUDENT').length;
+  const canonicalStudentCount = studentMetrics ? studentMetrics.totalRegistered : users.filter(u => u.role === 'STUDENT').length;
+  const studentActiveCount = studentMetrics ? studentMetrics.totalActive : users.filter(u => u.role === 'STUDENT' && u.status === 'Active').length;
+  const studentInactiveCount = studentMetrics ? studentMetrics.totalInactive : users.filter(u => u.role === 'STUDENT' && u.status !== 'Active').length;
+  const studentIncompleteCount = studentMetrics ? studentMetrics.totalIncomplete : 0;
   const facultyCount = users.filter(u => u.role === 'FACULTY').length;
   const hodCount = users.filter(u => u.role === 'HOD').length;
   const adminCount = users.filter(u => u.role === 'ADMIN').length;
@@ -49,6 +56,10 @@ export const AdminDashboard: React.FC = () => {
   const inactiveCount = users.filter(u => u.status === 'Inactive').length;
   const lockedCount = users.filter(u => u.status === 'Locked').length;
   const pendingCount = users.filter(u => u.status === 'Pending').length;
+
+  const deptStudentMap = new Map(
+    (studentMetrics?.byDepartment || []).map(d => [d.departmentId, d])
+  );
 
   return (
     <AdminAppShell>
@@ -92,8 +103,8 @@ export const AdminDashboard: React.FC = () => {
         />
         <StatCard
           title="STUDENTS"
-          value={studentCount}
-          subtitle="Enrolled Learners"
+          value={canonicalStudentCount}
+          subtitle={`${studentActiveCount} Active · ${studentInactiveCount} Inactive · ${studentIncompleteCount} Incomplete Profiles`}
           icon={<UserCheck size={22} />}
         />
         <StatCard
@@ -179,7 +190,9 @@ export const AdminDashboard: React.FC = () => {
                     </td>
                     <td style={{ padding: '0.85rem 1.25rem', fontWeight: 600 }}>{d.hodName}</td>
                     <td style={{ padding: '0.85rem 1.25rem' }} className="font-mono font-bold">{d.activeFacultyCount} / {d.facultyCount}</td>
-                    <td style={{ padding: '0.85rem 1.25rem' }} className="font-mono font-bold">{d.activeStudentCount} / {d.studentCount}</td>
+                    <td style={{ padding: '0.85rem 1.25rem' }} className="font-mono font-bold">
+                      {(deptStudentMap.get(d.id)?.active ?? d.activeStudentCount)} / {(deptStudentMap.get(d.id)?.total ?? d.studentCount)}
+                    </td>
                     <td style={{ padding: '0.85rem 1.25rem' }}>
                       <span className={`badge ${d.status === 'ACTIVE' ? 'badge-active' : 'badge-overdue'}`}>{d.status}</span>
                     </td>

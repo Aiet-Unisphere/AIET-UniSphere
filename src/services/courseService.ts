@@ -164,55 +164,187 @@ export const getFacultyCourses = async (): Promise<FacultyCourseItem[]> => {
   if (authError) throw new Error(`Unable to verify faculty session: ${authError.message}`);
   if (!user) return [];
 
-  const [enrollmentResult, profileResult] = await Promise.all([
+  // Query enrollments where faculty is assigned, timetable allocations, attendance sessions, and profile
+  const [enrollmentResult, timetableResult, sessionResult, profileResult] = await Promise.all([
     (supabase as any).from('course_enrollments')
       .select('course_id, course_name, course_code, semester, section, faculty_name, credits, student_id, department_id')
       .eq('faculty_id', user.id)
       .eq('status', 'Active'),
+    (supabase as any).from('timetable_entries')
+      .select('course_id, course_name, course_code, semester, section, faculty_name, department_id')
+      .eq('faculty_id', user.id),
+    (supabase as any).from('attendance_sessions')
+      .select('course_id, course_name, section, semester, department_id')
+      .eq('faculty_id', user.id),
     (supabase as any).from('profiles')
-      .select('full_name, department:departments(name)')
+      .select('full_name, department_id, department:departments(name)')
       .eq('id', user.id)
       .single(),
   ]);
-  if (enrollmentResult.error) throw new Error(`Unable to load assigned course enrollments: ${enrollmentResult.error.message}`);
-  if (profileResult.error) throw new Error(`Unable to load faculty profile: ${profileResult.error.message}`);
-  const enrollments = enrollmentResult.data || [];
-  const courseIds = [...new Set<string>(enrollments.map((row: any) => String(row.course_id)))];
-  if (!courseIds.length) return [];
 
-  const [assignmentsResult, assessmentsResult, sessionsResult] = await Promise.all([
-    (supabase as any).from('assignments').select('id, course_id, status').eq('created_by', user.id).in('course_id', courseIds),
-    (supabase as any).from('assessments').select('id, course_id, status').eq('created_by', user.id).in('course_id', courseIds),
-    (supabase as any).from('attendance_sessions').select('course_id, total_students, present_count, late_count').eq('faculty_id', user.id).in('course_id', courseIds),
-  ]);
-  for (const result of [assignmentsResult, assessmentsResult, sessionsResult]) {
-    if (result.error) throw new Error(`Unable to load faculty course metrics: ${result.error.message}`);
+  if (profileResult.error) throw new Error(`Unable to load faculty profile: ${profileResult.error.message}`);
+
+  const directEnrollments = enrollmentResult.data || [];
+  const timetableEntries = timetableResult.data || [];
+  const pastSessions = sessionResult.data || [];
+
+  // Map of courseId -> metadata
+  const courseMetaMap = new Map<string, {
+    courseId: string;
+    courseName: string;
+    courseCode?: string;
+    semester?: number;
+    section?: string;
+    credits?: number;
+    facultyName?: string;
+  }>();
+
+  for (const row of directEnrollments) {
+    if (!row.course_id) continue;
+    const cid = String(row.course_id);
+    if (!courseMetaMap.has(cid)) {
+      courseMetaMap.set(cid, {
+        courseId: cid,
+        courseName: row.course_name || cid,
+        courseCode: row.course_code || cid,
+        semester: row.semester != null ? Number(row.semester) : undefined,
+        section: row.section || undefined,
+        credits: Number(row.credits || 3),
+        facultyName: row.faculty_name || profileResult.data?.full_name,
+      });
+    }
   }
 
-  return courseIds.map((courseId) => {
-    const rows = enrollments.filter((row: any) => row.course_id === courseId);
-    const sample = rows[0];
-    const sessions = (sessionsResult.data || []).filter((row: any) => row.course_id === courseId);
+  for (const row of timetableEntries) {
+    if (!row.course_id) continue;
+    const cid = String(row.course_id);
+    if (!courseMetaMap.has(cid)) {
+      courseMetaMap.set(cid, {
+        courseId: cid,
+        courseName: row.course_name || cid,
+        courseCode: row.course_code || cid,
+        semester: row.semester != null ? Number(row.semester) : undefined,
+        section: row.section || undefined,
+        credits: 3,
+        facultyName: row.faculty_name || profileResult.data?.full_name,
+      });
+    }
+  }
+
+  for (const row of pastSessions) {
+    if (!row.course_id) continue;
+    const cid = String(row.course_id);
+    if (!courseMetaMap.has(cid)) {
+      courseMetaMap.set(cid, {
+        courseId: cid,
+        courseName: row.course_name || cid,
+        courseCode: cid,
+        semester: row.semester != null ? Number(row.semester) : undefined,
+        section: row.section || undefined,
+        credits: 3,
+        facultyName: profileResult.data?.full_name,
+      });
+    }
+  }
+
+  // If no courses directly assigned, check department fallback
+  if (courseMetaMap.size === 0 && profileResult.data?.department_id) {
+    const { data: deptEnrollments } = await (supabase as any)
+      .from('course_enrollments')
+      .select('course_id, course_name, course_code, semester, section, faculty_name, credits, student_id, department_id')
+      .eq('department_id', profileResult.data.department_id)
+      .eq('status', 'Active');
+
+    if (deptEnrollments && deptEnrollments.length > 0) {
+      for (const row of deptEnrollments) {
+        if (!row.course_id) continue;
+        const cid = String(row.course_id);
+        if (!courseMetaMap.has(cid)) {
+          courseMetaMap.set(cid, {
+            courseId: cid,
+            courseName: row.course_name || cid,
+            courseCode: row.course_code || cid,
+            semester: row.semester != null ? Number(row.semester) : undefined,
+            section: row.section || undefined,
+            credits: Number(row.credits || 3),
+            facultyName: row.faculty_name || profileResult.data?.full_name,
+          });
+        }
+      }
+    }
+  }
+
+  const courseIds = Array.from(courseMetaMap.keys());
+  if (!courseIds.length) return [];
+
+  // Query enrolled students for these courses (matching course_id or course_code)
+  const courseCodes = Array.from(new Set(Array.from(courseMetaMap.values()).map(c => c.courseCode).filter(Boolean))) as string[];
+
+  const [allEnrollmentsRes, assignmentsResult, assessmentsResult, sessionsResult] = await Promise.all([
+    (supabase as any).from('course_enrollments')
+      .select('course_id, course_code, student_id, status')
+      .eq('status', 'Active')
+      .or(`faculty_id.eq.${user.id},course_id.in.(${courseIds.join(',')})${courseCodes.length ? `,course_code.in.(${courseCodes.join(',')})` : ''}`),
+    (supabase as any).from('assignments')
+      .select('id, course_id, status')
+      .in('course_id', courseIds),
+    (supabase as any).from('assessments')
+      .select('id, course_id, status')
+      .in('course_id', courseIds),
+    (supabase as any).from('attendance_sessions')
+      .select('course_id, total_students, present_count, late_count')
+      .in('course_id', courseIds),
+  ]);
+
+  const activeEnrollments = allEnrollmentsRes.data || directEnrollments;
+
+  return Promise.all(courseIds.map(async (courseId) => {
+    const meta = courseMetaMap.get(courseId)!;
+    const courseCode = meta.courseCode || courseId;
+
+    // Match enrolled students by course_id OR course_code
+    const matchingEnrollments = activeEnrollments.filter(
+      (row: any) => row.course_id === courseId || (row.course_code && row.course_code === courseCode)
+    );
+    const uniqueStudents = new Set(matchingEnrollments.map((row: any) => row.student_id).filter(Boolean));
+
+    let resolvedStudentCount = uniqueStudents.size;
+    if (resolvedStudentCount === 0) {
+      try {
+        const { getEligibleStudentCountForCourse } = await import('./studentStatisticsService');
+        resolvedStudentCount = await getEligibleStudentCountForCourse({
+          courseCode,
+          section: meta.section,
+          semester: meta.semester
+        });
+      } catch (err) {
+        console.warn('[courseService] getEligibleStudentCountForCourse fallback error:', err);
+      }
+    }
+
+    const sessions = (sessionsResult.data || []).filter(
+      (row: any) => row.course_id === courseId || row.course_id === courseCode
+    );
     const totalStudentsInSessions = sessions.reduce((total: number, row: any) => total + Number(row.total_students || 0), 0);
     const attended = sessions.reduce((total: number, row: any) => total + Number(row.present_count || 0) + Number(row.late_count || 0), 0);
-    const uniqueStudents = new Set(rows.map((row: any) => row.student_id));
+
     return {
       id: courseId,
-      code: sample.course_code || courseId,
-      name: sample.course_name,
-      credits: Number(sample.credits || 3),
-      semester: sample.semester == null ? undefined : Number(sample.semester),
-      section: sample.section || undefined,
-      facultyName: sample.faculty_name || profileResult.data?.full_name || undefined,
-      studentCount: uniqueStudents.size,
-      activeAssignmentsCount: (assignmentsResult.data || []).filter((row: any) => row.course_id === courseId && !['Closed', 'Completed'].includes(row.status)).length,
-      upcomingAssessmentsCount: (assessmentsResult.data || []).filter((row: any) => row.course_id === courseId && ['Draft', 'Upcoming', 'Active'].includes(row.status)).length,
+      code: courseCode,
+      name: meta.courseName,
+      credits: Number(meta.credits || 3),
+      semester: meta.semester,
+      section: meta.section,
+      facultyName: meta.facultyName || profileResult.data?.full_name || 'Not assigned',
+      studentCount: resolvedStudentCount,
+      activeAssignmentsCount: (assignmentsResult.data || []).filter((row: any) => (row.course_id === courseId || row.course_id === courseCode) && !['Closed', 'Completed'].includes(row.status)).length,
+      upcomingAssessmentsCount: (assessmentsResult.data || []).filter((row: any) => (row.course_id === courseId || row.course_id === courseCode) && ['Draft', 'Upcoming', 'Active'].includes(row.status)).length,
       averageAttendancePercent: totalStudentsInSessions ? Math.round((attended / totalStudentsInSessions) * 100) : null,
       department: profileResult.data?.department?.name || 'Department not assigned',
-      faculty: sample.faculty_name || profileResult.data?.full_name || 'Not assigned',
+      faculty: meta.facultyName || profileResult.data?.full_name || 'Not assigned',
       modules: [],
     };
-  });
+  }));
 };
 
 export const getDepartmentCourses = async (): Promise<FacultyCourseItem[]> => {
@@ -247,12 +379,27 @@ export const getDepartmentCourses = async (): Promise<FacultyCourseItem[]> => {
     if (result.error) throw new Error(`Unable to load department course metrics: ${result.error.message}`);
   }
 
-  return courseIds.map(courseId => {
+  return Promise.all(courseIds.map(async courseId => {
     const rows = enrollments.filter((row: any) => String(row.course_id) === courseId);
     const sample = rows[0];
     const sessions = (sessionsResult.data || []).filter((row: any) => String(row.course_id) === courseId);
     const sessionTotal = sessions.reduce((sum: number, row: any) => sum + Number(row.total_students || 0), 0);
     const attended = sessions.reduce((sum: number, row: any) => sum + Number(row.present_count || 0) + Number(row.late_count || 0), 0);
+
+    let resolvedCount = new Set(rows.map((row: any) => row.student_id)).size;
+    if (resolvedCount === 0) {
+      try {
+        const { getEligibleStudentCountForCourse } = await import('./studentStatisticsService');
+        resolvedCount = await getEligibleStudentCountForCourse({
+          courseCode: sample.course_code || courseId,
+          section: sample.section || undefined,
+          semester: sample.semester == null ? undefined : Number(sample.semester)
+        });
+      } catch (err) {
+        console.warn('[courseService] getDepartmentCourses student count fallback error:', err);
+      }
+    }
+
     return {
       id: courseId,
       code: sample.course_code || courseId,
@@ -261,7 +408,7 @@ export const getDepartmentCourses = async (): Promise<FacultyCourseItem[]> => {
       semester: sample.semester == null ? undefined : Number(sample.semester),
       section: sample.section || undefined,
       facultyName: sample.faculty_name || 'Not assigned',
-      studentCount: new Set(rows.map((row: any) => row.student_id)).size,
+      studentCount: resolvedCount,
       activeAssignmentsCount: (assignmentsResult.data || []).filter((row: any) => String(row.course_id) === courseId && !['Closed', 'Completed'].includes(row.status)).length,
       upcomingAssessmentsCount: (assessmentsResult.data || []).filter((row: any) => String(row.course_id) === courseId && ['Draft', 'Upcoming', 'Active'].includes(row.status)).length,
       averageAttendancePercent: sessionTotal ? Math.round((attended / sessionTotal) * 100) : null,
@@ -269,7 +416,7 @@ export const getDepartmentCourses = async (): Promise<FacultyCourseItem[]> => {
       faculty: sample.faculty_name || 'Not assigned',
       modules: [],
     };
-  });
+  }));
 };
 
 export const getCourseById = async (id: string): Promise<Course | undefined> => {
@@ -745,9 +892,11 @@ export const getAvailableDepartmentCourses = async (): Promise<{ code: string; n
 
     if (!prof?.department_id) return [];
 
-    const [assgRes, assessRes] = await Promise.all([
+    const [assgRes, assessRes, ttRes, ceRes] = await Promise.all([
       (supabase as any).from('assignments').select('course_id, course_name').eq('department_id', prof.department_id),
-      (supabase as any).from('assessments').select('course_id, course_name, course_code').eq('department_id', prof.department_id)
+      (supabase as any).from('assessments').select('course_id, course_name, course_code').eq('department_id', prof.department_id),
+      (supabase as any).from('timetable_entries').select('course_id, course_name, course_code').eq('department_id', prof.department_id),
+      (supabase as any).from('course_enrollments').select('course_id, course_name, course_code').eq('department_id', prof.department_id),
     ]);
 
     const courseMap = new Map<string, string>();
@@ -758,9 +907,129 @@ export const getAvailableDepartmentCourses = async (): Promise<{ code: string; n
       const code = (a.course_code || a.course_id || '').toUpperCase();
       if (code && a.course_name) courseMap.set(code, a.course_name);
     });
+    (ttRes.data || []).forEach((t: any) => {
+      const code = (t.course_code || t.course_id || '').toUpperCase();
+      if (code && t.course_name) courseMap.set(code, t.course_name);
+    });
+    (ceRes.data || []).forEach((c: any) => {
+      const code = (c.course_code || c.course_id || '').toUpperCase();
+      if (code && c.course_name) courseMap.set(code, c.course_name);
+    });
 
     return Array.from(courseMap.entries()).map(([code, name]) => ({ code, name }));
   } catch (err) {
+    return [];
+  }
+};
+
+/**
+ * Fetches distinct courses/subjects explicitly allocated to the authenticated faculty member.
+ * Sources authoritative allocations from:
+ * 1. course_enrollments where faculty_id = user.id
+ * 2. timetable_entries where faculty_id = user.id
+ * 3. assignments or assessments where faculty_id = user.id
+ * 4. attendance_sessions where faculty_id = user.id
+ * If the user is an HOD or Admin, returns all department courses.
+ */
+export const getAllocatedCoursesForFaculty = async (): Promise<{ code: string; name: string; section?: string; semester?: number }[]> => {
+  try {
+    const { data: { user } } = await (supabase as any).auth.getUser();
+    if (!user) return [];
+
+    const { data: prof } = await (supabase as any)
+      .from('profiles')
+      .select('id, role, department_id')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    if (!prof) return [];
+
+    // HOD and Admin have visibility over all department subjects
+    if (prof.role === 'HOD' || prof.role === 'ADMIN') {
+      const deptCourses = await getAvailableDepartmentCourses();
+      return deptCourses.map(c => ({ code: c.code, name: c.name }));
+    }
+
+    const [enrollmentRes, timetableRes, sessionRes, assignmentRes, assessmentRes] = await Promise.all([
+      (supabase as any).from('course_enrollments')
+        .select('course_id, course_name, course_code, section, semester')
+        .eq('faculty_id', user.id)
+        .eq('status', 'Active'),
+      (supabase as any).from('timetable_entries')
+        .select('course_id, course_name, course_code, section, semester')
+        .eq('faculty_id', user.id),
+      (supabase as any).from('attendance_sessions')
+        .select('course_id, course_name, section, semester')
+        .eq('faculty_id', user.id),
+      (supabase as any).from('assignments')
+        .select('course_id, course_name')
+        .eq('faculty_id', user.id),
+      (supabase as any).from('assessments')
+        .select('course_id, course_name, course_code')
+        .eq('created_by', user.id),
+    ]);
+
+    const courseMap = new Map<string, { code: string; name: string; section?: string; semester?: number }>();
+
+    (enrollmentRes.data || []).forEach((e: any) => {
+      const code = (e.course_code || e.course_id || '').toUpperCase().trim();
+      if (code && !courseMap.has(code)) {
+        courseMap.set(code, {
+          code,
+          name: e.course_name || code,
+          section: e.section || undefined,
+          semester: e.semester != null ? Number(e.semester) : undefined
+        });
+      }
+    });
+
+    (timetableRes.data || []).forEach((t: any) => {
+      const code = (t.course_code || t.course_id || '').toUpperCase().trim();
+      if (code && !courseMap.has(code)) {
+        courseMap.set(code, {
+          code,
+          name: t.course_name || code,
+          section: t.section || undefined,
+          semester: t.semester != null ? Number(t.semester) : undefined
+        });
+      }
+    });
+
+    (assignmentRes.data || []).forEach((a: any) => {
+      const code = (a.course_id || '').toUpperCase().trim();
+      if (code && !courseMap.has(code)) {
+        courseMap.set(code, {
+          code,
+          name: a.course_name || code
+        });
+      }
+    });
+
+    (assessmentRes.data || []).forEach((a: any) => {
+      const code = (a.course_code || a.course_id || '').toUpperCase().trim();
+      if (code && !courseMap.has(code)) {
+        courseMap.set(code, {
+          code,
+          name: a.course_name || code
+        });
+      }
+    });
+
+    (sessionRes.data || []).forEach((s: any) => {
+      const code = (s.course_id || '').toUpperCase().trim();
+      if (code && !courseMap.has(code)) {
+        courseMap.set(code, {
+          code,
+          name: s.course_name || code,
+          section: s.section || undefined,
+          semester: s.semester != null ? Number(s.semester) : undefined
+        });
+      }
+    });
+
+    return Array.from(courseMap.values());
+  } catch (err) {
+    console.error('Failed to get allocated courses for faculty:', err);
     return [];
   }
 };
