@@ -1,12 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { 
   FolderGit2, 
   GitBranch, 
   GitCommit, 
   GitPullRequest, 
   RefreshCw,
-  Terminal,
   AlertTriangle,
   FolderSync,
   CheckCircle2,
@@ -49,6 +47,8 @@ import {
   clearWorkspaceChanges,
   getRateLimitDiagnostics,
   generateGitHubOAuthState,
+  getGitHubRedirectUri,
+  getGitHubClientId,
   type RateLimitDiagnostics
 } from '../services/githubService';
 import { useAuth } from '../app/context/AuthContext';
@@ -56,7 +56,6 @@ import { useAuth } from '../app/context/AuthContext';
 type GitTab = 'overview' | 'branches' | 'commits' | 'changes';
 
 export const GitGithubPage: React.FC = () => {
-  const navigate = useNavigate();
   const { user } = useAuth();
 
   const [connection, setConnection] = useState<GitHubConnection | null>(null);
@@ -92,7 +91,7 @@ export const GitGithubPage: React.FC = () => {
           visibility: 'Public',
           defaultBranch: 'main',
           currentBranch: 'main',
-          lastCommit: 'GitHub authentication failed or not connected',
+          lastCommit: 'Not Connected',
           status: 'Not Connected',
           githubConnected: false,
           githubUsername: '',
@@ -114,6 +113,26 @@ export const GitGithubPage: React.FC = () => {
         if (repos.length > 0) {
           selected = repos[0];
           await saveSelectedRepository(selected);
+        } else {
+          setRepo({
+            id: 'no-repos',
+            name: 'No Repositories Found',
+            owner: conn.githubUsername,
+            visibility: 'Public',
+            defaultBranch: 'main',
+            currentBranch: 'main',
+            lastCommit: 'None',
+            status: 'Connected',
+            githubConnected: true,
+            githubUsername: conn.githubUsername,
+            starsCount: 0,
+            forksCount: 0,
+            cloneUrl: ''
+          });
+          setBranches([]);
+          setCommits([]);
+          setChanges({ modified: [], added: [], deleted: [] });
+          return;
         }
       }
 
@@ -146,14 +165,14 @@ export const GitGithubPage: React.FC = () => {
 
   // Connect GitHub Handler with CSRF State Protection
   const handleConnectGitHub = async () => {
-    const clientId = import.meta.env.VITE_GITHUB_CLIENT_ID;
+    const clientId = getGitHubClientId();
     if (clientId) {
       const state = generateGitHubOAuthState();
-      const redirectUri = `${window.location.origin}/student/github/callback`;
+      const redirectUri = getGitHubRedirectUri();
       const authUrl = `https://github.com/login/oauth/authorize?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=read:user%20repo&state=${encodeURIComponent(state)}`;
       window.location.href = authUrl;
     } else {
-      setError('GitHub OAuth is not configured. Set VITE_GITHUB_CLIENT_ID and configure the github-oauth Edge Function.');
+      setError('GitHub OAuth is not configured. Set VITE_GITHUB_CLIENT_ID or VITE_GITHUB_DEV_CLIENT_ID in your environment and deploy the github-oauth Edge Function.');
     }
   };
 
@@ -284,15 +303,6 @@ export const GitGithubPage: React.FC = () => {
           >
             <RefreshCw size={15} />
             Fetch / Sync
-          </button>
-          
-          <button 
-            className="btn btn-primary"
-            style={{ width: 'auto' }}
-            onClick={() => navigate('/student/project-workspace')}
-          >
-            <Terminal size={15} />
-            Open IDE Workspace
           </button>
         </div>
       </div>

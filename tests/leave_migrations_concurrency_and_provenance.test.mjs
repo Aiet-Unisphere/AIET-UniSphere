@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import fs from 'node:fs';
 
 const execFileAsync = promisify(execFile);
 const PSQL_PATH = process.env.PSQL_PATH || 'C:\\Program Files\\PostgreSQL\\16\\bin\\psql.exe';
@@ -45,6 +46,10 @@ async function runSqlFile(filePath, dbName = DB_NAME) {
 }
 
 test('Leave Migrations: Setup, Deterministic Provenance & Concurrency Suite', async (t) => {
+  if (!fs.existsSync(PSQL_PATH)) {
+    t.skip('Local PostgreSQL 16 binary not found at ' + PSQL_PATH);
+    return;
+  }
   // 1. Setup isolated test database
   await t.test('1. Setup clean isolated database and base schema', async () => {
     // Terminate connections & drop/create test database

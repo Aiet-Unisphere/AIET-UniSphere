@@ -30,15 +30,12 @@ const StudentProfilePage = React.lazy(() => import('./pages/StudentProfilePage')
 const TimetablePage = React.lazy(() => import('./pages/TimetablePage').then(m => ({ default: m.TimetablePage })));
 const AcademicCalendarPage = React.lazy(() => import('./pages/AcademicCalendarPage').then(m => ({ default: m.AcademicCalendarPage })));
 const ResultsPage = React.lazy(() => import('./pages/ResultsPage').then(m => ({ default: m.ResultsPage })));
+const MyNotesPage = React.lazy(() => import('./pages/MyNotesPage').then(m => ({ default: m.MyNotesPage })));
 const AnnouncementsPage = React.lazy(() => import('./pages/AnnouncementsPage').then(m => ({ default: m.AnnouncementsPage })));
 const AnnouncementDetail = React.lazy(() => import('./pages/AnnouncementDetail').then(m => ({ default: m.AnnouncementDetail })));
 
-// Phase 4 Project & GitHub Feature Pages
+// Phase 4 Git & GitHub Feature Pages
 const NotificationsPage = React.lazy(() => import('./pages/NotificationsPage').then(m => ({ default: m.NotificationsPage })));
-const ProjectsList = React.lazy(() => import('./pages/ProjectsList').then(m => ({ default: m.ProjectsList })));
-const MyProjectsList = React.lazy(() => import('./pages/MyProjectsList').then(m => ({ default: m.MyProjectsList })));
-const ProjectDetail = React.lazy(() => import('./pages/ProjectDetail').then(m => ({ default: m.ProjectDetail })));
-const ProjectWorkspace = React.lazy(() => import('./pages/ProjectWorkspace').then(m => ({ default: m.ProjectWorkspace })));
 const GitGithubPage = React.lazy(() => import('./pages/GitGithubPage').then(m => ({ default: m.GitGithubPage })));
 const GitHubCallbackPage = React.lazy(() => import('./pages/GitHubCallbackPage').then(m => ({ default: m.GitHubCallbackPage })));
 
@@ -135,17 +132,13 @@ const App: React.FC = () => {
             <Route path="/student/timetable" element={<RoleGuard allowedRoles={['STUDENT', 'ADMIN']}><TimetablePage /></RoleGuard>} />
             <Route path="/student/calendar" element={<RoleGuard allowedRoles={['STUDENT', 'ADMIN']}><AcademicCalendarPage /></RoleGuard>} />
             <Route path="/student/results" element={<RoleGuard allowedRoles={['STUDENT', 'ADMIN']}><ResultsPage /></RoleGuard>} />
+            <Route path="/student/notes" element={<RoleGuard allowedRoles={['STUDENT', 'ADMIN']}><MyNotesPage /></RoleGuard>} />
             <Route path="/student/announcements" element={<RoleGuard allowedRoles={['STUDENT', 'ADMIN']}><AnnouncementsPage /></RoleGuard>} />
             <Route path="/student/announcements/:id" element={<RoleGuard allowedRoles={['STUDENT', 'ADMIN']}><AnnouncementDetail /></RoleGuard>} />
             <Route path="/announcements" element={<Navigate to="/student/announcements" replace />} />
 
-            {/* Phase 4 Project & GitHub Feature Routes */}
+            {/* Phase 4 Git & GitHub Feature Routes */}
             <Route path="/student/notifications" element={<RoleGuard allowedRoles={['STUDENT', 'ADMIN']}><NotificationsPage /></RoleGuard>} />
-            <Route path="/student/projects" element={<RoleGuard allowedRoles={['STUDENT', 'ADMIN']}><ProjectsList /></RoleGuard>} />
-            <Route path="/student/projects/my" element={<RoleGuard allowedRoles={['STUDENT', 'ADMIN']}><MyProjectsList /></RoleGuard>} />
-            <Route path="/student/projects/:id" element={<RoleGuard allowedRoles={['STUDENT', 'ADMIN']}><ProjectDetail /></RoleGuard>} />
-            <Route path="/student/projects/:id/workspace" element={<RoleGuard allowedRoles={['STUDENT', 'ADMIN']}><ProjectWorkspace /></RoleGuard>} />
-            <Route path="/student/project-workspace" element={<RoleGuard allowedRoles={['STUDENT', 'ADMIN']}><ProjectWorkspace /></RoleGuard>} />
             <Route path="/student/github" element={<RoleGuard allowedRoles={['STUDENT', 'ADMIN']}><GitGithubPage /></RoleGuard>} />
             <Route path="/student/github/callback" element={<RoleGuard allowedRoles={['STUDENT', 'ADMIN']}><GitHubCallbackPage /></RoleGuard>} />
 

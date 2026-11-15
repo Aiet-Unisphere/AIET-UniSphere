@@ -11,6 +11,13 @@ serve(async (req) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
+  if (req.method !== "POST") {
+    return new Response(
+      JSON.stringify({ error: "Method not allowed." }),
+      { status: 405, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
   try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
@@ -50,7 +57,7 @@ serve(async (req) => {
     }
 
     const body = await req.json();
-    const { code, redirect_uri } = body;
+    const { code, redirect_uri, client_id: callerClientId } = body;
 
     if (!code) {
       return new Response(
@@ -59,8 +66,37 @@ serve(async (req) => {
       );
     }
 
-    const githubClientId = Deno.env.get("GITHUB_CLIENT_ID");
-    const githubClientSecret = Deno.env.get("GITHUB_CLIENT_SECRET");
+    // Resolve environment-specific credentials:
+    // Production credentials (default / production)
+    const prodClientId = Deno.env.get("GITHUB_PROD_CLIENT_ID") || Deno.env.get("GITHUB_CLIENT_ID");
+    const prodClientSecret = Deno.env.get("GITHUB_PROD_CLIENT_SECRET") || Deno.env.get("GITHUB_CLIENT_SECRET");
+
+    // Development credentials (optional dedicated app for local dev / port 5174)
+    const devClientId = Deno.env.get("GITHUB_DEV_CLIENT_ID");
+    const devClientSecret = Deno.env.get("GITHUB_DEV_CLIENT_SECRET");
+
+    // Check if redirect URI targets local development environment
+    const isDevRedirect = typeof redirect_uri === "string" && (
+      redirect_uri.includes("localhost") || 
+      redirect_uri.includes("127.0.0.1") ||
+      redirect_uri.includes(":5174") ||
+      redirect_uri.includes(":5173")
+    );
+
+    let githubClientId = prodClientId;
+    let githubClientSecret = prodClientSecret;
+
+    // Pair appropriate client ID and client secret
+    if (callerClientId && devClientId && callerClientId === devClientId) {
+      githubClientId = devClientId;
+      githubClientSecret = devClientSecret || prodClientSecret;
+    } else if (isDevRedirect && devClientId && devClientSecret) {
+      githubClientId = devClientId;
+      githubClientSecret = devClientSecret;
+    } else if (callerClientId && prodClientId && callerClientId === prodClientId) {
+      githubClientId = prodClientId;
+      githubClientSecret = prodClientSecret;
+    }
 
     if (!githubClientId || !githubClientSecret) {
       return new Response(

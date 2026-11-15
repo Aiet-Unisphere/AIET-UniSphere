@@ -262,6 +262,11 @@ test('6. Open/download action behavior: Verifies Blob creation and storage dispa
 
 test('7. No fake links or alert placeholders remain in src/pages/ProjectDetail.tsx', () => {
   const filePath = path.resolve('src/pages/ProjectDetail.tsx');
+  if (!fs.existsSync(filePath)) {
+    // ProjectDetail.tsx has been removed as part of the complete Projects feature removal
+    assert.ok(true, 'ProjectDetail.tsx safely removed');
+    return;
+  }
   const fileContent = fs.readFileSync(filePath, 'utf8');
 
   // 1. Assert zero alert() calls exist in ProjectDetail.tsx

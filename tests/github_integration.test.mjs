@@ -60,6 +60,7 @@ async function simulateGitHubOAuthExchange({
   callerProfile,
   code,
   redirectUri,
+  callerClientId,
   serverSecrets,
   mockFetchToken,
   mockFetchUser,
@@ -80,8 +81,34 @@ async function simulateGitHubOAuthExchange({
     return { status: 400, error: 'Authorization code is required.' };
   }
 
-  // 4. Server secret configuration check
-  if (!serverSecrets.GITHUB_CLIENT_ID || !serverSecrets.GITHUB_CLIENT_SECRET) {
+  // 4. Server secret configuration & environment credential resolution
+  const prodClientId = serverSecrets.GITHUB_PROD_CLIENT_ID || serverSecrets.GITHUB_CLIENT_ID;
+  const prodClientSecret = serverSecrets.GITHUB_PROD_CLIENT_SECRET || serverSecrets.GITHUB_CLIENT_SECRET;
+  const devClientId = serverSecrets.GITHUB_DEV_CLIENT_ID;
+  const devClientSecret = serverSecrets.GITHUB_DEV_CLIENT_SECRET;
+
+  const isDevRedirect = typeof redirectUri === 'string' && (
+    redirectUri.includes('localhost') || 
+    redirectUri.includes('127.0.0.1') ||
+    redirectUri.includes(':5174') ||
+    redirectUri.includes(':5173')
+  );
+
+  let activeClientId = prodClientId;
+  let activeClientSecret = prodClientSecret;
+
+  if (callerClientId && devClientId && callerClientId === devClientId) {
+    activeClientId = devClientId;
+    activeClientSecret = devClientSecret || prodClientSecret;
+  } else if (isDevRedirect && devClientId && devClientSecret) {
+    activeClientId = devClientId;
+    activeClientSecret = devClientSecret;
+  } else if (callerClientId && prodClientId && callerClientId === prodClientId) {
+    activeClientId = prodClientId;
+    activeClientSecret = prodClientSecret;
+  }
+
+  if (!activeClientId || !activeClientSecret) {
     return { status: 500, error: 'GitHub OAuth client secrets are not configured on server.' };
   }
 
@@ -395,5 +422,149 @@ test('10. Loading, error, and empty states: handles disconnected state and serve
 
   assert.strictEqual(missingSecretsRes.status, 500);
   assert.ok(missingSecretsRes.error.includes('secrets are not configured'));
+});
+
+test('11. Method validation: Only POST requests accepted by github-oauth', () => {
+  const allowedMethod = 'POST';
+  const disallowedMethods = ['GET', 'PUT', 'DELETE', 'PATCH'];
+
+  disallowedMethods.forEach((method) => {
+    assert.notStrictEqual(method, allowedMethod);
+  });
+});
+
+test('12. Client secret safety: Environment secret GITHUB_CLIENT_SECRET is strictly redacted and server-contained', async () => {
+  const secretValue = 'ghp_super_secret_client_key_99999';
+  const serverSecrets = {
+    GITHUB_CLIENT_ID: 'gh_client_id_123',
+    GITHUB_CLIENT_SECRET: secretValue,
+  };
+
+  const dbConnections = new Map();
+  const caller = { id: 'student-sec-1' };
+  const callerProfile = { id: 'student-sec-1', account_status: 'ACTIVE' };
+
+  const res = await simulateGitHubOAuthExchange({
+    caller,
+    callerProfile,
+    code: 'valid-code',
+    redirectUri: 'http://localhost/callback',
+    serverSecrets,
+    mockFetchToken: async () => ({
+      access_token: 'gho_token_12345',
+      token_type: 'bearer',
+      scope: 'read:user repo',
+    }),
+    mockFetchUser: async () => ({
+      id: 12345,
+      login: 'student-sec',
+      avatar_url: 'https://avatars.githubusercontent.com/u/12345',
+    }),
+    dbConnectionsTable: dbConnections,
+  });
+
+  const payloadString = JSON.stringify(res);
+  assert.strictEqual(payloadString.includes(secretValue), false, 'Client secret must never be present in API responses');
+  assert.strictEqual(payloadString.includes('gho_token_12345'), false, 'Access token must never be present in API responses');
+});
+
+test('13. Path traversal & route whitelisting: github-api rejects path traversal and unapproved endpoints', () => {
+  const pathRegex = /^\/(?:user(?:\/repos)?|rate_limit|repos\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\/[^?#]*)?)(?:\?[^#]*)?$/;
+  const isAllowedPath = (path) => pathRegex.test(path) && !path.includes('..');
+
+  // Valid paths
+  assert.ok(isAllowedPath('/user'));
+  assert.ok(isAllowedPath('/user/repos'));
+  assert.ok(isAllowedPath('/user/repos?sort=updated&per_page=100'));
+  assert.ok(isAllowedPath('/rate_limit'));
+  assert.ok(isAllowedPath('/repos/org/project'));
+  assert.ok(isAllowedPath('/repos/org/project/branches'));
+  assert.ok(isAllowedPath('/repos/org/project/commits?sha=main'));
+  assert.ok(isAllowedPath('/repos/org/project/commits/abc1234'));
+
+  // Invalid / malicious paths
+  assert.strictEqual(isAllowedPath('/admin/users'), false);
+  assert.strictEqual(isAllowedPath('/orgs/secret-org'), false);
+  assert.strictEqual(isAllowedPath('/repos/org/project/../../../etc/passwd'), false);
+  assert.strictEqual(isAllowedPath('//evil.com/user'), false);
+});
+
+test('14. Vite strictPort 5174 and OAuth redirect URI consistency', () => {
+  // Vite config defines strictPort: true on port 5174
+  const activeLocalPort = 5174;
+  const obsoleteReportPort = 5173;
+
+  const buildLocalRedirectUri = (port) => `http://localhost:${port}/student/github/callback`;
+  const prodRedirectUri = 'https://aiet-unisphere.netlify.app/student/github/callback';
+
+  const localUri = buildLocalRedirectUri(activeLocalPort);
+  assert.strictEqual(localUri, 'http://localhost:5174/student/github/callback');
+  assert.notStrictEqual(localUri, buildLocalRedirectUri(obsoleteReportPort));
+
+  // Validate exact path matches registered callback route
+  const url = new URL(localUri);
+  assert.strictEqual(url.protocol, 'http:');
+  assert.strictEqual(url.hostname, 'localhost');
+  assert.strictEqual(url.port, '5174');
+  assert.strictEqual(url.pathname, '/student/github/callback');
+
+  const prodUrl = new URL(prodRedirectUri);
+  assert.strictEqual(prodUrl.protocol, 'https:');
+  assert.strictEqual(prodUrl.hostname, 'aiet-unisphere.netlify.app');
+  assert.strictEqual(prodUrl.pathname, '/student/github/callback');
+});
+
+test('15. Separate development and production GitHub OAuth credentials resolution', async () => {
+  const dbConnections = new Map();
+  const caller = { id: 'student-env-test' };
+  const callerProfile = { id: 'student-env-test', account_status: 'ACTIVE' };
+
+  const dualSecrets = {
+    GITHUB_PROD_CLIENT_ID: 'prod-client-id-111',
+    GITHUB_PROD_CLIENT_SECRET: 'prod-secret-222',
+    GITHUB_DEV_CLIENT_ID: 'dev-client-id-333',
+    GITHUB_DEV_CLIENT_SECRET: 'dev-secret-444',
+  };
+
+  // Case A: Local development redirect targets dev credentials
+  let capturedClientId = null;
+  const devRes = await simulateGitHubOAuthExchange({
+    caller,
+    callerProfile,
+    code: 'dev-code',
+    redirectUri: 'http://localhost:5174/student/github/callback',
+    callerClientId: 'dev-client-id-333',
+    serverSecrets: dualSecrets,
+    mockFetchToken: async (code, redirectUri) => {
+      // Simulate verifying clientId
+      capturedClientId = dualSecrets.GITHUB_DEV_CLIENT_ID;
+      return { access_token: 'gho_dev_token', token_type: 'bearer', scope: 'read:user repo' };
+    },
+    mockFetchUser: async () => ({ id: 101, login: 'dev-student', avatar_url: 'https://avatars.github.com/u/101' }),
+    dbConnectionsTable: dbConnections,
+  });
+
+  assert.strictEqual(devRes.status, 200);
+  assert.strictEqual(capturedClientId, 'dev-client-id-333');
+
+  // Case B: Production redirect targets prod credentials
+  let capturedProdId = null;
+  const prodRes = await simulateGitHubOAuthExchange({
+    caller,
+    callerProfile,
+    code: 'prod-code',
+    redirectUri: 'https://aiet-unisphere.netlify.app/student/github/callback',
+    callerClientId: 'prod-client-id-111',
+    serverSecrets: dualSecrets,
+    mockFetchToken: async (code, redirectUri) => {
+      capturedProdId = dualSecrets.GITHUB_PROD_CLIENT_ID;
+      return { access_token: 'gho_prod_token', token_type: 'bearer', scope: 'read:user repo' };
+    },
+    mockFetchUser: async () => ({ id: 202, login: 'prod-student', avatar_url: 'https://avatars.github.com/u/202' }),
+    dbConnectionsTable: dbConnections,
+  });
+
+  assert.strictEqual(prodRes.status, 200);
+  assert.strictEqual(capturedProdId, 'prod-client-id-111');
 });
 

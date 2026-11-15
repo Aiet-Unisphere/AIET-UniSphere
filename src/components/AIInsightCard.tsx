@@ -1,5 +1,6 @@
 import React from 'react';
-import { Sparkles, Info } from 'lucide-react';
+import { Info } from 'lucide-react';
+import uniSphereLogo from '../assets/icon.png';
 
 export interface AIInsightCardProps {
   insight: string;
@@ -15,7 +16,7 @@ export const AIInsightCard: React.FC<AIInsightCardProps> = ({
   return (
     <div className="ai-insight-card">
       <div className="ai-badge">
-        {isInsufficientData ? <Info size={15} /> : <Sparkles size={15} />}
+        {isInsufficientData ? <Info size={15} /> : <img src={uniSphereLogo} alt="AIET-UniSphere AI" style={{ width: 15, height: 15, objectFit: 'contain' }} />}
         <span>{isInsufficientData ? 'Academic Insight' : 'AI Academic Insight'}</span>
       </div>
       <p className="ai-insight-text">

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Sparkles, MessageSquare, RotateCcw, Trash2, AlertCircle, RefreshCw, Building2, UserCheck } from 'lucide-react';
+import { MessageSquare, RotateCcw, Trash2, AlertCircle, RefreshCw, Building2, UserCheck } from 'lucide-react';
+import uniSphereLogo from '../../assets/icon.png';
 import { HODAppShell } from '../components/HODAppShell';
 import { LoadingState } from '../../components/LoadingState';
 import { AIMessage } from '../../components/AIMessage';
@@ -207,7 +208,7 @@ export const HODAIAssistantPage: React.FC = () => {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginTop: '0.25rem' }}>
-            <Sparkles size={24} className="text-orange" />
+            <img src={uniSphereLogo} alt="AIET-UniSphere" style={{ width: 24, height: 24, objectFit: 'contain' }} />
             <h1 style={{ fontSize: '1.75rem', fontWeight: 700 }}>Department Head AI Assistant</h1>
             <span className="badge badge-active font-mono" style={{ fontSize: '0.7rem' }}>Department Intelligence</span>
           </div>
@@ -291,7 +292,7 @@ export const HODAIAssistantPage: React.FC = () => {
                 /* Landing Experience */
                 <div className="ai-landing-experience">
                   <div className="ai-landing-icon-badge">
-                    <Sparkles size={32} className="text-orange" />
+                    <img src={uniSphereLogo} alt="AIET-UniSphere AI" style={{ width: 32, height: 32, objectFit: 'contain' }} />
                   </div>
                   <h2 className="ai-landing-title font-display">Department Governance AI</h2>
                   <p className="ai-landing-subtitle">
@@ -352,7 +353,7 @@ export const HODAIAssistantPage: React.FC = () => {
 
                   {isSending && (
                     <div className="ai-typing-indicator">
-                      <Sparkles size={16} className="text-orange animate-spin" />
+                      <img src={uniSphereLogo} alt="AIET-UniSphere AI" style={{ width: 16, height: 16, objectFit: 'contain' }} className="animate-spin" />
                       <span>HOD Department AI is gathering analytics and policy context...</span>
                     </div>
                   )}

@@ -63,8 +63,8 @@ export const RepositoryCard: React.FC<RepositoryCardProps> = ({
               <span className="badge badge-overdue" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
                 <XCircle size={13} /> Not Connected
               </span>
-              <span style={{ fontSize: '0.75rem', color: '#DC2626', marginTop: '0.15rem' }}>
-                GitHub authentication failed
+              <span style={{ fontSize: '0.75rem', color: 'var(--brand-dark-grey)', marginTop: '0.15rem' }}>
+                Account Not Linked
               </span>
             </div>
           )}

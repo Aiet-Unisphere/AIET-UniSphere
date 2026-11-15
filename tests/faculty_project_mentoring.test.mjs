@@ -251,7 +251,12 @@ test('6. Security: Departmental isolation prevents cross-department data exposur
 // 5. Real PostgreSQL 16 Engine Verification of Migration 00044
 // ---------------------------------------------------------------------------
 
-test('7. PostgreSQL 16 Engine: Migration 00044 executes cleanly and enforces department scoping', () => {
+test('7. PostgreSQL 16 Engine: Migration 00044 executes cleanly and enforces department scoping', (t) => {
+  const psqlPath = process.env.PSQL_PATH || 'C:\\Program Files\\PostgreSQL\\16\\bin\\psql.exe';
+  if (!fs.existsSync(psqlPath)) {
+    if (t?.skip) t.skip('Local PostgreSQL 16 binary not found at ' + psqlPath);
+    return;
+  }
   const migrationSql = fs.readFileSync('supabase/migrations/00044_faculty_project_mentoring.sql', 'utf8');
 
   const testHarnessSql = `

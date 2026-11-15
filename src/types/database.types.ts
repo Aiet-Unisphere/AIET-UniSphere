@@ -321,6 +321,15 @@ export interface DBExternalCourseEvidence {
   updated_at: string;
 }
 
+export interface DBStudentNote {
+  id: string;
+  student_id: string;
+  title: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Database {
   public: {
     Tables: {
@@ -483,6 +492,15 @@ export interface Database {
           updated_at?: string;
         };
         Update: Partial<Omit<DBExternalCourseEvidence, 'id'>>;
+      };
+      student_notes: {
+        Row: DBStudentNote;
+        Insert: Omit<DBStudentNote, 'id' | 'created_at' | 'updated_at'> & {
+          id?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Omit<DBStudentNote, 'id'>>;
       };
     };
     Views: Record<string, never>;

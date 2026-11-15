@@ -59,9 +59,6 @@ export class TerminalGateway {
           return;
         }
       }
-        ws.close(4003, 'Forbidden');
-        return;
-      }
 
       // 2. Check if Docker is available on the execution host
       if (!this.dockerManager.isDockerAvailable()) {

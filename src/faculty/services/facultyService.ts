@@ -34,7 +34,7 @@ export const getFacultyProfile = async (): Promise<FacultyProfile> => {
     // Robust profile lookup with graceful fallback
     const { data, error } = await (supabase as any)
       .from('profiles')
-      .select('id, full_name, designation, department_id, department:departments(name)')
+      .select('id, full_name, email, designation, department:departments(name)')
       .eq('id', user.id)
       .maybeSingle();
 
@@ -52,7 +52,7 @@ export const getFacultyProfile = async (): Promise<FacultyProfile> => {
     return {
       id: data.id,
       name: data.full_name || user.email?.split('@')[0] || 'Faculty Member',
-      title: data.designation || 'Faculty Member',
+      title: data.designation || 'Designation not specified',
       department: data.department?.name || 'Department not assigned',
       email: user.email || '',
       office: 'Not recorded',

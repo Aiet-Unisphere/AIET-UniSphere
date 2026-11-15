@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import fs from 'node:fs';
 
 const execFileAsync = promisify(execFile);
 const PSQL_PATH = process.env.PSQL_PATH || 'C:\\Program Files\\PostgreSQL\\16\\bin\\psql.exe';
@@ -29,6 +30,10 @@ async function runSql(sql, dbName = DB_NAME) {
 }
 
 test('Old Frontend Submission Compatibility & RLS Hardening Suite', async (t) => {
+  if (!fs.existsSync(PSQL_PATH)) {
+    t.skip('Local PostgreSQL 16 binary not found at ' + PSQL_PATH);
+    return;
+  }
   const studentId = '11111111-1111-1111-1111-111111111111';
   const deptId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
   const hodId = '33333333-3333-3333-3333-333333333333';

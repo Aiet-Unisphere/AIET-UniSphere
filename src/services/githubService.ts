@@ -14,6 +14,22 @@ export interface RateLimitDiagnostics {
   resetTime: string;
 }
 
+async function parseEdgeFunctionError(error: any, functionName: string): Promise<string> {
+  let errorDetail = error?.message || 'Unknown error';
+  if (error?.context) {
+    try {
+      const json = await error.context.json();
+      if (json?.error) {
+        errorDetail = json.error;
+      }
+    } catch {}
+  }
+  if (error?.context?.status === 404 || errorDetail.includes('Requested function was not found') || errorDetail.includes('Function not found')) {
+    return `The '${functionName}' Edge Function is not deployed to Supabase. Deploy it using \`npx supabase functions deploy ${functionName}\`.`;
+  }
+  return errorDetail;
+}
+
 async function githubApiFetch(input: string | URL, init?: RequestInit): Promise<Response> {
   const url = new URL(input.toString(), 'https://api.github.com');
   if (url.origin !== 'https://api.github.com') throw new Error('Unsupported GitHub API host.');
@@ -25,7 +41,10 @@ async function githubApiFetch(input: string | URL, init?: RequestInit): Promise<
   const { data, error } = await supabase.functions.invoke('github-api', {
     body: { path: `${url.pathname}${url.search}`, method: init?.method || 'GET', body },
   });
-  if (error) throw new Error(`GitHub request failed: ${error.message}`);
+  if (error) {
+    const errorMsg = await parseEdgeFunctionError(error, 'github-api');
+    throw new Error(`GitHub request failed: ${errorMsg}`);
+  }
   const status = Number(data?.status || 500);
   const responseBody = status === 204 || status === 304 ? null : JSON.stringify(data?.body ?? {});
   return new Response(responseBody, { status, headers: { 'Content-Type': 'application/json' } });
@@ -76,6 +95,43 @@ export const validateGitHubOAuthState = (incomingState: string | null): boolean 
   }
 };
 
+// 0.2 ENVIRONMENT-AWARE GITHUB OAUTH CLIENT & REDIRECT URI RESOLUTION
+export const getGitHubRedirectUri = (): string => {
+  // 1. Explicit override if configured
+  const configuredOverride = (import.meta as any).env?.VITE_GITHUB_CALLBACK_URL;
+  if (configuredOverride) return configuredOverride;
+
+  // 2. Active browser origin (e.g. http://localhost:5174 or https://aiet-unisphere.netlify.app)
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return `${window.location.origin}/student/github/callback`;
+  }
+
+  // 3. Fallback based on production vs development mode
+  if ((import.meta as any).env?.PROD) {
+    return 'https://aiet-unisphere.netlify.app/student/github/callback';
+  }
+
+  // Default local dev callback matches Vite server strictPort: 5174
+  return 'http://localhost:5174/student/github/callback';
+};
+
+export const getGitHubClientId = (): string => {
+  const env = (import.meta as any).env || {};
+
+  // 1. Check dedicated dev client ID in development
+  if (env.DEV && env.VITE_GITHUB_DEV_CLIENT_ID) {
+    return env.VITE_GITHUB_DEV_CLIENT_ID;
+  }
+
+  // 2. Check dedicated prod client ID in production
+  if (env.PROD && env.VITE_GITHUB_PROD_CLIENT_ID) {
+    return env.VITE_GITHUB_PROD_CLIENT_ID;
+  }
+
+  // 3. Fallback to common/unified client ID
+  return env.VITE_GITHUB_CLIENT_ID || '';
+};
+
 // Helper to get stored access token
 export const hasGitHubConnection = async (): Promise<boolean> => {
   const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -115,9 +171,28 @@ export const getGitHubConnection = async (): Promise<GitHubConnection | null> =>
 };
 
 // 2. CONNECT WITH OAUTH CODE VIA EDGE FUNCTION
-export const connectGitHubOAuth = async (code: string, redirectUri: string): Promise<GitHubConnection> => {
-  const { data, error } = await supabase.functions.invoke('github-oauth', { body: { code, redirect_uri: redirectUri } });
-  if (error || !data?.success) throw new Error(data?.error || error?.message || 'Failed to exchange GitHub authorization code.');
+export const connectGitHubOAuth = async (
+  code: string, 
+  redirectUri?: string,
+  clientId?: string
+): Promise<GitHubConnection> => {
+  const effectiveRedirectUri = redirectUri || getGitHubRedirectUri();
+  const effectiveClientId = clientId || getGitHubClientId();
+
+  const { data, error } = await supabase.functions.invoke('github-oauth', { 
+    body: { 
+      code, 
+      redirect_uri: effectiveRedirectUri,
+      client_id: effectiveClientId
+    } 
+  });
+  if (error) {
+    const errorMsg = await parseEdgeFunctionError(error, 'github-oauth');
+    throw new Error(errorMsg);
+  }
+  if (!data?.success) {
+    throw new Error(data?.error || 'Failed to exchange GitHub authorization code.');
+  }
 
   const conn = await getGitHubConnection();
   if (!conn) throw new Error("Failed to retrieve connected GitHub profile.");

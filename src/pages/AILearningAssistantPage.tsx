@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Sparkles, MessageSquare, RotateCcw, Trash2, AlertCircle, RefreshCw } from 'lucide-react';
+import { MessageSquare, RotateCcw, Trash2, AlertCircle, RefreshCw } from 'lucide-react';
+import uniSphereLogo from '../assets/icon.png';
 import { AppShell } from '../components/AppShell';
 import { LoadingState } from '../components/LoadingState';
 import { AIMessage } from '../components/AIMessage';
@@ -213,7 +214,7 @@ export const AILearningAssistantPage: React.FC = () => {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.25rem' }}>
-            <Sparkles size={24} className="text-orange" />
+            <img src={uniSphereLogo} alt="AIET-UniSphere" style={{ width: 24, height: 24, objectFit: 'contain' }} />
             <h1 style={{ fontSize: '1.75rem', fontWeight: 700 }}>AIET-UniSphere AI</h1>
             <span className="badge badge-active font-mono" style={{ fontSize: '0.7rem' }}>Internal AI</span>
           </div>
@@ -285,7 +286,7 @@ export const AILearningAssistantPage: React.FC = () => {
                 /* Landing Experience */
                 <div className="ai-landing-experience">
                   <div className="ai-landing-icon-badge">
-                    <Sparkles size={32} className="text-orange" />
+                    <img src={uniSphereLogo} alt="AIET-UniSphere AI" style={{ width: 32, height: 32, objectFit: 'contain' }} />
                   </div>
                   <h2 className="ai-landing-title font-display">AIET-UniSphere AI</h2>
                   <p className="ai-landing-subtitle">
@@ -361,7 +362,7 @@ export const AILearningAssistantPage: React.FC = () => {
                   ))}
                   {isSending && (
                     <div className="ai-typing-indicator font-mono">
-                      <Sparkles size={14} className="text-orange animate-spin" />
+                      <img src={uniSphereLogo} alt="AIET-UniSphere AI" style={{ width: 14, height: 14, objectFit: 'contain' }} className="animate-spin" />
                       <span>AIET-UniSphere AI is generating response...</span>
                     </div>
                   )}

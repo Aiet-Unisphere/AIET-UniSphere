@@ -3,7 +3,12 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { LoadingState } from '../components/LoadingState';
 import { ErrorState } from '../components/ErrorState';
-import { connectGitHubOAuth, validateGitHubOAuthState } from '../services/githubService';
+import { 
+  connectGitHubOAuth, 
+  validateGitHubOAuthState,
+  getGitHubRedirectUri,
+  getGitHubClientId
+} from '../services/githubService';
 
 export const GitHubCallbackPage: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -40,8 +45,9 @@ export const GitHubCallbackPage: React.FC = () => {
       }
 
       try {
-        const redirectUri = `${window.location.origin}/student/github/callback`;
-        await connectGitHubOAuth(code, redirectUri);
+        const redirectUri = getGitHubRedirectUri();
+        const clientId = getGitHubClientId();
+        await connectGitHubOAuth(code, redirectUri, clientId);
         navigate('/student/github', { replace: true });
       } catch (e: any) {
         setError(e.message || 'Failed to complete GitHub authorization.');

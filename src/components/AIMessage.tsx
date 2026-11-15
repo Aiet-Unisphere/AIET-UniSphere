@@ -1,5 +1,6 @@
 import React from 'react';
-import { User, Sparkles } from 'lucide-react';
+import { User } from 'lucide-react';
+import uniSphereLogo from '../assets/icon.png';
 import type { AIMessageItem } from '../data/aiConversations';
 
 interface AIMessageProps {
@@ -201,7 +202,7 @@ export const AIMessage: React.FC<AIMessageProps> = ({ message }) => {
   return (
     <div className={`ai-message-row ${isAI ? 'ai-sender' : 'user-sender'}`}>
       <div className={`ai-avatar-circle ${isAI ? 'ai-icon-bg' : 'user-icon-bg'}`}>
-        {isAI ? <Sparkles size={16} className="text-orange" /> : <User size={16} className="text-navy" />}
+        {isAI ? <img src={uniSphereLogo} alt="AIET-UniSphere AI" style={{ width: 16, height: 16, objectFit: 'contain' }} /> : <User size={16} className="text-navy" />}
       </div>
 
       <div className="ai-message-bubble-wrapper">

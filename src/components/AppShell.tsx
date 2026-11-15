@@ -10,11 +10,9 @@ import {
   Clock,
   Calendar,
   Award,
+  Notebook,
   Megaphone,
   Bell,
-  FolderGit2,
-  FolderPlus,
-  Terminal,
   GitBranch,
   Sparkles,
   BarChart3,
@@ -135,6 +133,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
     { label: 'Timetable', path: '/student/timetable', icon: <Clock size={18} /> },
     { label: 'Academic Calendar', path: '/student/calendar', icon: <Calendar size={18} /> },
     { label: 'Results', path: '/student/results', icon: <Award size={18} /> },
+    { label: 'My Notes', path: '/student/notes', icon: <Notebook size={18} /> },
   ];
 
   const navCommunication = [
@@ -143,10 +142,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
   ];
 
   const navDevelopment = [
-    { label: 'Projects', path: '/student/projects', icon: <FolderGit2 size={18} />, exact: true },
-    { label: 'My Projects', path: '/student/projects/my', icon: <FolderPlus size={18} />, exact: true },
-    { label: 'Project Workspace', path: '/student/project-workspace', icon: <Terminal size={18} />, exact: false },
-    { label: 'Git / GitHub', path: '/student/github', icon: <GitBranch size={18} /> },
+    { label: 'Git / GitHub', path: '/student/github', icon: <GitBranch size={18} />, exact: false },
   ];
 
   const navIntelligence = [
@@ -181,12 +177,9 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
     if (path.includes('/student/timetable')) return 'Semester Timetable';
     if (path.includes('/student/calendar')) return 'Academic Calendar';
     if (path.includes('/student/results')) return 'Academic Results';
+    if (path.includes('/student/notes')) return 'My Notes';
     if (path.includes('/student/announcements')) return 'Announcements';
     if (path.includes('/student/notifications')) return 'Notification Center';
-    if (path.includes('/workspace')) return 'Project Workspace';
-    if (path.includes('/student/projects/my')) return 'My Projects';
-    if (path.includes('/student/projects/')) return 'Project Overview';
-    if (path.includes('/student/projects')) return 'Project Portal';
     if (path.includes('/student/github')) return 'Git & GitHub';
     if (path.includes('/student/ai')) return 'AI Learning Assistant';
     if (path.includes('/student/analytics')) return 'Academic Analytics';
@@ -405,7 +398,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
             <input 
               type="text" 
               className="header-search-input" 
-              placeholder="Search courses, projects..." 
+              placeholder="Search courses, assignments..." 
               aria-label="Global search input"
             />
           </div>
